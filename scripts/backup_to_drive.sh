@@ -34,7 +34,7 @@ OUT="$TMP/icalora_${TS}.sql.zst"
 echo "[backup] pg_dump ($PGDB) -> zstd …"
 docker exec -e PGPASSWORD="$PGPASS" "$CONTAINER" \
   pg_dump -U "$PGUSER" -d "$PGDB" --no-owner --no-privileges \
-  | zstd -q -19 -o "$OUT"
+  | zstd -q -T0 -12 -o "$OUT"
 
 SIZE="$(du -h "$OUT" | cut -f1)"
 echo "[backup] unggah $OUT ($SIZE) -> $REMOTE/db/"
