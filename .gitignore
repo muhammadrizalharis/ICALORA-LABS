@@ -1,0 +1,53 @@
+# === Keamanan: jangan pernah commit file sensitif ke repo PUBLIK ===
+# Secrets & environment
+.env
+.env.*
+*.env
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+secrets/
+credentials/
+*secret*
+*credential*
+*.token
+.npmrc
+
+# Dependencies
+node_modules/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# Build & cache
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+.cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Data korpus & model (besar / bisa sensitif) — jangan masuk repo
+corpus_data/
+datasets/
+*.model
+*.bin
+*.pt
+*.ckpt
+*.sqlite
+*.db
+
+# OS & editor
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+*.log
+logs/
