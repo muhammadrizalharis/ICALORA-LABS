@@ -39,6 +39,10 @@ CREATE TABLE IF NOT EXISTS corpus_embeddings (
     embedding vector(1024) NOT NULL
 );
 
+-- Index ANN untuk pencarian kemiripan semantik (cosine)
+CREATE INDEX IF NOT EXISTS idx_corpus_emb_hnsw
+    ON corpus_embeddings USING hnsw (embedding vector_cosine_ops);
+
 -- Status pekerjaan ingest (resumable)
 CREATE TABLE IF NOT EXISTS ingest_jobs (
     id             BIGSERIAL PRIMARY KEY,

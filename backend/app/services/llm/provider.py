@@ -22,6 +22,8 @@ class LLMProvider(Protocol):
 
     def embed(self, text: str) -> list[float]: ...
 
+    def embed_batch(self, texts: list[str]) -> list[list[float]]: ...
+
 
 class OllamaProvider:
     """Adapter untuk Ollama (API lokal /api/chat & /api/embeddings)."""
@@ -50,6 +52,16 @@ class OllamaProvider:
             resp = client.post(f"{self.base_url}/api/embeddings", json=payload)
             resp.raise_for_status()
             return resp.json()["embedding"]
+
+    def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        """Embed banyak teks dalam satu panggilan (GPU) via /api/embed."""
+        if not texts:
+            return []
+        payload = {"model": self.embed_model, "input": texts}
+        with httpx.Client(timeout=self.timeout) as client:
+            resp = client.post(f"{self.base_url}/api/embed", json=payload)
+            resp.raise_for_status()
+            return resp.json()["embeddings"]
 
 
 def get_llm() -> LLMProvider:
