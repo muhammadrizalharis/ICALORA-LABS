@@ -51,6 +51,7 @@ class Settings(BaseSettings):
     # Bot Telegram (akses privat)
     telegram_bot_token: str = Field(default="")
     telegram_allowed_chat_ids: str = Field(default="")  # daftar id dipisah koma
+    telegram_bot_secret: str = Field(default="")  # wajib untuk perintah krusial
     backend_base_url: str = Field(default="http://127.0.0.1:58010")
 
     @property

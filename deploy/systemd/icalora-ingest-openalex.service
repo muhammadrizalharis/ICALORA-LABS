@@ -1,0 +1,15 @@
+[Unit]
+Description=ICALORA-LABS ingest worker (openalex)
+After=network.target icalora-backend.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/muhammadrizalharis/ICALORA-LABS/backend
+ExecStart=/home/muhammadrizalharis/ICALORA-LABS/backend/.venv/bin/python -u -m app.ingest.openalex --target 1000000
+Restart=always
+RestartSec=10
+StandardOutput=append:/home/muhammadrizalharis/ICALORA-LABS/backend/.logs/ingest_openalex.log
+StandardError=append:/home/muhammadrizalharis/ICALORA-LABS/backend/.logs/ingest_openalex.log
+
+[Install]
+WantedBy=default.target

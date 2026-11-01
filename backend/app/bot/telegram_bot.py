@@ -32,17 +32,42 @@ TG = f"https://api.telegram.org/bot{settings.telegram_bot_token}"
 ROOT = Path(__file__).resolve().parents[3]
 
 _HELP = (
-    "<b>ICALORA-LABS Bot</b>\n"
-    "Kirim perintah diikuti teks:\n"
+    "<b>ICALORA-LABS Bot</b>\n\n"
+    "<b>Fitur teks:</b>\n"
     "/cek &lt;teks&gt; — cek kemiripan/plagiarisme\n"
     "/grammar &lt;teks&gt; — perbaiki tata bahasa\n"
     "/parafrase &lt;teks&gt; — parafrase\n"
     "/humanize &lt;teks&gt; — humanize teks AI\n"
     "/hitung &lt;teks&gt; — word count\n"
     "/status — status korpus &amp; ingest\n"
-    "/backup — backup DB ke Drive\n"
-    "/whoami — tampilkan chat id Anda"
+    "/whoami — chat id Anda\n\n"
+    "<b>Admin (wajib secret):</b>\n"
+    "/backup &lt;secret&gt; — backup DB ke Drive\n"
+    "/services &lt;secret&gt; — status semua layanan\n"
+    "/restart &lt;secret&gt; &lt;layanan&gt; — restart layanan\n"
+    "/ingest &lt;secret&gt; &lt;openalex|pmc|embed&gt; &lt;start|stop|restart&gt;\n"
+    "/logs &lt;secret&gt; &lt;layanan&gt; — 15 baris log terakhir\n\n"
+    "layanan: backend, frontend, bot, openalex, pmc, embed, all"
 )
+
+# Nama ramah -> unit systemd
+_UNITS = {
+    "backend": "icalora-backend",
+    "frontend": "icalora-frontend",
+    "bot": "icalora-bot",
+    "openalex": "icalora-ingest-openalex",
+    "pmc": "icalora-ingest-pmc",
+    "embed": "icalora-ingest-embed",
+}
+_LOG_FILES = {
+    "backend": "service_backend.log",
+    "frontend": "service_frontend.log",
+    "bot": "service_bot.log",
+    "openalex": "ingest_openalex.log",
+    "pmc": "ingest_pmc.log",
+    "embed": "ingest_embed.log",
+}
+_LOGDIR = ROOT / "backend" / ".logs"
 
 
 def _allowed() -> set[int]:
@@ -124,6 +149,85 @@ def _run_backup() -> str:
         return f"Gagal memulai backup: {exc}"
 
 
+def _systemctl(*args: str) -> str:
+    try:
+        res = subprocess.run(
+            ["systemctl", "--user", *args],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        out = (res.stdout or "") + (res.stderr or "")
+        return out.strip() or "(tidak ada output)"
+    except Exception as exc:  # noqa: BLE001
+        return f"Gagal systemctl: {exc}"
+
+
+def _services_status() -> str:
+    lines = ["<b>Status layanan:</b>"]
+    for name, unit in _UNITS.items():
+        state = _systemctl("is-active", unit).splitlines()[0] if unit else "?"
+        mark = "✅" if state == "active" else "⚠️"
+        lines.append(f"{mark} {name}: <code>{state}</code>")
+    return "\n".join(lines)
+
+
+def _restart_service(name: str) -> str:
+    name = name.lower().strip()
+    if name == "all":
+        units = list(_UNITS.values())
+    elif name in _UNITS:
+        units = [_UNITS[name]]
+    else:
+        return f"Layanan tidak dikenal: {html.escape(name)}"
+    # restart bot terakhir supaya balasan sempat terkirim
+    units.sort(key=lambda u: u == "icalora-bot")
+    _systemctl("restart", *units)
+    return f"Restart dikirim: {html.escape(name)}"
+
+
+def _ingest_control(source: str, action: str) -> str:
+    source = source.lower().strip()
+    action = action.lower().strip()
+    if source not in ("openalex", "pmc", "embed"):
+        return f"Sumber tidak dikenal: {html.escape(source)}"
+    if action not in ("start", "stop", "restart", "status"):
+        return f"Aksi tidak dikenal: {html.escape(action)}"
+    unit = _UNITS[source]
+    if action == "status":
+        return f"{source}: <code>{_systemctl('is-active', unit).splitlines()[0]}</code>"
+    _systemctl(action, unit)
+    return f"ingest {source}: {action} dikirim."
+
+
+def _tail_log(name: str, lines: int = 15) -> str:
+    name = name.lower().strip()
+    fname = _LOG_FILES.get(name)
+    if not fname:
+        return f"Layanan tidak dikenal: {html.escape(name)}"
+    path = _LOGDIR / fname
+    if not path.exists():
+        return f"Log belum ada: {fname}"
+    try:
+        with path.open("rb") as fh:
+            data = fh.readlines()[-lines:]
+        text = b"".join(data).decode("utf-8", "replace")
+        return f"<b>{name} (akhir {lines} baris):</b>\n<pre>{html.escape(text)}</pre>"
+    except Exception as exc:  # noqa: BLE001
+        return f"Gagal baca log: {html.escape(str(exc))}"
+
+
+def _check_secret(arg: str) -> tuple[bool, str]:
+    """Pisahkan secret (token pertama) dari sisa argumen."""
+    secret, _, rest = arg.partition(" ")
+    expected = settings.telegram_bot_secret or ""
+    if not expected:
+        return False, "Secret admin belum dikonfigurasi di server."
+    if secret != expected:
+        return False, "Secret salah atau kosong. Format: /perintah &lt;secret&gt; ..."
+    return True, rest.strip()
+
+
 def _handle(chat_id: int, text: str) -> None:
     text = text.strip()
     cmd, _, arg = text.partition(" ")
@@ -135,6 +239,42 @@ def _handle(chat_id: int, text: str) -> None:
         return
     if cmd == "whoami":
         _send(chat_id, f"chat_id Anda: <code>{chat_id}</code>")
+        return
+
+    # ---- Perintah admin (wajib secret) ----
+    admin_cmds = {"backup", "services", "restart", "ingest", "logs"}
+    if cmd in admin_cmds:
+        ok, rest = _check_secret(arg)
+        if not ok:
+            _send(chat_id, rest)
+            return
+        if cmd == "backup":
+            _send(chat_id, _run_backup())
+        elif cmd == "services":
+            _send(chat_id, _services_status())
+        elif cmd == "restart":
+            if not rest:
+                _send(chat_id, "Format: /restart &lt;secret&gt; &lt;layanan&gt;")
+            else:
+                _send(chat_id, _restart_service(rest.split()[0]))
+        elif cmd == "ingest":
+            parts = rest.split()
+            if len(parts) < 2:
+                _send(chat_id, "Format: /ingest &lt;secret&gt; &lt;sumber&gt; &lt;aksi&gt;")
+            else:
+                _send(chat_id, _ingest_control(parts[0], parts[1]))
+        elif cmd == "logs":
+            if not rest:
+                _send(chat_id, "Format: /logs &lt;secret&gt; &lt;layanan&gt;")
+            else:
+                _send(chat_id, _tail_log(rest.split()[0]))
+        return
+
+    if cmd == "status":
+        try:
+            _send(chat_id, _status())
+        except Exception as exc:  # noqa: BLE001
+            _send(chat_id, f"Gagal ambil status: {html.escape(str(exc))}")
         return
 
     text_cmds = {
@@ -150,15 +290,6 @@ def _handle(chat_id: int, text: str) -> None:
             ),
         ),
     }
-    if cmd == "status":
-        try:
-            _send(chat_id, _status())
-        except Exception as exc:  # noqa: BLE001
-            _send(chat_id, f"Gagal ambil status: {html.escape(str(exc))}")
-        return
-    if cmd == "backup":
-        _send(chat_id, _run_backup())
-        return
     if cmd in text_cmds:
         if not arg:
             _send(chat_id, f"Format: /{cmd} &lt;teks&gt;")
