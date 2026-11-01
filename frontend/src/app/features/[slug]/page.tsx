@@ -77,7 +77,7 @@ export default async function FeaturePage({
         ) : feature.slug === "plagiarism-checker" ? (
           <PlagiarismTool />
         ) : (
-          <div className="rounded-xl border border-dashed border-neutral-300 p-6 text-sm text-neutral-500 dark:border-neutral-700 dark:text-neutral-400">
+          <div className="rounded-xl border border-dashed border-c p-6 text-sm text-neutral-500 dark:text-neutral-400">
             Placeholder antarmuka untuk <b>{feature.name}</b>.
           </div>
         )}

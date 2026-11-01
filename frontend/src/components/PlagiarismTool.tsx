@@ -69,7 +69,7 @@ export default function PlagiarismTool() {
         value={text}
         onChange={(e) => setText(e.target.value)}
         placeholder="Tempel teks/abstrak yang ingin diperiksa keasliannya…"
-        className="h-56 w-full resize-y rounded-xl border border-neutral-300 p-4 text-sm text-neutral-900 outline-none focus:border-neutral-500 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder:text-neutral-500 dark:focus:border-neutral-500"
+        className="h-56 w-full resize-y rounded-xl border border-c p-4 text-sm text-neutral-900 outline-none focus:border-neutral-500 dark:text-neutral-100 dark:placeholder:text-neutral-500 dark:focus:border-neutral-500"
       />
       <div className="flex items-center gap-3">
         <button
@@ -91,7 +91,7 @@ export default function PlagiarismTool() {
       )}
 
       {report && (
-        <div className="space-y-5 rounded-xl border border-neutral-200 p-5 dark:border-neutral-800">
+        <div className="space-y-5 rounded-xl border border-c p-5">
           <div className="flex flex-wrap items-center gap-8">
             <ScoreRing
               value={report.overall_similarity}
@@ -113,7 +113,7 @@ export default function PlagiarismTool() {
             <div className="mb-2 text-sm font-semibold text-neutral-800 dark:text-neutral-200">Sumber Teratas</div>
             <ul className="space-y-3">
               {report.sources.map((s) => (
-                <li key={s.doc_id} className="rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
+                <li key={s.doc_id} className="rounded-lg border border-c p-3">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="truncate text-sm font-medium text-neutral-900 dark:text-neutral-100">

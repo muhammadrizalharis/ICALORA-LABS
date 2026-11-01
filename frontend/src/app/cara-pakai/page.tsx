@@ -57,7 +57,7 @@ export default function CaraPakaiPage() {
   return (
     <div className="mx-auto max-w-4xl px-4 py-16 sm:px-6">
       <div className="text-center">
-        <span className="inline-flex items-center gap-2 rounded-full border border-neutral-200 bg-white/70 px-3 py-1 text-xs font-medium text-neutral-700 dark:border-white/10 dark:bg-white/5 dark:text-neutral-200">
+        <span className="inline-flex items-center gap-2 rounded-full border border-c bg-white/70 px-3 py-1 text-xs font-medium text-neutral-700 dark:bg-white/5 dark:text-neutral-200">
           📖 Panduan
         </span>
         <h1 className="mt-4 text-4xl font-extrabold tracking-tight text-neutral-900 dark:text-white">
@@ -73,7 +73,7 @@ export default function CaraPakaiPage() {
         {STEPS.map((s) => (
           <div
             key={s.n}
-            className="flex gap-5 rounded-2xl border border-neutral-200 bg-white p-6 dark:border-white/10 dark:bg-neutral-900/50"
+            className="flex gap-5 rounded-2xl border border-c surface p-6"
           >
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl brand-grad text-xl text-white">
               {s.icon}
@@ -95,7 +95,7 @@ export default function CaraPakaiPage() {
           {TIPS.map((t) => (
             <div
               key={t.t}
-              className="flex items-start gap-3 rounded-xl border border-neutral-200 p-4 dark:border-white/10"
+              className="flex items-start gap-3 rounded-xl border border-c p-4"
             >
               <span className="text-xl">{t.icon}</span>
               <span className="text-sm text-neutral-700 dark:text-neutral-300">{t.t}</span>
@@ -113,7 +113,7 @@ export default function CaraPakaiPage() {
           {FAQ.map((f) => (
             <details
               key={f.q}
-              className="group rounded-xl border border-neutral-200 p-5 dark:border-white/10"
+              className="group rounded-xl border border-c p-5"
             >
               <summary className="flex cursor-pointer list-none items-center justify-between font-medium text-neutral-900 dark:text-white">
                 {f.q}

@@ -8,7 +8,7 @@ const activeFeatures = FEATURES.filter((f) => f.status === "active").slice(0, 6)
 
 export default function Footer() {
   return (
-    <footer className="border-t border-neutral-200 bg-neutral-50 dark:border-white/10 dark:bg-neutral-950">
+    <footer className="border-t border-c surface-2">
       <div className="mx-auto grid max-w-6xl gap-10 px-4 py-14 sm:px-6 md:grid-cols-[1.4fr_1fr_1fr_1fr]">
         {/* Brand */}
         <div>
@@ -72,7 +72,7 @@ export default function Footer() {
         </div>
       </div>
 
-      <div className="border-t border-neutral-200 dark:border-white/10">
+      <div className="border-t border-c">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-2 px-4 py-6 text-xs text-neutral-500 sm:flex-row sm:px-6 dark:text-neutral-500">
           <p>© {YEAR} ICALORA-LABS by MRH INNOVEX. Semua sumber data bersifat akses-terbuka (CC0/CC-BY).</p>
           <p>Dibuat dengan ❤️ di Indonesia</p>

@@ -26,7 +26,7 @@ export default function TopNav() {
   }, [pathname]);
 
   return (
-    <header className="sticky top-0 z-50 border-b border-neutral-200/70 glass dark:border-white/10">
+    <header className="sticky top-0 z-50 border-b border-c glass">
       <nav className="mx-auto flex h-16 max-w-6xl items-center gap-6 px-4 sm:px-6">
         {/* Logo */}
         <Link href="/" className="flex items-center gap-2.5">
@@ -69,7 +69,7 @@ export default function TopNav() {
 
             {megaOpen && (
               <div className="absolute left-1/2 top-full w-[720px] max-w-[92vw] -translate-x-1/2 pt-3">
-                <div className="grid grid-cols-3 gap-4 rounded-2xl border border-neutral-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-neutral-900">
+                <div className="grid grid-cols-3 gap-4 rounded-2xl border border-c surface p-4 shadow-2xl">
                   {GROUPS.map((group) => (
                     <div key={group}>
                       <div className="mb-2 flex items-center gap-1.5 px-2">
@@ -140,7 +140,7 @@ export default function TopNav() {
             type="button"
             onClick={() => setMobileOpen((v) => !v)}
             aria-label="Menu"
-            className="flex h-10 w-10 items-center justify-center rounded-lg border border-neutral-200 text-neutral-700 md:hidden dark:border-white/10 dark:text-neutral-200"
+            className="flex h-10 w-10 items-center justify-center rounded-lg border border-c text-neutral-700 md:hidden dark:text-neutral-200"
           >
             {mobileOpen ? "✕" : "☰"}
           </button>
@@ -149,7 +149,7 @@ export default function TopNav() {
 
       {/* Mobile panel */}
       {mobileOpen && (
-        <div className="border-t border-neutral-200 bg-white px-4 py-4 md:hidden dark:border-white/10 dark:bg-neutral-950">
+        <div className="border-t border-c surface px-4 py-4 md:hidden">
           <div className="mb-3 flex flex-col gap-1">
             {NAV.map((n) => (
               <Link

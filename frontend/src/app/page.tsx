@@ -41,7 +41,7 @@ export default function Home() {
         <div className="relative mx-auto max-w-6xl px-4 pb-16 pt-20 sm:px-6 lg:pt-28">
           <div className="grid items-center gap-12 lg:grid-cols-[1.1fr_0.9fr]">
             <div>
-              <span className="inline-flex items-center gap-2 rounded-full border border-neutral-200 bg-white/70 px-3 py-1 text-xs font-medium text-neutral-700 shadow-sm dark:border-white/10 dark:bg-white/5 dark:text-neutral-200">
+              <span className="inline-flex items-center gap-2 rounded-full border border-c bg-white/70 px-3 py-1 text-xs font-medium text-neutral-700 shadow-sm dark:bg-white/5 dark:text-neutral-200">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
                 Alternatif Turnitin yang legal & self-hosted
               </span>
@@ -65,7 +65,7 @@ export default function Home() {
                 </Link>
                 <Link
                   href="/cara-pakai"
-                  className="inline-flex items-center gap-2 rounded-xl border border-neutral-300 px-6 py-3 text-sm font-semibold text-neutral-800 transition hover:bg-neutral-100 dark:border-white/15 dark:text-neutral-100 dark:hover:bg-white/5"
+                  className="inline-flex items-center gap-2 rounded-xl border border-c px-6 py-3 text-sm font-semibold text-neutral-800 transition hover:bg-neutral-100 dark:border-white/15 dark:text-neutral-100 dark:hover:bg-white/5"
                 >
                   Cara Pakai →
                 </Link>
@@ -107,7 +107,7 @@ export default function Home() {
                   <Link
                     key={f.slug}
                     href={`/features/${f.slug}`}
-                    className="group relative overflow-hidden rounded-2xl border border-neutral-200 bg-white p-5 transition hover:-translate-y-0.5 hover:border-transparent hover:shadow-xl dark:border-white/10 dark:bg-neutral-900/50"
+                    className="group relative overflow-hidden rounded-2xl border border-c surface p-5 transition hover:-translate-y-0.5 hover:border-transparent hover:shadow-xl"
                   >
                     <div className="pointer-events-none absolute inset-0 opacity-0 transition group-hover:opacity-100 brand-grad-soft" />
                     <div className="relative">
@@ -135,7 +135,7 @@ export default function Home() {
       </section>
 
       {/* ===== CARA KERJA ===== */}
-      <section id="cara-kerja" className="border-y border-neutral-200 bg-neutral-50 dark:border-white/10 dark:bg-neutral-900/30">
+      <section id="cara-kerja" className="border-y border-c surface-2">
         <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
           <div className="mx-auto max-w-2xl text-center">
             <h2 className="text-3xl font-bold tracking-tight text-neutral-900 dark:text-white">
@@ -146,7 +146,7 @@ export default function Home() {
             {STEPS.map((s, i) => (
               <div
                 key={s.title}
-                className="relative rounded-2xl border border-neutral-200 bg-white p-6 dark:border-white/10 dark:bg-neutral-900/50"
+                className="relative rounded-2xl border border-c surface p-6"
               >
                 <span className="absolute right-5 top-5 text-5xl font-black text-neutral-100 dark:text-white/5">
                   {i + 1}
@@ -169,7 +169,7 @@ export default function Home() {
         </div>
         <div className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
           {WHY.map((w) => (
-            <div key={w.title} className="rounded-2xl border border-neutral-200 p-6 dark:border-white/10">
+            <div key={w.title} className="rounded-2xl border border-c p-6">
               <div className="text-3xl">{w.icon}</div>
               <h3 className="mt-4 font-semibold text-neutral-900 dark:text-white">{w.title}</h3>
               <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-400">{w.desc}</p>
@@ -205,7 +205,7 @@ function HeroPreview() {
   const score = 8;
   return (
     <div className="relative">
-      <div className="glass rounded-3xl border border-neutral-200 p-6 shadow-2xl dark:border-white/10">
+      <div className="glass rounded-3xl border border-c p-6 shadow-2xl">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="h-3 w-3 rounded-full bg-rose-400" />
@@ -222,7 +222,7 @@ function HeroPreview() {
               background: `conic-gradient(#10b981 ${score * 3.6}deg, rgba(120,140,200,0.15) 0deg)`,
             }}
           >
-            <div className="grid h-[88px] w-[88px] place-items-center rounded-full bg-white dark:bg-neutral-900">
+            <div className="grid h-[88px] w-[88px] place-items-center rounded-full surface">
               <div className="text-center">
                 <div className="text-2xl font-extrabold text-emerald-500">{score}%</div>
                 <div className="text-[10px] text-neutral-500">kemiripan</div>
@@ -244,7 +244,7 @@ function HeroPreview() {
           ].map((s) => (
             <div
               key={s.t}
-              className="flex items-center justify-between rounded-lg border border-neutral-200 px-3 py-2 text-xs dark:border-white/10"
+              className="flex items-center justify-between rounded-lg border border-c px-3 py-2 text-xs"
             >
               <span className="truncate text-neutral-600 dark:text-neutral-300">🔗 {s.t}</span>
               <span className="ml-2 font-semibold text-amber-600 dark:text-amber-400">{s.m}</span>

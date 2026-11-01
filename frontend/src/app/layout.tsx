@@ -40,7 +40,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
-      <body className="min-h-full bg-white text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
+      <body className="min-h-full text-[color:var(--foreground)]">
         <TopNav />
         <main className="min-h-[calc(100vh-8rem)]">{children}</main>
         <Footer />

@@ -70,7 +70,7 @@ export default function TextTool({
         onChange={(e) => setText(e.target.value)}
         placeholder={placeholder}
         rows={8}
-        className="w-full resize-y rounded-xl border border-neutral-300 p-4 text-sm text-neutral-900 outline-none focus:border-neutral-500 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder:text-neutral-500 dark:focus:border-neutral-500"
+        className="w-full resize-y rounded-xl border border-c p-4 text-sm text-neutral-900 outline-none focus:border-neutral-500 dark:text-neutral-100 dark:placeholder:text-neutral-500 dark:focus:border-neutral-500"
       />
       <div className="flex items-center gap-3">
         <button
@@ -102,7 +102,7 @@ export default function TextTool({
           ].map(([label, value]) => (
             <div
               key={label as string}
-              className="rounded-xl border border-neutral-200 bg-neutral-50 p-4 dark:border-neutral-800 dark:bg-neutral-900"
+              className="rounded-xl border border-c surface-2 p-4"
             >
               <div className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">{value}</div>
               <div className="text-xs text-neutral-500 dark:text-neutral-400">{label}</div>
@@ -112,7 +112,7 @@ export default function TextTool({
       )}
 
       {out !== null && (
-        <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-4 dark:border-neutral-800 dark:bg-neutral-900">
+        <div className="rounded-xl border border-c surface-2 p-4">
           <div className="mb-2 text-xs font-medium uppercase tracking-wide text-neutral-400 dark:text-neutral-500">
             Hasil
           </div>

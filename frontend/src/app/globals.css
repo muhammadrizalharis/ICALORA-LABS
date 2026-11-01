@@ -3,13 +3,25 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Terang — Ice Blue base, aksen Lavender & Platinum */
+  --background: #e6f2f7;   /* Ice Blue / Pale Aqua */
+  --foreground: #0e1726;
+  --bg-soft: #eae6f3;      /* Lavender pucat */
+  --surface: #ffffff;      /* kartu */
+  --surface-2: #e1e4e6;    /* Platinum Gray panel */
+  --border-c: rgba(14, 23, 38, 0.1);
+  --muted: #5b6b7a;
 }
 
 .dark {
-  --background: #0a0a0a;
-  --foreground: #ededed;
+  /* Gelap — Midnight Blue base, aksen Violet & Slate */
+  --background: #0e1726;   /* Midnight Blue */
+  --foreground: #eaf2f7;
+  --bg-soft: #221830;      /* Muted Deep Violet */
+  --surface: #1a202c;      /* Slate Charcoal kartu */
+  --surface-2: #141b27;
+  --border-c: rgba(255, 255, 255, 0.08);
+  --muted: #94a3b8;
 }
 
 @theme inline {
@@ -20,9 +32,24 @@
 }
 
 body {
-  background: var(--background);
+  background:
+    radial-gradient(1200px 600px at 12% -10%, var(--bg-soft), transparent 60%),
+    radial-gradient(1000px 520px at 100% 0%, var(--surface-2), transparent 55%),
+    var(--background);
+  background-attachment: fixed;
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Permukaan semantik (mengikuti tema via variabel) */
+.surface {
+  background: var(--surface);
+}
+.surface-2 {
+  background: var(--surface-2);
+}
+.border-c {
+  border-color: var(--border-c);
 }
 
 /* ===== Sistem desain ICALORA-LABS ===== */
@@ -65,11 +92,11 @@ body {
 }
 
 .glass {
-  background: rgba(255, 255, 255, 0.7);
+  background: rgba(230, 242, 247, 0.72);
   backdrop-filter: blur(12px);
 }
 .dark .glass {
-  background: rgba(17, 20, 32, 0.6);
+  background: rgba(14, 23, 38, 0.62);
 }
 
 @keyframes shimmer {
