@@ -65,8 +65,26 @@ export default function Footer() {
         <div>
           <h3 className="text-sm font-semibold text-neutral-900 dark:text-white">Kontak</h3>
           <ul className="mt-4 space-y-2.5 text-sm text-neutral-600 dark:text-neutral-400">
-            <li>Telegram Bot</li>
-            <li>support@icalora-labs.id</li>
+            <li>
+              <a
+                href="https://www.instagram.com/mhmmddrizal/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 transition hover:text-neutral-900 dark:hover:text-white"
+              >
+                <span>📷</span> Instagram
+              </a>
+            </li>
+            <li>
+              <a
+                href="https://muhammad-rizal-haris.vercel.app/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 transition hover:text-neutral-900 dark:hover:text-white"
+              >
+                <span>🌐</span> Blog Pribadi
+              </a>
+            </li>
             <li>Indonesia 🇮🇩</li>
           </ul>
         </div>
