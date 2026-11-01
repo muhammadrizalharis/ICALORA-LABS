@@ -32,7 +32,7 @@ function ScoreRing({ value, label, tone }: { value: number; label: string; tone:
       >
         {value.toFixed(0)}%
       </div>
-      <div className="mt-2 text-center text-xs font-medium text-neutral-500">{label}</div>
+      <div className="mt-2 text-center text-xs font-medium text-neutral-500 dark:text-neutral-400">{label}</div>
     </div>
   );
 }
@@ -69,29 +69,29 @@ export default function PlagiarismTool() {
         value={text}
         onChange={(e) => setText(e.target.value)}
         placeholder="Tempel teks/abstrak yang ingin diperiksa keasliannya…"
-        className="h-56 w-full resize-y rounded-xl border border-neutral-300 p-4 text-sm text-neutral-900 outline-none focus:border-neutral-500"
+        className="h-56 w-full resize-y rounded-xl border border-neutral-300 p-4 text-sm text-neutral-900 outline-none focus:border-neutral-500 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder:text-neutral-500 dark:focus:border-neutral-500"
       />
       <div className="flex items-center gap-3">
         <button
           onClick={run}
           disabled={loading || text.trim().length === 0}
-          className="rounded-lg bg-neutral-900 px-5 py-2 text-sm font-medium text-white disabled:opacity-40"
+          className="rounded-lg bg-neutral-900 px-5 py-2 text-sm font-medium text-white disabled:opacity-40 dark:bg-neutral-100 dark:text-neutral-900"
         >
           {loading ? "Memeriksa…" : "Periksa Kemiripan"}
         </button>
-        <span className="text-xs text-neutral-400">
+        <span className="text-xs text-neutral-400 dark:text-neutral-500">
           Dibandingkan dengan korpus akses-terbuka ICALORA-LABS.
         </span>
       </div>
 
       {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
           {error}
         </div>
       )}
 
       {report && (
-        <div className="space-y-5 rounded-xl border border-neutral-200 p-5">
+        <div className="space-y-5 rounded-xl border border-neutral-200 p-5 dark:border-neutral-800">
           <div className="flex flex-wrap items-center gap-8">
             <ScoreRing
               value={report.overall_similarity}
@@ -103,23 +103,23 @@ export default function PlagiarismTool() {
               label="Risiko Parafrase (semantik)"
               tone={toneForScore(report.paraphrase_similarity)}
             />
-            <div className="text-sm text-neutral-500">
+            <div className="text-sm text-neutral-500 dark:text-neutral-400">
               <div>{report.word_count} kata · {report.char_count} karakter</div>
               <div>{report.sources.length} sumber teratas ditemukan</div>
             </div>
           </div>
 
           <div>
-            <div className="mb-2 text-sm font-semibold text-neutral-800">Sumber Teratas</div>
+            <div className="mb-2 text-sm font-semibold text-neutral-800 dark:text-neutral-200">Sumber Teratas</div>
             <ul className="space-y-3">
               {report.sources.map((s) => (
-                <li key={s.doc_id} className="rounded-lg border border-neutral-200 p-3">
+                <li key={s.doc_id} className="rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="truncate text-sm font-medium text-neutral-900">
+                      <div className="truncate text-sm font-medium text-neutral-900 dark:text-neutral-100">
                         {s.title || "(tanpa judul)"}
                       </div>
-                      <div className="mt-0.5 text-xs text-neutral-400">
+                      <div className="mt-0.5 text-xs text-neutral-400 dark:text-neutral-500">
                         {s.source}
                         {s.pub_year ? ` · ${s.pub_year}` : ""}
                         {s.doi ? (
@@ -141,13 +141,13 @@ export default function PlagiarismTool() {
                       <div className={`font-bold ${toneForScore(s.similarity).split(" ")[1]}`}>
                         {s.similarity.toFixed(0)}%
                       </div>
-                      <div className="text-neutral-400">
+                      <div className="text-neutral-400 dark:text-neutral-500">
                         sal {s.lexical_similarity.toFixed(0)} · sem {s.semantic_similarity.toFixed(0)}
                       </div>
                     </div>
                   </div>
                   {s.snippet && (
-                    <p className="mt-2 line-clamp-3 text-xs text-neutral-500">{s.snippet}</p>
+                    <p className="mt-2 line-clamp-3 text-xs text-neutral-500 dark:text-neutral-400">{s.snippet}</p>
                   )}
                 </li>
               ))}

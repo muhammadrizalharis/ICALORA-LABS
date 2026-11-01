@@ -70,21 +70,21 @@ export default function TextTool({
         onChange={(e) => setText(e.target.value)}
         placeholder={placeholder}
         rows={8}
-        className="w-full resize-y rounded-xl border border-neutral-300 p-4 text-sm text-neutral-900 outline-none focus:border-neutral-500"
+        className="w-full resize-y rounded-xl border border-neutral-300 p-4 text-sm text-neutral-900 outline-none focus:border-neutral-500 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder:text-neutral-500 dark:focus:border-neutral-500"
       />
       <div className="flex items-center gap-3">
         <button
           onClick={handleSubmit}
           disabled={loading || !text.trim()}
-          className="rounded-lg bg-neutral-900 px-5 py-2 text-sm font-medium text-white disabled:opacity-40"
+          className="rounded-lg bg-neutral-900 px-5 py-2 text-sm font-medium text-white disabled:opacity-40 dark:bg-neutral-100 dark:text-neutral-900"
         >
           {loading ? "Memproses…" : submitLabel}
         </button>
-        <span className="text-xs text-neutral-400">{text.length} karakter</span>
+        <span className="text-xs text-neutral-400 dark:text-neutral-500">{text.length} karakter</span>
       </div>
 
       {error && (
-        <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+        <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700 dark:border-rose-900 dark:bg-rose-950 dark:text-rose-300">
           {error}
         </div>
       )}
@@ -102,21 +102,21 @@ export default function TextTool({
           ].map(([label, value]) => (
             <div
               key={label as string}
-              className="rounded-xl border border-neutral-200 bg-neutral-50 p-4"
+              className="rounded-xl border border-neutral-200 bg-neutral-50 p-4 dark:border-neutral-800 dark:bg-neutral-900"
             >
-              <div className="text-lg font-semibold text-neutral-900">{value}</div>
-              <div className="text-xs text-neutral-500">{label}</div>
+              <div className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">{value}</div>
+              <div className="text-xs text-neutral-500 dark:text-neutral-400">{label}</div>
             </div>
           ))}
         </div>
       )}
 
       {out !== null && (
-        <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-4">
-          <div className="mb-2 text-xs font-medium uppercase tracking-wide text-neutral-400">
+        <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-4 dark:border-neutral-800 dark:bg-neutral-900">
+          <div className="mb-2 text-xs font-medium uppercase tracking-wide text-neutral-400 dark:text-neutral-500">
             Hasil
           </div>
-          <p className="whitespace-pre-wrap text-sm text-neutral-900">{out}</p>
+          <p className="whitespace-pre-wrap text-sm text-neutral-900 dark:text-neutral-100">{out}</p>
         </div>
       )}
     </div>

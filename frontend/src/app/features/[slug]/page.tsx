@@ -55,11 +55,11 @@ export default async function FeaturePage({
 
   return (
     <div className="mx-auto max-w-4xl p-8">
-      <div className="mb-1 text-[11px] uppercase tracking-wide text-neutral-400">
+      <div className="mb-1 text-[11px] uppercase tracking-wide text-neutral-400 dark:text-neutral-500">
         {GROUP_LABEL[feature.group]} · Fase {feature.phase}
       </div>
-      <h1 className="text-2xl font-bold text-neutral-900">{feature.name}</h1>
-      <p className="mt-2 text-neutral-500">
+      <h1 className="text-2xl font-bold text-neutral-900 dark:text-neutral-50">{feature.name}</h1>
+      <p className="mt-2 text-neutral-500 dark:text-neutral-400">
         {isActive
           ? "Masukkan teks Anda, lalu proses menggunakan mesin ICALORA-LABS."
           : "Fitur ini sedang dalam tahap perencanaan. UI dan logika akan diimplementasikan sesuai roadmap (docs/04)."}
@@ -77,7 +77,7 @@ export default async function FeaturePage({
         ) : feature.slug === "plagiarism-checker" ? (
           <PlagiarismTool />
         ) : (
-          <div className="rounded-xl border border-dashed border-neutral-300 p-6 text-sm text-neutral-500">
+          <div className="rounded-xl border border-dashed border-neutral-300 p-6 text-sm text-neutral-500 dark:border-neutral-700 dark:text-neutral-400">
             Placeholder antarmuka untuk <b>{feature.name}</b>.
           </div>
         )}
