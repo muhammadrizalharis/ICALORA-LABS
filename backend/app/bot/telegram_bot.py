@@ -34,11 +34,11 @@ ROOT = Path(__file__).resolve().parents[3]
 _HELP = (
     "<b>ICALORA-LABS Bot</b>\n"
     "Kirim perintah diikuti teks:\n"
-    "/cek <teks> — cek kemiripan/plagiarisme\n"
-    "/grammar <teks> — perbaiki tata bahasa\n"
-    "/parafrase <teks> — parafrase\n"
-    "/humanize <teks> — humanize teks AI\n"
-    "/hitung <teks> — word count\n"
+    "/cek &lt;teks&gt; — cek kemiripan/plagiarisme\n"
+    "/grammar &lt;teks&gt; — perbaiki tata bahasa\n"
+    "/parafrase &lt;teks&gt; — parafrase\n"
+    "/humanize &lt;teks&gt; — humanize teks AI\n"
+    "/hitung &lt;teks&gt; — word count\n"
     "/status — status korpus &amp; ingest\n"
     "/backup — backup DB ke Drive\n"
     "/whoami — tampilkan chat id Anda"
@@ -52,11 +52,18 @@ def _allowed() -> set[int]:
 
 def _send(chat_id: int, text: str) -> None:
     try:
-        httpx.post(
+        r = httpx.post(
             f"{TG}/sendMessage",
             json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"},
             timeout=30,
         )
+        if r.status_code == 400:
+            # HTML gagal di-parse → kirim ulang sebagai teks biasa
+            httpx.post(
+                f"{TG}/sendMessage",
+                json={"chat_id": chat_id, "text": text},
+                timeout=30,
+            )
     except Exception as exc:  # noqa: BLE001
         print(f"[bot] gagal kirim: {exc}", flush=True)
 
