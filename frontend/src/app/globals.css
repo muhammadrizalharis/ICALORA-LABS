@@ -24,3 +24,62 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* ===== Sistem desain ICALORA-LABS ===== */
+/* Palet brand selaras logo: biru elektrik → ungu → magenta. */
+
+.text-gradient {
+  background-image: linear-gradient(100deg, #3b82f6 0%, #22d3ee 30%, #8b5cf6 65%, #d946ef 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.brand-grad {
+  background-image: linear-gradient(100deg, #3b82f6 0%, #8b5cf6 55%, #d946ef 100%);
+}
+
+.brand-grad-soft {
+  background-image: linear-gradient(135deg, rgba(59, 130, 246, 0.14), rgba(217, 70, 239, 0.14));
+}
+
+/* Latar hero: grid halus + cahaya. */
+.hero-grid {
+  background-image:
+    linear-gradient(to right, rgba(120, 140, 200, 0.08) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(120, 140, 200, 0.08) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000 55%, transparent 100%);
+}
+
+.glow-blob {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(80px);
+  opacity: 0.5;
+  animation: floatBlob 14s ease-in-out infinite;
+}
+@keyframes floatBlob {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(18px, -24px) scale(1.08); }
+}
+
+.glass {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(12px);
+}
+.dark .glass {
+  background: rgba(17, 20, 32, 0.6);
+}
+
+@keyframes shimmer {
+  100% { transform: translateX(100%); }
+}
+.shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.12), transparent);
+  transform: translateX(-100%);
+  animation: shimmer 1.4s infinite;
+}

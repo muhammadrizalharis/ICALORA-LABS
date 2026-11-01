@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
-import { Suspense } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import Sidebar from "@/components/Sidebar";
+import TopNav from "@/components/TopNav";
+import Footer from "@/components/Footer";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -15,8 +15,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ICALORA-LABS — by MRH INNOVEX",
-  description: "Toolkit integritas akademik: plagiarism, AI detector, dan 11 fitur lainnya.",
+  title: "ICALORA-LABS — Deteksi Plagiarisme & AI | by MRH INNOVEX",
+  description:
+    "Alternatif Turnitin legal & self-hosted. Cek plagiarisme dan deteksi AI terhadap 1 juta+ dokumen akses-terbuka. Cepat dengan GPU, aman, gratis.",
 };
 
 const themeInitScript = `
@@ -39,17 +40,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
-      <body className="min-h-full">
-        <div className="flex h-screen">
-          <Suspense
-            fallback={
-              <aside className="w-64 shrink-0 border-r border-neutral-200 bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-900" />
-            }
-          >
-            <Sidebar />
-          </Suspense>
-          <main className="flex-1 overflow-y-auto bg-white dark:bg-neutral-950">{children}</main>
-        </div>
+      <body className="min-h-full bg-white text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
+        <TopNav />
+        <main className="min-h-[calc(100vh-8rem)]">{children}</main>
+        <Footer />
       </body>
     </html>
   );

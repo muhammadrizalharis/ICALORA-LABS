@@ -1,32 +1,24 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { FEATURES, GROUP_LABEL, GROUP_COLOR, type FeatureGroup } from "@/lib/features";
-import ThemeToggle from "@/components/ThemeToggle";
 
-const GROUPS: FeatureGroup[] = ["ringan", "api", "berat"];
+const GROUPS: FeatureGroup[] = ["berat", "ringan", "api"];
 
 export default function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="flex w-64 shrink-0 flex-col border-r border-neutral-200 bg-neutral-50 p-4 overflow-y-auto dark:border-neutral-800 dark:bg-neutral-900">
-      <Link href="/" className="mb-6 block">
-        {/* Teks logo berwarna putih/silver → beri panel gelap saat tema terang
-            agar tetap terbaca; di tema gelap sidebar sudah gelap. */}
-        <div className="rounded-xl bg-neutral-900 p-3 dark:bg-transparent dark:p-0">
-          <Image
-            src="/logo.png"
-            alt="ICALORA-LABS by MRH INNOVEX"
-            width={1536}
-            height={1024}
-            priority
-            className="h-auto w-full"
-          />
-        </div>
-      </Link>
+    <aside className="hidden w-64 shrink-0 flex-col overflow-y-auto border-r border-neutral-200 bg-neutral-50 p-4 lg:flex dark:border-neutral-800 dark:bg-neutral-900/40">
+      <div className="mb-4 px-1">
+        <Link
+          href="/"
+          className="text-xs font-medium text-neutral-500 transition hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-white"
+        >
+          ← Kembali ke Beranda
+        </Link>
+      </div>
 
       <nav className="space-y-5">
         {GROUPS.map((group) => (
@@ -43,13 +35,17 @@ export default function Sidebar() {
                   <li key={f.slug}>
                     <Link
                       href={href}
-                      className={`block rounded-md px-3 py-1.5 text-sm transition ${
+                      className={`flex items-center gap-2.5 rounded-md px-3 py-1.5 text-sm transition ${
                         active
                           ? "bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900"
                           : "text-neutral-700 hover:bg-neutral-200 dark:text-neutral-300 dark:hover:bg-neutral-800"
                       }`}
                     >
-                      {f.name}
+                      <span className="text-base leading-none">{f.icon}</span>
+                      <span className="truncate">{f.name}</span>
+                      {f.status === "active" && !active && (
+                        <span className="ml-auto h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                      )}
                     </Link>
                   </li>
                 );
@@ -58,10 +54,6 @@ export default function Sidebar() {
           </div>
         ))}
       </nav>
-
-      <div className="mt-auto pt-6">
-        <ThemeToggle />
-      </div>
     </aside>
   );
 }
