@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.services.llm.tasks import grammar_check, humanize, paraphrase
+from app.services.plagiarism import check_plagiarism
 from app.services.text_tools import analyze_text
 
 router = APIRouter(prefix="/tools", tags=["tools"])
@@ -17,6 +18,10 @@ class TextIn(BaseModel):
 
 class ParaphraseIn(TextIn):
     style: str = Field(default="standar")
+
+
+class PlagiarismIn(TextIn):
+    top_k: int = Field(default=10, ge=1, le=50)
 
 
 def _guard(text: str) -> None:
@@ -54,3 +59,12 @@ def humanize_ep(body: TextIn) -> dict:
         return humanize(body.text)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"LLM gagal: {exc}") from exc
+
+
+@router.post("/plagiarism")
+def plagiarism_ep(body: PlagiarismIn) -> dict:
+    _guard(body.text)
+    try:
+        return check_plagiarism(body.text, body.top_k)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Cek plagiarisme gagal: {exc}") from exc

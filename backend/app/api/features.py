@@ -70,7 +70,7 @@ FEATURES: list[dict] = [
         "name": "Plagiarism Checker",
         "group": "berat",
         "phase": 3,
-        "status": "planned",
+        "status": "active",
     },
 ]
 

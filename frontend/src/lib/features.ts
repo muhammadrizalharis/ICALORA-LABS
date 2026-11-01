@@ -22,7 +22,7 @@ export const FEATURES: Feature[] = [
   { slug: "resume-builder", name: "Resume Builder", group: "ringan", phase: 1, status: "planned" },
   { slug: "ai-detector", name: "AI Detector", group: "berat", phase: 4, status: "planned" },
   { slug: "authorship", name: "Authorship", group: "berat", phase: 4, status: "planned" },
-  { slug: "plagiarism-checker", name: "Plagiarism Checker", group: "berat", phase: 3, status: "planned" },
+  { slug: "plagiarism-checker", name: "Plagiarism Checker", group: "berat", phase: 3, status: "active" },
 ];
 
 export const GROUP_LABEL: Record<FeatureGroup, string> = {

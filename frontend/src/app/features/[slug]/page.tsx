@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { getFeature, GROUP_LABEL, FEATURES } from "@/lib/features";
-import SimilarityReportPlaceholder from "@/components/report-viewer/SimilarityReport";
+import PlagiarismTool from "@/components/PlagiarismTool";
 import TextTool from "@/components/TextTool";
 
 export function generateStaticParams() {
@@ -75,7 +75,7 @@ export default async function FeaturePage({
             placeholder={tool.placeholder}
           />
         ) : feature.slug === "plagiarism-checker" ? (
-          <SimilarityReportPlaceholder />
+          <PlagiarismTool />
         ) : (
           <div className="rounded-xl border border-dashed border-neutral-300 p-6 text-sm text-neutral-500">
             Placeholder antarmuka untuk <b>{feature.name}</b>.
