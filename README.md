@@ -50,6 +50,6 @@ Platform AI akademik serba-bisa: **plagiarism checker, AI detector, paraphraser,
 ## 🚦 Prinsip Utama
 
 1. **Legal-first** — hanya memakai data yang lisensinya mengizinkan reuse.
-2. **Self-contained** — sumber daya dibangun khusus untuk ICALORA-LABS, tidak mengambil dari proyek lain.
+2. **Self-contained (MUTLAK)** — SEMUA sumber daya (kode, korpus, dataset, model, aset, konfigurasi, dependensi) dibangun khusus untuk ICALORA-LABS. **DILARANG** mengambil, menyalin, atau berbagi sumber daya dari proyek lain mana pun di workspace (mis. Askara, CodeUnical, dll). Tidak ada ketergantungan silang antar-proyek.
 3. **Jujur ke pengguna** — AI detector selalu menampilkan disclaimer akurasi; tidak ada klaim berlebihan.
 4. **MVP dulu** — fitur ringan jalan cepat, fitur berat (plagiarism, detector) dibangun bertahap.
