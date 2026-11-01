@@ -27,6 +27,35 @@ def ensure_schema() -> None:
             conn.execute(text(stmt))
 
 
+# Lisensi yang mengizinkan penyimpanan & pemakaian full-text pada produk
+# komersial (pengganti Turnitin). Hanya yang benar-benar permisif.
+# NC (non-komersial) & ND (tanpa turunan) DIKECUALIKAN demi aman hukum.
+_FULLTEXT_OK = {
+    "cc0",
+    "ccby",
+    "ccbysa",
+    "pd",
+    "publicdomain",
+    "cczero",
+    "ccpublicdomain",
+}
+
+
+def license_allows_fulltext(code: str | None) -> bool:
+    """True bila lisensi mengizinkan simpan full-text untuk layanan komersial.
+
+    Normalisasi 'CC BY', 'cc-by', 'CC-BY 4.0' → 'ccby'. NC/ND/tidak diketahui → False.
+    """
+    if not code:
+        return False
+    norm = re.sub(r"[^a-z0-9]", "", code.lower())
+    # buang penanda versi seperti '40', '30' di belakang
+    norm = re.sub(r"(by|sa|nc|nd|zero|cc0|publicdomain)\d+$", r"\1", norm)
+    if "nc" in norm or "nd" in norm:
+        return False
+    return norm in _FULLTEXT_OK
+
+
 def reconstruct_abstract(inverted_index: dict | None) -> str:
     """Bangun ulang abstrak dari abstract_inverted_index OpenAlex."""
     if not inverted_index:
