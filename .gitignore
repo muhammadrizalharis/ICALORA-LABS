@@ -56,3 +56,6 @@ Thumbs.db
 *.swp
 *.log
 logs/
+
+# PDF acuan internal (berisi data pribadi / dokumen asli) — JANGAN publik
+docs/*.pdf
