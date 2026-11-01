@@ -3,38 +3,42 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
-  /* Terang — Ice Blue base, aksen Lavender & Platinum */
-  --background: #e6f2f7;   /* Ice Blue / Pale Aqua */
-  --foreground: #0e1726;
-  --bg-soft: #eae6f3;      /* Lavender pucat */
-  --surface: #ffffff;      /* kartu */
-  --surface-2: #e1e4e6;    /* Platinum Gray panel */
-  --border-c: rgba(14, 23, 38, 0.1);
-  --muted: #5b6b7a;
+  /* Terang — satu hue lembut (soft slate), aksen indigo tunggal */
+  --background: #f6f7fb;
+  --foreground: #1b2130;
+  --bg-soft: #eef0f7;
+  --surface: #ffffff;
+  --surface-2: #f0f2f8;
+  --border-c: rgba(27, 33, 48, 0.08);
+  --muted: #697086;
+  --brand: #6366f1;        /* Indigo lembut — satu warna aksen */
+  --brand-soft: rgba(99, 102, 241, 0.1);
 }
 
 .dark {
-  /* Gelap — Midnight Blue base, aksen Violet & Slate */
-  --background: #0e1726;   /* Midnight Blue */
-  --foreground: #eaf2f7;
-  --bg-soft: #221830;      /* Muted Deep Violet */
-  --surface: #1a202c;      /* Slate Charcoal kartu */
-  --surface-2: #141b27;
-  --border-c: rgba(255, 255, 255, 0.08);
-  --muted: #94a3b8;
+  /* Gelap — satu hue lembut (soft slate), aksen indigo tunggal */
+  --background: #0f1320;
+  --foreground: #e7e9f2;
+  --bg-soft: #141829;
+  --surface: #171b2a;
+  --surface-2: #121624;
+  --border-c: rgba(255, 255, 255, 0.07);
+  --muted: #9aa1b5;
+  --brand: #818cf8;        /* Indigo lebih terang agar kontras di gelap */
+  --brand-soft: rgba(129, 140, 248, 0.14);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-brand: var(--brand);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
 body {
   background:
-    radial-gradient(1200px 600px at 12% -10%, var(--bg-soft), transparent 60%),
-    radial-gradient(1000px 520px at 100% 0%, var(--surface-2), transparent 55%),
+    radial-gradient(1100px 560px at 50% -12%, var(--bg-soft), transparent 70%),
     var(--background);
   background-attachment: fixed;
   color: var(--foreground);
@@ -53,28 +57,30 @@ body {
 }
 
 /* ===== Sistem desain ICALORA-LABS ===== */
-/* Palet brand selaras logo: biru elektrik → ungu → magenta. */
+/* Aksen brand: SATU warna indigo lembut (var --brand). */
 
 .text-gradient {
-  background-image: linear-gradient(100deg, #3b82f6 0%, #22d3ee 30%, #8b5cf6 65%, #d946ef 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  color: var(--brand);
+  background: none;
+  -webkit-background-clip: border-box;
+  background-clip: border-box;
 }
 
 .brand-grad {
-  background-image: linear-gradient(100deg, #3b82f6 0%, #8b5cf6 55%, #d946ef 100%);
+  background-color: var(--brand);
+  background-image: none;
 }
 
 .brand-grad-soft {
-  background-image: linear-gradient(135deg, rgba(59, 130, 246, 0.14), rgba(217, 70, 239, 0.14));
+  background-image: none;
+  background-color: var(--brand-soft);
 }
 
-/* Latar hero: grid halus + cahaya. */
+/* Latar hero: grid halus (tanpa warna glow). */
 .hero-grid {
   background-image:
-    linear-gradient(to right, rgba(120, 140, 200, 0.08) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(120, 140, 200, 0.08) 1px, transparent 1px);
+    linear-gradient(to right, rgba(120, 130, 160, 0.07) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(120, 130, 160, 0.07) 1px, transparent 1px);
   background-size: 44px 44px;
   mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000 55%, transparent 100%);
 }
@@ -82,9 +88,11 @@ body {
 .glow-blob {
   position: absolute;
   border-radius: 9999px;
-  filter: blur(80px);
-  opacity: 0.5;
-  animation: floatBlob 14s ease-in-out infinite;
+  filter: blur(90px);
+  opacity: 0.18;
+  background-color: var(--brand);
+  background-image: none;
+  animation: floatBlob 16s ease-in-out infinite;
 }
 @keyframes floatBlob {
   0%, 100% { transform: translate(0, 0) scale(1); }
@@ -92,11 +100,11 @@ body {
 }
 
 .glass {
-  background: rgba(230, 242, 247, 0.72);
+  background: rgba(246, 247, 251, 0.75);
   backdrop-filter: blur(12px);
 }
 .dark .glass {
-  background: rgba(14, 23, 38, 0.62);
+  background: rgba(15, 19, 32, 0.68);
 }
 
 @keyframes shimmer {
