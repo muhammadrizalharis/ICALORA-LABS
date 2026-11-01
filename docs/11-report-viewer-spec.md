@@ -5,9 +5,16 @@ praktik terbaik industri (Turnitin, Grammarly) namun dengan **desain, nama eleme
 skema warna, dan ikon yang ORISINAL** milik ICALORA-LABS — bukan salinan identik —
 agar aman dari masalah merek & hak cipta UI.
 
-> Referensi analisis: `docs/report.pdf` (gaya laporan Writing/Grammarly) dan
-> `docs/TURNITIN.pdf` (gaya laporan Similarity/Integrity). Kedua PDF hanya acuan
-> internal, tidak dipublikasikan ulang.
+> Referensi analisis: `docs/report.pdf` (gaya laporan Writing/Grammarly),
+> `docs/TURNITIN.pdf` (gaya "Integrity Overview" baru), serta dua contoh
+> `docs/Turnitin_*.pdf` (gaya "Originality Report" klasik). Semua PDF hanya acuan
+> internal, tidak dipublikasikan ulang (diblokir `.gitignore`).
+
+> **Dua gaya laporan similarity yang didukung ICALORA-LABS:**
+> 1. **Ringkas/Overview** (ala Integrity) — skor besar + Match Groups + Top Sources berpil warna.
+> 2. **Klasik/Originality** — halaman sampul (jumlah kata, waktu kirim, ID dokumen),
+>    angka match inline di dokumen, daftar sumber format `N kata — X%` + tag database,
+>    dan panel pengaturan Exclude. Keduanya berbagi model data yang sama.
 
 ---
 
@@ -34,21 +41,33 @@ Tiap sumber satu baris:
 - **Badge nomor** (lingkaran berwarna, warna di-rotate per peringkat).
 - **Tag tipe**: `Internet` / `Publikasi` / `Karya Terkirim` (pil berwarna).
 - **Nama sumber** (domain atau judul/penulis) + **persentase** di kanan.
+- **Varian klasik**: tampilkan `N kata — X%` (jumlah kata yang cocok) + tag database
+  sumber (mis. Crossref, Internet, Publikasi) di bawah badge.
+
+### A.2b Pengaturan Exclude (filter laporan)
+Panel kontrol untuk menyesuaikan perhitungan skor:
+- **Exclude Quotes** (teks dalam tanda kutip) — on/off
+- **Exclude Bibliography** (daftar pustaka) — on/off
+- **Exclude Sources** kecil (mis. < ambang %) — on/off
+- **Exclude Matches** pendek (mis. < N kata) — on/off
+Skor keseluruhan dihitung ulang sesuai filter aktif.
 
 ### A.3 Tampilan Dokumen (Document View)
 - Render teks asli pengguna (boleh 1 atau 2 kolom).
 - **Highlight** pada rentang teks yang cocok, warna mengikuti sumbernya.
-- **Badge nomor** di margin kiri, sejajar baris highlight → klik untuk lompat ke sumber.
+- **Badge nomor** di margin/inline, sejajar baris highlight → klik untuk lompat ke sumber.
 - **Panel sumber** samping/popover: cuplikan sumber + tautan + % kecocokan rentang itu.
 - Interaksi: klik highlight → sorot sumber terkait; toggle filter (bibliografi/kutipan).
+- **Halaman sampul (opsional, gaya klasik)**: jumlah kata, waktu kirim, ID dokumen.
 
 ### A.4 Model data (ringkas)
 ```
 SimilarityReport
-  submissionId, overallPercent, filters{bibliography, quoted}
+  submissionId, wordCount, submittedAt, overallPercent
+  filters{excludeQuotes, excludeBibliography, excludeSmallSources, excludeShortMatches}
   matchGroups[]: {type, count, percent}
   topCategories[]: {type, percent}
-  sources[]: {rank, type, name, url?, percent}
+  sources[]: {rank, type, name, url?, percent, matchedWords}
   matches[]: {startOffset, endOffset, sourceRank, snippet}
 ```
 
