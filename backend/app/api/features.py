@@ -11,14 +11,14 @@ FEATURES: list[dict] = [
         "name": "Grammar Checker",
         "group": "ringan",
         "phase": 1,
-        "status": "planned",
+        "status": "active",
     },
     {
         "slug": "paraphraser",
         "name": "Paraphraser",
         "group": "ringan",
         "phase": 1,
-        "status": "planned",
+        "status": "active",
     },
     {
         "slug": "ai-rewriter",
@@ -27,14 +27,14 @@ FEATURES: list[dict] = [
         "phase": 1,
         "status": "planned",
     },
-    {"slug": "humanizer", "name": "Humanizer", "group": "ringan", "phase": 1, "status": "planned"},
+    {"slug": "humanizer", "name": "Humanizer", "group": "ringan", "phase": 1, "status": "active"},
     {"slug": "ai-grader", "name": "AI Grader", "group": "ringan", "phase": 1, "status": "planned"},
     {
         "slug": "word-count",
         "name": "Word Count",
         "group": "ringan",
         "phase": 1,
-        "status": "planned",
+        "status": "active",
     },
     {
         "slug": "citation-finder",

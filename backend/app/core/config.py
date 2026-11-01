@@ -34,6 +34,13 @@ class Settings(BaseSettings):
     s3_region: str = Field(default="us-east-1")
     s3_bucket: str = Field(default="icalora")
 
+    # LLM (Ollama bersama di server: 127.0.0.1:11434)
+    llm_provider: str = Field(default="ollama")
+    ollama_base_url: str = Field(default="http://127.0.0.1:11434")
+    ollama_model: str = Field(default="qwen2.5:7b-instruct")
+    ollama_embed_model: str = Field(default="bge-m3")
+    llm_timeout: int = Field(default=120)
+
     @property
     def database_url(self) -> str:
         return (

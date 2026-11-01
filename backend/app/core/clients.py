@@ -54,3 +54,19 @@ def check_s3() -> dict:
     client = s3_client()
     buckets = [b["Name"] for b in client.list_buckets().get("Buckets", [])]
     return {"ok": True, "buckets": buckets}
+
+
+def check_llm() -> dict:
+    import httpx
+
+    base = settings.ollama_base_url.rstrip("/")
+    with httpx.Client(timeout=10) as client:
+        resp = client.get(f"{base}/api/tags")
+        resp.raise_for_status()
+        models = [m["name"] for m in resp.json().get("models", [])]
+    return {
+        "ok": True,
+        "provider": settings.llm_provider,
+        "model": settings.ollama_model,
+        "model_available": settings.ollama_model in models,
+    }

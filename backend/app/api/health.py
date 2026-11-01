@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from app.core.clients import check_postgres, check_redis, check_s3
+from app.core.clients import check_llm, check_postgres, check_redis, check_s3
 
 router = APIRouter(tags=["health"])
 
@@ -15,7 +15,12 @@ def health() -> dict:
 @router.get("/health/infra")
 def health_infra() -> dict:
     results: dict[str, dict] = {}
-    for name, fn in (("postgres", check_postgres), ("redis", check_redis), ("s3", check_s3)):
+    for name, fn in (
+        ("postgres", check_postgres),
+        ("redis", check_redis),
+        ("s3", check_s3),
+        ("llm", check_llm),
+    ):
         try:
             results[name] = fn()
         except Exception as exc:  # noqa: BLE001
