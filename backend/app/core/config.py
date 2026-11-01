@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     semantic_scholar_api_key: str = Field(default="")
     ncbi_api_key: str = Field(default="")
 
+    # Bot Telegram (akses privat)
+    telegram_bot_token: str = Field(default="")
+    telegram_allowed_chat_ids: str = Field(default="")  # daftar id dipisah koma
+    backend_base_url: str = Field(default="http://127.0.0.1:58010")
+
     @property
     def database_url(self) -> str:
         return (

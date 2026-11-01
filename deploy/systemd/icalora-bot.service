@@ -1,0 +1,15 @@
+[Unit]
+Description=ICALORA-LABS Telegram bot (long-polling)
+After=network.target icalora-backend.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/muhammadrizalharis/ICALORA-LABS/backend
+ExecStart=/home/muhammadrizalharis/ICALORA-LABS/backend/.venv/bin/python -m app.bot.telegram_bot
+Restart=always
+RestartSec=5
+StandardOutput=append:/home/muhammadrizalharis/ICALORA-LABS/backend/.logs/service_bot.log
+StandardError=append:/home/muhammadrizalharis/ICALORA-LABS/backend/.logs/service_bot.log
+
+[Install]
+WantedBy=default.target
