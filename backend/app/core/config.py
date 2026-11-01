@@ -41,6 +41,13 @@ class Settings(BaseSettings):
     ollama_embed_model: str = Field(default="bge-m3")
     llm_timeout: int = Field(default=120)
 
+    # Ingest korpus
+    contact_email: str = Field(default="")  # mailto polite-pool OpenAlex/Crossref
+    ingest_page_size: int = Field(default=200)
+    core_api_key: str = Field(default="")
+    semantic_scholar_api_key: str = Field(default="")
+    ncbi_api_key: str = Field(default="")
+
     @property
     def database_url(self) -> str:
         return (
