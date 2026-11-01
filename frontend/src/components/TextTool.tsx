@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { apiPost } from "@/lib/api";
+import TextInput from "@/components/TextInput";
 
 type ToolKind = "word-count" | "text-output";
 
@@ -65,13 +66,7 @@ export default function TextTool({
 
   return (
     <div className="space-y-4">
-      <textarea
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        placeholder={placeholder}
-        rows={8}
-        className="w-full resize-y rounded-xl border border-c p-4 text-sm text-neutral-900 outline-none focus:border-neutral-500 dark:text-neutral-100 dark:placeholder:text-neutral-500 dark:focus:border-neutral-500"
-      />
+      <TextInput value={text} onChange={setText} placeholder={placeholder} rows={8} />
       <div className="flex items-center gap-3">
         <button
           onClick={handleSubmit}

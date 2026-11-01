@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { apiPost } from "@/lib/api";
+import TextInput from "@/components/TextInput";
 
 interface Source {
   doc_id: number;
@@ -65,11 +66,11 @@ export default function PlagiarismTool() {
 
   return (
     <div className="space-y-5">
-      <textarea
+      <TextInput
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={setText}
         placeholder="Tempel teks/abstrak yang ingin diperiksa keasliannya…"
-        className="h-56 w-full resize-y rounded-xl border border-c p-4 text-sm text-neutral-900 outline-none focus:border-neutral-500 dark:text-neutral-100 dark:placeholder:text-neutral-500 dark:focus:border-neutral-500"
+        rows={10}
       />
       <div className="flex items-center gap-3">
         <button

@@ -1,8 +1,9 @@
 """Endpoint fitur ringan Fase 1."""
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
+from app.services.file_extract import MAX_UPLOAD_BYTES, extract_text
 from app.services.llm.tasks import grammar_check, humanize, paraphrase
 from app.services.plagiarism import check_plagiarism
 from app.services.text_tools import analyze_text
@@ -32,6 +33,32 @@ def _guard(text: str) -> None:
 @router.post("/word-count")
 def word_count(body: TextIn) -> dict:
     return analyze_text(body.text)
+
+
+@router.post("/extract-text")
+async def extract_text_ep(file: UploadFile = File(...)) -> dict:  # noqa: B008
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Berkas kosong.")
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Berkas melebihi {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.",
+        )
+    try:
+        text = extract_text(file.filename or "", data)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    text = text.strip()
+    if not text:
+        raise HTTPException(
+            status_code=422,
+            detail="Tidak ada teks yang dapat diekstrak dari berkas.",
+        )
+    if len(text) > MAX_CHARS:
+        text = text[:MAX_CHARS]
+    return {"filename": file.filename, "text": text, "chars": len(text)}
 
 
 @router.post("/grammar-check")
