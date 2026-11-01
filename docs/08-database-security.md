@@ -15,7 +15,7 @@ Dokumen ini merinci pondasi teknis ICALORA-LABS: pilihan database, lapisan keama
 | Database utama | **PostgreSQL 16** | User, dokumen, hasil analisis, langganan, metadata korpus |
 | Vector search | **pgvector** (extension) | Embedding untuk deteksi parafrase / semantic similarity |
 | Cache & antrian | **Redis** | Cache hasil, session, broker job berat |
-| Object storage | **MinIO / S3-compatible** | Dokumen asli & full-text korpus (TIDAK disimpan di DB) |
+| Object storage | **SeaweedFS (S3-compatible)** | Dokumen asli & full-text korpus (TIDAK disimpan di DB) |
 
 **Alasan:** gratis, matang, andal; pgvector memungkinkan satu DB untuk data relasional + vector (sederhana di awal). Bisa migrasi ke **Qdrant** saat korpus membesar.
 
@@ -118,7 +118,7 @@ corpus_segments  (id, corpus_doc_id, text_hash, embedding, position)
 ## Ringkasan Keputusan
 
 ```
-Database  : PostgreSQL + pgvector + Redis + MinIO/S3
+Database  : PostgreSQL + pgvector + Redis + SeaweedFS (S3)
 Keamanan  : JWT, argon2/bcrypt, HTTPS, validasi Pydantic, rate limit,
             secrets via .env (repo publik aman), enkripsi data pengguna
 Backend   : Python 3.12 + FastAPI + Celery + SQLAlchemy/Alembic

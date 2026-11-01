@@ -1,0 +1,82 @@
+# ICALORA-LABS — Infrastruktur Lokal (di-hardening untuk keamanan)
+# Jalankan dari folder infra/:  docker compose -f docker-compose.infra.yml up -d
+#
+# Prinsip keamanan:
+# - Semua port HANYA diikat ke 127.0.0.1 (tidak terekspos ke jaringan luar)
+# - Kredensial via .env + seaweedfs/s3.json (TIDAK di-commit ke repo publik)
+# - no-new-privileges, healthcheck, batas resource, restart otomatis
+# - Image di-pin (Redis/Postgres by tag, SeaweedFS by digest SHA256) agar aman & reproducible
+# - Object storage: SeaweedFS (S3-compatible, open-source) — MinIO kini di-gate login
+
+name: icalora-infra
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: icalora-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    mem_limit: 8g
+    cpus: 8.0
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: icalora-redis
+    restart: unless-stopped
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redisdata:/data
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    mem_limit: 4g
+    cpus: 2.0
+
+  seaweedfs:
+    image: chrislusf/seaweedfs@sha256:c2658820e763294a9e9de7b36c81e59b879e3459148351aee4e31a126ca64860
+    container_name: icalora-seaweedfs
+    restart: unless-stopped
+    command: ["server", "-dir=/data", "-s3", "-s3.config=/etc/seaweedfs/s3.json"]
+    ports:
+      - "127.0.0.1:${S3_PORT:-8333}:8333"
+      - "127.0.0.1:${S3_FILER_PORT:-8888}:8888"
+    volumes:
+      - seaweeddata:/data
+      - ./seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9333/cluster/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    mem_limit: 4g
+    cpus: 4.0
+
+volumes:
+  pgdata:
+    name: icalora_pgdata
+  redisdata:
+    name: icalora_redisdata
+  seaweeddata:
+    name: icalora_seaweeddata

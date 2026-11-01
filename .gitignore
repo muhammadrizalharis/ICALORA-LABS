@@ -3,6 +3,8 @@
 .env
 .env.*
 *.env
+!.env.example
+!**/.env.example
 *.pem
 *.key
 *.crt
@@ -14,6 +16,9 @@ credentials/
 *credential*
 *.token
 .npmrc
+# SeaweedFS S3 identities (berisi secret) — jangan commit, kecuali contoh
+**/seaweedfs/s3.json
+!**/seaweedfs/s3.json.example
 
 # Dependencies
 node_modules/

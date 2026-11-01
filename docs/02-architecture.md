@@ -70,7 +70,7 @@ Arsitektur ICALORA-LABS dirancang **self-contained**: semua layanan & data milik
 ### 5. Data Layer
 - **PostgreSQL** — data pengguna, dokumen, metadata, hasil.
 - **pgvector / Qdrant** — index embedding untuk semantic search.
-- **Object storage** (S3-compatible / MinIO) — simpan dokumen asli & full-text korpus.
+- **Object storage** (SeaweedFS, S3-compatible) — simpan dokumen asli & full-text korpus.
 - **Redis** — cache + broker antrian job.
 
 ### 6. Corpus Pipeline (batch)

@@ -1,0 +1,11 @@
+{
+  "identities": [
+    {
+      "name": "icalora",
+      "credentials": [
+        { "accessKey": "icalora", "secretKey": "ganti_dengan_secret_kuat" }
+      ],
+      "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+    }
+  ]
+}

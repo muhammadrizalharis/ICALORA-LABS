@@ -73,7 +73,7 @@ Dibangun sendiri — pasangan teks **manusia vs AI**.
 
 | Komponen | Teknologi | Untuk |
 |---|---|---|
-| Full-text korpus | Object storage (MinIO/S3) | Teks mentah & bersih |
+| Full-text korpus | Object storage (SeaweedFS/S3) | Teks mentah & bersih |
 | Fingerprint | Tabel MinHash (Postgres/khusus) | Pencarian exact/near-dup cepat |
 | Embedding | pgvector / Qdrant | Semantic/parafrase search |
 | Metadata | PostgreSQL | Lisensi, sumber, DOI, dsb. |

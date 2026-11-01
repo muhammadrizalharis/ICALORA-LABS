@@ -21,7 +21,7 @@ Rekomendasi stack untuk ICALORA-LABS. Semua dibangun **fresh** untuk proyek ini 
 ### Data & Index
 - **PostgreSQL** (data utama)
 - **pgvector** atau **Qdrant** (vector search)
-- **MinIO** / S3-compatible (object storage)
+- **SeaweedFS** (S3-compatible object storage, open-source)
 - **Redis** (cache + broker antrian)
 
 ### ML / AI
