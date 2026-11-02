@@ -12,18 +12,18 @@ export interface Feature {
 
 // Katalog 13 fitur ICALORA-LABS (selaras dengan backend /features).
 export const FEATURES: Feature[] = [
-  { slug: "ai-chat", name: "AI Chat", group: "ringan", phase: 1, status: "planned", icon: "💬", desc: "Asisten tulis akademik berbasis LLM lokal." },
+  { slug: "ai-chat", name: "AI Chat", group: "ringan", phase: 1, status: "active", icon: "💬", desc: "Asisten tulis akademik berbasis LLM lokal." },
   { slug: "grammar-checker", name: "Grammar Checker", group: "ringan", phase: 1, status: "active", icon: "✍️", desc: "Perbaiki tata bahasa & ejaan secara instan." },
   { slug: "paraphraser", name: "Paraphraser", group: "ringan", phase: 1, status: "active", icon: "🔁", desc: "Tulis ulang kalimat tetap menjaga makna." },
-  { slug: "ai-rewriter", name: "AI Rewriter", group: "ringan", phase: 1, status: "planned", icon: "🪄", desc: "Rombak gaya tulisan sesuai kebutuhan." },
+  { slug: "ai-rewriter", name: "AI Rewriter", group: "ringan", phase: 1, status: "active", icon: "🪄", desc: "Rombak gaya tulisan sesuai kebutuhan." },
   { slug: "humanizer", name: "Humanizer", group: "ringan", phase: 1, status: "active", icon: "🧑‍🎓", desc: "Buat teks AI terasa alami & manusiawi." },
-  { slug: "ai-grader", name: "AI Grader", group: "ringan", phase: 1, status: "planned", icon: "🎯", desc: "Nilai esai dengan rubrik otomatis." },
+  { slug: "ai-grader", name: "AI Grader", group: "ringan", phase: 1, status: "active", icon: "🎯", desc: "Nilai esai dengan rubrik otomatis." },
   { slug: "word-count", name: "Word Count", group: "ringan", phase: 1, status: "active", icon: "🔢", desc: "Hitung kata, kalimat, & waktu baca." },
-  { slug: "citation-finder", name: "Citation Finder", group: "api", phase: 2, status: "planned", icon: "🔗", desc: "Temukan & format sitasi otomatis." },
-  { slug: "reader-reactions", name: "Reader Reactions", group: "ringan", phase: 1, status: "planned", icon: "👀", desc: "Prediksi reaksi pembaca atas tulisan." },
-  { slug: "resume-builder", name: "Resume Builder", group: "ringan", phase: 1, status: "planned", icon: "📄", desc: "Susun CV profesional dalam menit." },
-  { slug: "ai-detector", name: "AI Detector", group: "berat", phase: 4, status: "planned", icon: "🤖", desc: "Deteksi konten buatan AI tingkat kalimat." },
-  { slug: "authorship", name: "Authorship", group: "berat", phase: 4, status: "planned", icon: "🕵️", desc: "Analisis gaya & verifikasi kepenulisan." },
+  { slug: "citation-finder", name: "Citation Finder", group: "api", phase: 2, status: "active", icon: "🔗", desc: "Temukan & format sitasi otomatis." },
+  { slug: "reader-reactions", name: "Reader Reactions", group: "ringan", phase: 1, status: "active", icon: "👀", desc: "Prediksi reaksi pembaca atas tulisan." },
+  { slug: "resume-builder", name: "Resume Builder", group: "ringan", phase: 1, status: "active", icon: "📄", desc: "Susun CV profesional dalam menit." },
+  { slug: "ai-detector", name: "AI Detector", group: "berat", phase: 4, status: "active", icon: "🤖", desc: "Deteksi konten buatan AI tingkat kalimat." },
+  { slug: "authorship", name: "Authorship", group: "berat", phase: 4, status: "active", icon: "🕵️", desc: "Analisis gaya & verifikasi kepenulisan." },
   { slug: "plagiarism-checker", name: "Plagiarism Checker", group: "berat", phase: 3, status: "active", icon: "🛡️", desc: "Cek kemiripan dengan 1 juta+ dokumen." },
 ];
 

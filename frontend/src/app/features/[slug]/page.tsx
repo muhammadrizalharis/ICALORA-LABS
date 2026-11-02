@@ -2,12 +2,20 @@ import { notFound } from "next/navigation";
 import { getFeature, GROUP_LABEL, FEATURES } from "@/lib/features";
 import PlagiarismTool from "@/components/PlagiarismTool";
 import TextTool from "@/components/TextTool";
+import ChatTool from "@/components/tools/ChatTool";
+import RewriteTool from "@/components/tools/RewriteTool";
+import GraderTool from "@/components/tools/GraderTool";
+import ReactionsTool from "@/components/tools/ReactionsTool";
+import ResumeTool from "@/components/tools/ResumeTool";
+import CitationTool from "@/components/tools/CitationTool";
+import AiDetectorTool from "@/components/tools/AiDetectorTool";
+import AuthorshipTool from "@/components/tools/AuthorshipTool";
 
 export function generateStaticParams() {
   return FEATURES.map((f) => ({ slug: f.slug }));
 }
 
-type ToolConfig = {
+type SimpleTool = {
   endpoint: string;
   kind: "word-count" | "text-output";
   submitLabel: string;
@@ -15,12 +23,8 @@ type ToolConfig = {
   placeholder?: string;
 };
 
-const TOOL_CONFIG: Record<string, ToolConfig> = {
-  "word-count": {
-    endpoint: "/tools/word-count",
-    kind: "word-count",
-    submitLabel: "Hitung",
-  },
+const SIMPLE_TOOLS: Record<string, SimpleTool> = {
+  "word-count": { endpoint: "/tools/word-count", kind: "word-count", submitLabel: "Hitung" },
   "grammar-checker": {
     endpoint: "/tools/grammar-check",
     kind: "text-output",
@@ -41,6 +45,18 @@ const TOOL_CONFIG: Record<string, ToolConfig> = {
   },
 };
 
+const RICH_TOOLS: Record<string, React.ComponentType> = {
+  "plagiarism-checker": PlagiarismTool,
+  "ai-chat": ChatTool,
+  "ai-rewriter": RewriteTool,
+  "ai-grader": GraderTool,
+  "reader-reactions": ReactionsTool,
+  "resume-builder": ResumeTool,
+  "citation-finder": CitationTool,
+  "ai-detector": AiDetectorTool,
+  authorship: AuthorshipTool,
+};
+
 export default async function FeaturePage({
   params,
 }: {
@@ -50,8 +66,9 @@ export default async function FeaturePage({
   const feature = getFeature(slug);
   if (!feature) notFound();
 
-  const tool = TOOL_CONFIG[feature.slug];
-  const isActive = Boolean(tool) || feature.slug === "plagiarism-checker";
+  const simple = SIMPLE_TOOLS[feature.slug];
+  const Rich = RICH_TOOLS[feature.slug];
+  const isActive = Boolean(simple) || Boolean(Rich);
 
   return (
     <div className="mx-auto max-w-4xl p-8">
@@ -61,21 +78,21 @@ export default async function FeaturePage({
       <h1 className="text-2xl font-bold text-neutral-900 dark:text-neutral-50">{feature.name}</h1>
       <p className="mt-2 text-neutral-500 dark:text-neutral-400">
         {isActive
-          ? "Masukkan teks Anda, lalu proses menggunakan mesin ICALORA-LABS."
-          : "Fitur ini sedang dalam tahap perencanaan. UI dan logika akan diimplementasikan sesuai roadmap (docs/04)."}
+          ? feature.desc
+          : "Fitur ini sedang dalam tahap perencanaan. UI dan logika akan diimplementasikan sesuai roadmap."}
       </p>
 
       <div className="mt-6">
-        {tool ? (
+        {simple ? (
           <TextTool
-            endpoint={tool.endpoint}
-            kind={tool.kind}
-            submitLabel={tool.submitLabel}
-            outputKey={tool.outputKey}
-            placeholder={tool.placeholder}
+            endpoint={simple.endpoint}
+            kind={simple.kind}
+            submitLabel={simple.submitLabel}
+            outputKey={simple.outputKey}
+            placeholder={simple.placeholder}
           />
-        ) : feature.slug === "plagiarism-checker" ? (
-          <PlagiarismTool />
+        ) : Rich ? (
+          <Rich />
         ) : (
           <div className="rounded-xl border border-dashed border-c p-6 text-sm text-neutral-500 dark:text-neutral-400">
             Placeholder antarmuka untuk <b>{feature.name}</b>.
