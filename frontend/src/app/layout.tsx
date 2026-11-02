@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import TopNav from "@/components/TopNav";
-import Footer from "@/components/Footer";
+import AppShell from "@/components/AppShell";
+import { AuthProvider } from "@/lib/auth";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -41,9 +42,11 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
       <body className="min-h-full text-[color:var(--foreground)]">
-        <TopNav />
-        <main className="min-h-[calc(100vh-8rem)]">{children}</main>
-        <Footer />
+        <AuthProvider>
+          <Suspense fallback={<div className="min-h-screen" />}>
+            <AppShell>{children}</AppShell>
+          </Suspense>
+        </AuthProvider>
       </body>
     </html>
   );
