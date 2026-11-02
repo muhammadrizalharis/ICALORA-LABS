@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { apiPost } from "@/lib/api";
+import { downloadPdfReport } from "@/lib/download";
 import TextInput from "@/components/TextInput";
 
 interface Source {
@@ -132,13 +133,7 @@ ${passages ? `<h2>Kalimat Terdeteksi Menyalin</h2><table>${passages}</table>` : 
 <h2>Sumber Teratas</h2><table>${sources}</table>
 <footer>Dibandingkan dengan korpus akses-terbuka ICALORA-LABS. Laporan ini bersifat indikatif untuk tinjauan akademik.</footer>
 </body></html>`;
-    const blob = new Blob([html], { type: "text/html" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `laporan-kemiripan-${Date.now()}.html`;
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadPdfReport(`laporan-kemiripan-${Date.now()}.pdf`, html);
   }
 
   return (
@@ -191,7 +186,7 @@ ${passages ? `<h2>Kalimat Terdeteksi Menyalin</h2><table>${passages}</table>` : 
                 onClick={downloadReport}
                 className="mt-2 rounded-lg border border-c px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-white/5"
               >
-                ⬇ Unduh Laporan
+                ⬇ Unduh Laporan (PDF)
               </button>
             </div>
           </div>

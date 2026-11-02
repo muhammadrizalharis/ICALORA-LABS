@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { apiPost } from "@/lib/api";
+import { downloadPdfReport } from "@/lib/download";
 import TextInput from "@/components/TextInput";
 
 interface Criterion {
@@ -91,13 +92,7 @@ ${criteria ? `<h2>Penilaian per Kriteria</h2><table>${criteria}</table>` : ""}
 ${suggestions ? `<h2>Saran Perbaikan</h2><ul>${suggestions}</ul>` : ""}
 <footer>Dinilai oleh ICALORA-LABS. Laporan ini bersifat indikatif untuk tinjauan akademik.</footer>
 </body></html>`;
-    const blob = new Blob([html], { type: "text/html" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `laporan-penilaian-${Date.now()}.html`;
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadPdfReport(`laporan-penilaian-${Date.now()}.pdf`, html);
   }
 
   return (
@@ -174,7 +169,7 @@ ${suggestions ? `<h2>Saran Perbaikan</h2><ul>${suggestions}</ul>` : ""}
             onClick={downloadReport}
             className="rounded-lg border border-c surface-2 px-4 py-2 text-sm font-medium hover:bg-black/5 dark:hover:bg-white/5"
           >
-            ⬇ Unduh laporan (HTML)
+            ⬇ Unduh laporan (PDF)
           </button>
         </div>
       )}

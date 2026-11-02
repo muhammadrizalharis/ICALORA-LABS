@@ -1,6 +1,7 @@
 """Endpoint fitur ringan Fase 1."""
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from app.services.ai_detector import detect_ai
@@ -24,6 +25,7 @@ from app.services.llm.tasks import (
 )
 from app.services.plagiarism import check_plagiarism
 from app.services.publikasi import recommend_journals
+from app.services.report import MAX_HTML_BYTES, render_pdf
 from app.services.text_tools import analyze_text
 from app.services.transkrip import (
     MAX_AUDIO_BYTES,
@@ -363,3 +365,26 @@ async def transcribe_ep(
         raise HTTPException(status_code=502, detail=f"Transkripsi gagal: {exc}") from exc
     _log(request, "transkrip-audio", "Transkrip Audio", file.filename or "audio", res)
     return res
+
+
+class ReportPdfIn(BaseModel):
+    html: str = Field(..., min_length=1)
+    filename: str = Field(default="laporan.pdf", max_length=120)
+
+
+@router.post("/report-pdf")
+async def report_pdf_ep(body: ReportPdfIn) -> Response:
+    if len(body.html.encode("utf-8")) > MAX_HTML_BYTES:
+        raise HTTPException(status_code=413, detail="Konten laporan terlalu besar.")
+    name = body.filename.strip() or "laporan.pdf"
+    if not name.lower().endswith(".pdf"):
+        name += ".pdf"
+    try:
+        pdf = render_pdf(body.html)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Render PDF gagal: {exc}") from exc
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )

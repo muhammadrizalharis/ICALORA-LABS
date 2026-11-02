@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { apiPost } from "@/lib/api";
+import { downloadPdfReport } from "@/lib/download";
 import TextInput from "@/components/TextInput";
 
 interface Signals {
@@ -111,13 +112,7 @@ ${flagged ? `<h2>Kalimat yang Ditandai Mirip AI</h2><ul>${flagged}</ul>` : ""}
 <h2>Sinyal Analisis</h2><table>${rows}</table>
 <footer>${esc(res.note)}</footer>
 </body></html>`;
-    const blob = new Blob([html], { type: "text/html" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `laporan-deteksi-ai-${Date.now()}.html`;
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadPdfReport(`laporan-deteksi-ai-${Date.now()}.pdf`, html);
   }
 
   return (
@@ -202,7 +197,7 @@ ${flagged ? `<h2>Kalimat yang Ditandai Mirip AI</h2><ul>${flagged}</ul>` : ""}
             onClick={downloadReport}
             className="rounded-lg border border-c surface-2 px-4 py-2 text-sm font-medium hover:bg-black/5 dark:hover:bg-white/5"
           >
-            ⬇ Unduh laporan (HTML)
+            ⬇ Unduh laporan (PDF)
           </button>
         </div>
       )}
