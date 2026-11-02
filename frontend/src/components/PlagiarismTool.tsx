@@ -57,6 +57,12 @@ function toneForScore(v: number): string {
   return "border-emerald-400 text-emerald-600";
 }
 
+function ringClass(v: number): string {
+  if (v >= 40) return "c-red";
+  if (v >= 15) return "c-amber";
+  return "c-green";
+}
+
 export default function PlagiarismTool() {
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
@@ -75,6 +81,64 @@ export default function PlagiarismTool() {
     } finally {
       setLoading(false);
     }
+  }
+
+  function downloadReport() {
+    if (!report) return;
+    const esc = (s: string) =>
+      s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const now = new Date().toLocaleString("id-ID");
+    const passages = report.matched_passages
+      .map(
+        (p) => `<tr><td class="r">${p.match_ratio.toFixed(0)}%</td><td>&ldquo;${esc(
+          p.sentence,
+        )}&rdquo;${
+          p.source_title ? `<div class="src">↳ ${esc(p.source_title)}${p.source_doi ? ` · ${esc(p.source_doi)}` : ""}</div>` : ""
+        }</td></tr>`,
+      )
+      .join("");
+    const sources = report.sources
+      .map(
+        (s) => `<tr><td class="r">${s.similarity.toFixed(0)}%</td><td>${esc(
+          s.title || "(tanpa judul)",
+        )}<div class="src">${esc(s.source)}${s.pub_year ? ` · ${s.pub_year}` : ""}${
+          s.doi ? ` · ${esc(s.doi)}` : ""
+        }</div></td></tr>`,
+      )
+      .join("");
+    const html = `<!doctype html><html lang="id"><head><meta charset="utf-8">
+<title>Laporan Kemiripan — ICALORA-LABS</title>
+<style>
+  body{font-family:system-ui,Segoe UI,Roboto,sans-serif;color:#1a202c;max-width:820px;margin:32px auto;padding:0 24px;}
+  h1{font-size:20px;margin:0;} .sub{color:#64748b;font-size:12px;margin-bottom:24px;}
+  .scores{display:flex;gap:24px;margin:16px 0 28px;}
+  .ring{border:4px solid;border-radius:50%;width:92px;height:92px;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;}
+  .ring.c-red{border-color:#f87171;color:#dc2626;} .ring.c-amber{border-color:#fbbf24;color:#d97706;} .ring.c-green{border-color:#34d399;color:#059669;}
+  .lbl{font-size:11px;color:#64748b;text-align:center;margin-top:6px;max-width:100px;}
+  h2{font-size:14px;border-bottom:1px solid #e2e8f0;padding-bottom:6px;margin-top:28px;}
+  table{width:100%;border-collapse:collapse;font-size:12px;} td{padding:8px;border-bottom:1px solid #eef2f7;vertical-align:top;}
+  td.r{width:52px;font-weight:700;text-align:center;} .src{color:#94a3b8;font-size:11px;margin-top:3px;}
+  .meta{font-size:12px;color:#64748b;} footer{margin-top:40px;color:#94a3b8;font-size:11px;text-align:center;}
+  @media print{body{margin:0;}}
+</style></head><body>
+<h1>Laporan Indeks Kemiripan</h1>
+<div class="sub">ICALORA-LABS · MRH INNOVEX — dibuat ${esc(now)}</div>
+<div class="scores">
+  <div><div class="ring ${ringClass(report.overall_similarity)}">${report.overall_similarity.toFixed(0)}%</div><div class="lbl">Indeks Kemiripan (salinan)</div></div>
+  <div><div class="ring ${ringClass(report.paraphrase_similarity)}">${report.paraphrase_similarity.toFixed(0)}%</div><div class="lbl">Risiko Parafrase (semantik)</div></div>
+</div>
+<div class="meta">${report.word_count} kata · ${report.char_count} karakter · ${report.matched_sentences}/${report.total_sentences} kalimat cocok persis · ${report.sources.length} sumber dibandingkan.</div>
+${passages ? `<h2>Kalimat Terdeteksi Menyalin</h2><table>${passages}</table>` : ""}
+<h2>Sumber Teratas</h2><table>${sources}</table>
+<footer>Dibandingkan dengan korpus akses-terbuka ICALORA-LABS. Laporan ini bersifat indikatif untuk tinjauan akademik.</footer>
+</body></html>`;
+    const blob = new Blob([html], { type: "text/html" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `laporan-kemiripan-${Date.now()}.html`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   return (
@@ -123,6 +187,12 @@ export default function PlagiarismTool() {
               <div>
                 {report.matched_sentences}/{report.total_sentences} kalimat cocok persis
               </div>
+              <button
+                onClick={downloadReport}
+                className="mt-2 rounded-lg border border-c px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-white/5"
+              >
+                ⬇ Unduh Laporan
+              </button>
             </div>
           </div>
 
