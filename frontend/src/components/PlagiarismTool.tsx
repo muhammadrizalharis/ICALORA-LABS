@@ -17,9 +17,22 @@ interface Source {
   snippet: string;
 }
 
+interface MatchedPassage {
+  sentence: string;
+  match_ratio: number;
+  source_title: string | null;
+  source_doi: string | null;
+  doc_id: number | null;
+}
+
 interface Report {
   overall_similarity: number;
+  document_lexical_similarity: number;
   paraphrase_similarity: number;
+  similarity_index: number;
+  matched_sentences: number;
+  total_sentences: number;
+  matched_passages: MatchedPassage[];
   word_count: number;
   char_count: number;
   sources: Source[];
@@ -107,8 +120,54 @@ export default function PlagiarismTool() {
             <div className="text-sm text-neutral-500 dark:text-neutral-400">
               <div>{report.word_count} kata · {report.char_count} karakter</div>
               <div>{report.sources.length} sumber teratas ditemukan</div>
+              <div>
+                {report.matched_sentences}/{report.total_sentences} kalimat cocok persis
+              </div>
             </div>
           </div>
+
+          {report.matched_passages.length > 0 && (
+            <div>
+              <div className="mb-2 text-sm font-semibold text-neutral-800 dark:text-neutral-200">
+                Kalimat Terdeteksi Menyalin ({report.matched_passages.length})
+              </div>
+              <ul className="space-y-2">
+                {report.matched_passages.map((p, i) => (
+                  <li
+                    key={i}
+                    className="rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900/50 dark:bg-amber-950/30"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <p className="text-xs text-neutral-700 dark:text-neutral-200">
+                        &ldquo;{p.sentence}&rdquo;
+                      </p>
+                      <span className="shrink-0 text-xs font-bold text-amber-600 dark:text-amber-400">
+                        {p.match_ratio.toFixed(0)}%
+                      </span>
+                    </div>
+                    {p.source_title && (
+                      <div className="mt-1 text-[11px] text-neutral-400">
+                        ↳ {p.source_title}
+                        {p.source_doi && (
+                          <>
+                            {" · "}
+                            <a
+                              href={`https://doi.org/${p.source_doi}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="underline"
+                            >
+                              {p.source_doi}
+                            </a>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           <div>
             <div className="mb-2 text-sm font-semibold text-neutral-800 dark:text-neutral-200">Sumber Teratas</div>
