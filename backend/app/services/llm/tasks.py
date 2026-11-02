@@ -210,3 +210,62 @@ def build_resume(info: str, target_role: str | None = None) -> dict:
     ]
     result = llm.chat(messages, temperature=0.4, max_tokens=1200)
     return {"resume_markdown": result, "target_role": target_role}
+
+
+def generate_toc(text: str) -> dict:
+    """Buat Daftar Isi Otomatis: susun struktur bab/sub-bab dari dokumen."""
+    llm = get_llm()
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "Anda penyusun struktur dokumen akademik. Dari isi dokumen pengguna, "
+                "susun Daftar Isi berjenjang (bab & sub-bab). Balas HANYA JSON valid: "
+                '{"entries": [{"level": <1-3>, "title": "<judul>", '
+                '"number": "<1 / 1.1 / 1.1.1>"}], "markdown": "<daftar isi dalam Markdown>"}'
+            ),
+        },
+        {"role": "user", "content": text},
+    ]
+    raw = llm.chat(messages, temperature=0.2, max_tokens=1200)
+    try:
+        return _extract_json(raw)
+    except json.JSONDecodeError:
+        return {"entries": [], "markdown": raw[:1500]}
+
+
+def improve_document(text: str, goal: str | None = None) -> dict:
+    """Perbaikan Dokumen: sunting dokumen agar lebih jelas, rapi, dan baku."""
+    llm = get_llm()
+    goal_line = f" Fokus perbaikan: {goal}." if goal else ""
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "Anda editor akademik profesional. Perbaiki dokumen pengguna: tata bahasa, "
+                "kejelasan, alur, dan gaya baku — tanpa mengubah makna, data, atau bahasa "
+                "asli." + goal_line + " Balas HANYA teks dokumen hasil perbaikan."
+            ),
+        },
+        {"role": "user", "content": text},
+    ]
+    improved = llm.chat(messages, temperature=0.3, max_tokens=2048)
+    return {"improved": improved, "goal": goal}
+
+
+def doc_chat(context: str, messages: list[dict]) -> dict:
+    """Chat PDF/Dokumen: tanya-jawab berdasarkan isi dokumen yang diunggah."""
+    llm = get_llm()
+    sys_prompt = (
+        "Anda asisten yang menjawab pertanyaan HANYA berdasarkan dokumen berikut. "
+        "Jika jawaban tidak ada dalam dokumen, katakan terus terang. Gunakan bahasa "
+        "yang sama dengan pengguna.\n\n=== DOKUMEN ===\n" + context[:12000] + "\n=== AKHIR ==="
+    )
+    convo = [{"role": "system", "content": sys_prompt}]
+    for m in messages[-12:]:
+        role = m.get("role")
+        content = (m.get("content") or "").strip()
+        if role in ("user", "assistant") and content:
+            convo.append({"role": role, "content": content})
+    reply = llm.chat(convo, temperature=0.3, max_tokens=1024)
+    return {"reply": reply}

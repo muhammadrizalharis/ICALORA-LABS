@@ -8,17 +8,22 @@ from app.services.auth import optional_user_from_request, record_history
 from app.services.authorship import analyze_authorship
 from app.services.citation import find_citations
 from app.services.file_extract import MAX_UPLOAD_BYTES, extract_text
+from app.services.hidden_text import check_hidden_text
 from app.services.llm.tasks import (
     build_resume,
     chat,
+    doc_chat,
+    generate_toc,
     grade_essay,
     grammar_check,
     humanize,
+    improve_document,
     paraphrase,
     reader_reactions,
     rewrite,
 )
 from app.services.plagiarism import check_plagiarism
+from app.services.publikasi import recommend_journals
 from app.services.text_tools import analyze_text
 
 router = APIRouter(prefix="/tools", tags=["tools"])
@@ -67,6 +72,23 @@ class ResumeIn(BaseModel):
 
 class AuthorshipIn(TextIn):
     compare: str | None = Field(default=None)
+
+
+class ImproveIn(TextIn):
+    goal: str | None = Field(default=None)
+
+
+class HiddenTextIn(TextIn):
+    check_typos: bool = Field(default=True)
+
+
+class DocChatIn(BaseModel):
+    context: str = Field(..., min_length=1)
+    messages: list[ChatMessage] = Field(..., min_length=1)
+
+
+class PublikasiIn(TextIn):
+    top_k: int = Field(default=10, ge=1, le=30)
 
 
 def _guard(text: str) -> None:
@@ -251,3 +273,61 @@ def authorship_ep(body: AuthorshipIn, request: Request) -> dict:
         return res
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Analisis kepenulisan gagal: {exc}") from exc
+
+
+@router.post("/toc")
+def toc_ep(body: TextIn, request: Request) -> dict:
+    _guard(body.text)
+    try:
+        res = generate_toc(body.text)
+        _log(request, "daftar-isi", "Daftar Isi Otomatis", body.text[:200], res)
+        return res
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"LLM gagal: {exc}") from exc
+
+
+@router.post("/improve")
+def improve_ep(body: ImproveIn, request: Request) -> dict:
+    _guard(body.text)
+    try:
+        res = improve_document(body.text, body.goal)
+        _log(request, "perbaikan-dokumen", "Perbaikan Dokumen", body.text[:200], res)
+        return res
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"LLM gagal: {exc}") from exc
+
+
+@router.post("/hidden-text")
+def hidden_text_ep(body: HiddenTextIn, request: Request) -> dict:
+    _guard(body.text)
+    try:
+        res = check_hidden_text(body.text, body.check_typos)
+        _log(request, "hidden-text", "Cek Hidden Text & Typo", body.text[:200], res)
+        return res
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Pemindaian gagal: {exc}") from exc
+
+
+@router.post("/doc-chat")
+def doc_chat_ep(body: DocChatIn, request: Request) -> dict:
+    total = len(body.context) + sum(len(m.content) for m in body.messages)
+    if total > MAX_CHARS * 2:
+        raise HTTPException(status_code=413, detail="Dokumen + percakapan terlalu panjang.")
+    try:
+        res = doc_chat(body.context, [m.model_dump() for m in body.messages])
+        last = next((m.content for m in reversed(body.messages) if m.role == "user"), "")
+        _log(request, "chat-pdf", "Chat PDF", last[:200], res)
+        return res
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"LLM gagal: {exc}") from exc
+
+
+@router.post("/publikasi")
+def publikasi_ep(body: PublikasiIn, request: Request) -> dict:
+    _guard(body.text)
+    try:
+        res = recommend_journals(body.text, body.top_k)
+        _log(request, "publikasi-jurnal", "Publikasi Jurnal", body.text[:200], res)
+        return res
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Rekomendasi publikasi gagal: {exc}") from exc

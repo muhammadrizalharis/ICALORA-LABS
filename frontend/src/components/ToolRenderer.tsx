@@ -10,6 +10,11 @@ import ResumeTool from "@/components/tools/ResumeTool";
 import CitationTool from "@/components/tools/CitationTool";
 import AiDetectorTool from "@/components/tools/AiDetectorTool";
 import AuthorshipTool from "@/components/tools/AuthorshipTool";
+import TocTool from "@/components/tools/TocTool";
+import ImproveTool from "@/components/tools/ImproveTool";
+import HiddenTextTool from "@/components/tools/HiddenTextTool";
+import PublikasiTool from "@/components/tools/PublikasiTool";
+import ChatPdfTool from "@/components/tools/ChatPdfTool";
 
 type SimpleTool = {
   endpoint: string;
@@ -50,6 +55,11 @@ const RICH_TOOLS: Record<string, React.ComponentType> = {
   "citation-finder": CitationTool,
   "ai-detector": AiDetectorTool,
   authorship: AuthorshipTool,
+  "daftar-isi": TocTool,
+  "perbaikan-dokumen": ImproveTool,
+  "hidden-text": HiddenTextTool,
+  "publikasi-jurnal": PublikasiTool,
+  "chat-pdf": ChatPdfTool,
 };
 
 export default function ToolRenderer({ slug }: { slug: string }) {

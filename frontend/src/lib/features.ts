@@ -25,6 +25,11 @@ export const FEATURES: Feature[] = [
   { slug: "ai-detector", name: "AI Detector", group: "berat", phase: 4, status: "active", icon: "🤖", desc: "Deteksi konten buatan AI tingkat kalimat." },
   { slug: "authorship", name: "Authorship", group: "berat", phase: 4, status: "active", icon: "🕵️", desc: "Analisis gaya & verifikasi kepenulisan." },
   { slug: "plagiarism-checker", name: "Plagiarism Checker", group: "berat", phase: 3, status: "active", icon: "🛡️", desc: "Cek kemiripan dengan 1 juta+ dokumen." },
+  { slug: "chat-pdf", name: "Chat PDF", group: "api", phase: 2, status: "active", icon: "📚", desc: "Tanya-jawab langsung dari isi dokumen." },
+  { slug: "hidden-text", name: "Cek Hidden Text & Typo", group: "ringan", phase: 1, status: "active", icon: "🔍", desc: "Deteksi karakter tersembunyi & salah ketik." },
+  { slug: "daftar-isi", name: "Daftar Isi Otomatis", group: "ringan", phase: 1, status: "active", icon: "📑", desc: "Susun daftar isi berjenjang otomatis." },
+  { slug: "perbaikan-dokumen", name: "Perbaikan Dokumen", group: "ringan", phase: 1, status: "active", icon: "🧹", desc: "Sunting dokumen agar rapi & baku." },
+  { slug: "publikasi-jurnal", name: "Publikasi Jurnal", group: "api", phase: 2, status: "active", icon: "📰", desc: "Rekomendasi jurnal & kesiapan publikasi." },
 ];
 
 export const GROUP_LABEL: Record<FeatureGroup, string> = {
