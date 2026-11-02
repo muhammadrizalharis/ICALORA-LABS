@@ -54,6 +54,18 @@ class Settings(BaseSettings):
     telegram_bot_secret: str = Field(default="")  # wajib untuk perintah krusial
     backend_base_url: str = Field(default="http://127.0.0.1:58010")
 
+    # Auth / sesi
+    session_secret: str = Field(default="icalora-dev-secret-change-me")
+    session_cookie: str = Field(default="icalora_session")
+    session_ttl_days: int = Field(default=30)
+    frontend_base_url: str = Field(default="http://localhost:58030")
+    allow_demo_login: bool = Field(default=True)
+    google_client_id: str = Field(default="")
+    google_client_secret: str = Field(default="")
+    google_redirect_uri: str = Field(
+        default="http://localhost:58030/api/backend/auth/google/callback"
+    )
+
     @property
     def database_url(self) -> str:
         return (
