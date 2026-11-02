@@ -25,6 +25,11 @@ from app.services.llm.tasks import (
 from app.services.plagiarism import check_plagiarism
 from app.services.publikasi import recommend_journals
 from app.services.text_tools import analyze_text
+from app.services.transkrip import (
+    MAX_AUDIO_BYTES,
+    is_supported,
+    transcribe_audio,
+)
 
 router = APIRouter(prefix="/tools", tags=["tools"])
 
@@ -331,3 +336,30 @@ def publikasi_ep(body: PublikasiIn, request: Request) -> dict:
         return res
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Rekomendasi publikasi gagal: {exc}") from exc
+
+
+@router.post("/transcribe")
+async def transcribe_ep(
+    request: Request,
+    file: UploadFile = File(...),  # noqa: B008
+    language: str | None = None,
+) -> dict:
+    if not is_supported(file.filename or ""):
+        raise HTTPException(
+            status_code=422,
+            detail="Format tidak didukung. Gunakan mp3/wav/m4a/ogg/mp4/webm, dll.",
+        )
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Berkas kosong.")
+    if len(data) > MAX_AUDIO_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Berkas melebihi {MAX_AUDIO_BYTES // (1024 * 1024)} MB.",
+        )
+    try:
+        res = transcribe_audio(file.filename or "audio", data, language)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Transkripsi gagal: {exc}") from exc
+    _log(request, "transkrip-audio", "Transkrip Audio", file.filename or "audio", res)
+    return res

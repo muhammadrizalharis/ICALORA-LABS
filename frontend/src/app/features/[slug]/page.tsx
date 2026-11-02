@@ -15,6 +15,7 @@ import ImproveTool from "@/components/tools/ImproveTool";
 import HiddenTextTool from "@/components/tools/HiddenTextTool";
 import PublikasiTool from "@/components/tools/PublikasiTool";
 import ChatPdfTool from "@/components/tools/ChatPdfTool";
+import TranskripTool from "@/components/tools/TranskripTool";
 
 export function generateStaticParams() {
   return FEATURES.map((f) => ({ slug: f.slug }));
@@ -65,6 +66,7 @@ const RICH_TOOLS: Record<string, React.ComponentType> = {
   "hidden-text": HiddenTextTool,
   "publikasi-jurnal": PublikasiTool,
   "chat-pdf": ChatPdfTool,
+  "transkrip-audio": TranskripTool,
 };
 
 export default async function FeaturePage({

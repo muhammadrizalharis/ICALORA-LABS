@@ -30,6 +30,7 @@ export const FEATURES: Feature[] = [
   { slug: "daftar-isi", name: "Daftar Isi Otomatis", group: "ringan", phase: 1, status: "active", icon: "📑", desc: "Susun daftar isi berjenjang otomatis." },
   { slug: "perbaikan-dokumen", name: "Perbaikan Dokumen", group: "ringan", phase: 1, status: "active", icon: "🧹", desc: "Sunting dokumen agar rapi & baku." },
   { slug: "publikasi-jurnal", name: "Publikasi Jurnal", group: "api", phase: 2, status: "active", icon: "📰", desc: "Rekomendasi jurnal & kesiapan publikasi." },
+  { slug: "transkrip-audio", name: "Transkrip Audio", group: "berat", phase: 4, status: "active", icon: "🎧", desc: "Ubah audio/video menjadi teks berwaktu." },
 ];
 
 export const GROUP_LABEL: Record<FeatureGroup, string> = {
