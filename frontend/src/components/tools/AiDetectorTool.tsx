@@ -8,6 +8,9 @@ interface Signals {
   burstiness: number;
   type_token_ratio: number;
   avg_sentence_length: number;
+  bigram_repetition: number;
+  cliche_density: number;
+  personal_ratio: number;
   sentence_count: number;
   word_count: number;
   stat_score: number;
@@ -18,6 +21,7 @@ interface DetectResult {
   stat_probability?: number;
   llm_probability?: number | null;
   signals: Signals;
+  flagged_sentences: string[];
   note: string;
 }
 
@@ -95,6 +99,10 @@ export default function AiDetectorTool() {
               ["Burstiness", res.signals.burstiness],
               ["Keragaman kata", res.signals.type_token_ratio],
               ["Panjang kalimat", res.signals.avg_sentence_length],
+              ["Pengulangan bigram", res.signals.bigram_repetition],
+              ["Kepadatan klise", res.signals.cliche_density],
+              ["Nada personal", res.signals.personal_ratio],
+              ["Jumlah kalimat", res.signals.sentence_count],
               ["Jumlah kata", res.signals.word_count],
             ].map(([l, v]) => (
               <div key={l as string} className="rounded-xl border border-c surface-2 p-4">
@@ -103,6 +111,23 @@ export default function AiDetectorTool() {
               </div>
             ))}
           </div>
+          {res.flagged_sentences?.length > 0 && (
+            <div className="rounded-xl border border-c surface-2 p-5">
+              <div className="mb-3 text-sm font-semibold">
+                Kalimat yang ditandai mirip AI ({res.flagged_sentences.length})
+              </div>
+              <ul className="space-y-2">
+                {res.flagged_sentences.map((s, i) => (
+                  <li
+                    key={i}
+                    className="rounded-lg border-l-4 border-rose-400 bg-rose-50 p-3 text-sm text-neutral-700 dark:bg-rose-950/40 dark:text-neutral-200"
+                  >
+                    {s}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
             ⚠️ {res.note}
           </p>

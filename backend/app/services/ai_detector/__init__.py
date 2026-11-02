@@ -1,13 +1,15 @@
 """AI Detector — estimasi probabilitas teks dihasilkan AI.
 
 Pendekatan jujur (bukan klaim 100% akurat): gabungan sinyal statistik gaya
-tulisan + penilaian LLM. Teks AI cenderung punya "burstiness" rendah (variasi
-panjang kalimat kecil), keberagaman kosakata moderat-seragam, dan sedikit
-penanda personal. Semua sinyal digabung jadi skor indikatif.
+tulisan + penilaian LLM, plus penyorotan kalimat yang paling "mirip AI".
+Teks AI cenderung punya "burstiness" rendah (variasi panjang kalimat kecil),
+keberagaman kosakata moderat-seragam, sedikit penanda personal, dan banyak
+frasa klise/transisi generik. Semua sinyal digabung jadi skor indikatif.
 """
 
 from __future__ import annotations
 
+import json
 import math
 import re
 
@@ -15,6 +17,19 @@ from app.services.llm.provider import get_llm
 
 _WORD_RE = re.compile(r"\b[\w'-]+\b", re.UNICODE)
 _SENT_RE = re.compile(r"[^.!?]+[.!?]*")
+
+# Penanda "suara personal" (kontraksi/kata ganti) yang jarang pada teks AI formal.
+_PERSONAL = {
+    "i", "we", "my", "our", "me", "us", "saya", "aku", "kami", "kita", "ku",
+}
+# Frasa transisi/klise yang sering muncul pada teks AI.
+_AI_CLICHES = (
+    "moreover", "furthermore", "in conclusion", "it is important to note",
+    "overall", "in today's world", "plays a crucial role", "a wide range of",
+    "it is worth noting", "in summary", "delve into", "navigating the",
+    "selain itu", "di sisi lain", "secara keseluruhan", "penting untuk dicatat",
+    "dalam kesimpulan", "memainkan peran penting", "tidak dapat dipungkiri",
+)
 
 
 def _sentences(text: str) -> list[str]:
@@ -39,6 +54,29 @@ def _type_token_ratio(words: list[str]) -> float:
     return len({w.lower() for w in words}) / len(words)
 
 
+def _bigram_repetition(words: list[str]) -> float:
+    """Proporsi bigram berulang (tinggi = pola repetitif seperti AI)."""
+    if len(words) < 3:
+        return 0.0
+    lw = [w.lower() for w in words]
+    bigrams = [(lw[i], lw[i + 1]) for i in range(len(lw) - 1)]
+    unique = len(set(bigrams))
+    return 1.0 - unique / len(bigrams)
+
+
+def _cliche_density(text: str) -> float:
+    low = text.lower()
+    hits = sum(low.count(c) for c in _AI_CLICHES)
+    words = max(len(_WORD_RE.findall(text)), 1)
+    return min(hits / words * 100.0, 3.0) / 3.0
+
+
+def _personal_ratio(words: list[str]) -> float:
+    if not words:
+        return 0.0
+    return sum(1 for w in words if w.lower() in _PERSONAL) / len(words)
+
+
 def _statistical_signals(text: str) -> dict:
     words = _WORD_RE.findall(text)
     sents = _sentences(text)
@@ -47,47 +85,66 @@ def _statistical_signals(text: str) -> dict:
     burst = _burstiness(sent_lengths)
     ttr = _type_token_ratio(words)
     avg_len = sum(sent_lengths) / len(sent_lengths)
-    # variasi panjang kalimat rendah -> indikasi AI
-    len_uniformity = 1.0 - min(burst / 0.6, 1.0)
-    # TTR sangat rendah (repetitif) sedikit menaikkan skor
-    repetition = 1.0 - min(ttr / 0.5, 1.0)
+    bigram_rep = _bigram_repetition(words)
+    cliche = _cliche_density(text)
+    personal = _personal_ratio(words)
 
-    stat_score = max(0.0, min(1.0, 0.65 * len_uniformity + 0.35 * repetition))
+    len_uniformity = 1.0 - min(burst / 0.6, 1.0)
+    repetition = 1.0 - min(ttr / 0.5, 1.0)
+    low_personal = 1.0 - min(personal / 0.03, 1.0)
+
+    stat_score = max(
+        0.0,
+        min(
+            1.0,
+            0.40 * len_uniformity
+            + 0.20 * repetition
+            + 0.15 * bigram_rep
+            + 0.15 * cliche
+            + 0.10 * low_personal,
+        ),
+    )
     return {
         "burstiness": round(burst, 3),
         "type_token_ratio": round(ttr, 3),
         "avg_sentence_length": round(avg_len, 1),
+        "bigram_repetition": round(bigram_rep, 3),
+        "cliche_density": round(cliche, 3),
+        "personal_ratio": round(personal, 4),
         "sentence_count": len(sents),
         "word_count": len(words),
         "stat_score": round(stat_score, 3),
     }
 
 
-def _llm_judgment(text: str) -> float | None:
-    """Minta LLM menilai 0-100 kemungkinan teks ditulis AI."""
-    import json
-
+def _llm_analysis(text: str) -> dict:
+    """Minta LLM menilai probabilitas AI + kalimat yang paling mirip AI."""
     llm = get_llm()
     messages = [
         {
             "role": "system",
             "content": (
                 "Nilai kemungkinan teks berikut ditulis oleh AI (model bahasa) "
-                "dibanding manusia. Pertimbangkan keseragaman, klise, dan kurangnya "
-                'suara personal. Balas HANYA JSON: {"ai_probability": <0-100>}'
+                "dibanding manusia. Pertimbangkan keseragaman, klise, pola generik, "
+                "dan kurangnya suara personal. Balas HANYA JSON: "
+                '{"ai_probability": <0-100>, '
+                '"ai_sentences": ["<kalimat yang paling mirip AI, verbatim>", ...]}'
             ),
         },
         {"role": "user", "content": text[:6000]},
     ]
     try:
-        raw = llm.chat(messages, temperature=0.0, max_tokens=60).strip()
+        raw = llm.chat(messages, temperature=0.0, max_tokens=400).strip()
         raw = re.sub(r"^```(?:json)?|```$", "", raw).strip()
         m = re.search(r"\{.*\}", raw, re.DOTALL)
         data = json.loads(m.group(0) if m else raw)
-        val = float(data.get("ai_probability"))
-        return max(0.0, min(100.0, val))
+        prob = data.get("ai_probability")
+        prob = max(0.0, min(100.0, float(prob))) if prob is not None else None
+        sents = data.get("ai_sentences", [])
+        sents = [s.strip() for s in sents if isinstance(s, str) and s.strip()][:10]
+        return {"prob": prob, "sentences": sents}
     except Exception:  # noqa: BLE001
-        return None
+        return {"prob": None, "sentences": []}
 
 
 def detect_ai(text: str) -> dict:
@@ -99,18 +156,17 @@ def detect_ai(text: str) -> dict:
             "verdict": "tidak cukup teks",
             "note": "Butuh minimal ~20 kata untuk analisis yang bermakna.",
             "signals": _statistical_signals(text),
+            "flagged_sentences": [],
         }
 
     signals = _statistical_signals(text)
     stat_pct = signals["stat_score"] * 100
-    llm_pct = _llm_judgment(text)
+    analysis = _llm_analysis(text)
+    llm_pct = analysis["prob"]
 
-    if llm_pct is None:
-        final = stat_pct
-    else:
-        final = 0.45 * stat_pct + 0.55 * llm_pct
-
+    final = stat_pct if llm_pct is None else 0.45 * stat_pct + 0.55 * llm_pct
     final = round(max(0.0, min(100.0, final)), 1)
+
     if final >= 70:
         verdict = "kemungkinan besar AI"
     elif final >= 45:
@@ -118,12 +174,20 @@ def detect_ai(text: str) -> dict:
     else:
         verdict = "kemungkinan besar manusia"
 
+    flagged: list[str] = []
+    low_text = text.lower()
+    for s in analysis["sentences"]:
+        key = s.lower()[:40]
+        if key and key in low_text:
+            flagged.append(s)
+
     return {
         "ai_probability": final,
         "verdict": verdict,
         "stat_probability": round(stat_pct, 1),
         "llm_probability": round(llm_pct, 1) if llm_pct is not None else None,
         "signals": signals,
+        "flagged_sentences": flagged,
         "note": (
             "Hasil bersifat indikatif, bukan bukti absolut. Deteksi AI tidak pernah "
             "100% akurat; gunakan sebagai pertimbangan, bukan vonis."
