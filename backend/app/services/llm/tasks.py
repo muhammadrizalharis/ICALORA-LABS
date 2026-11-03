@@ -212,9 +212,43 @@ def build_resume(info: str, target_role: str | None = None) -> dict:
     return {"resume_markdown": result, "target_role": target_role}
 
 
+def _toc_source(text: str, max_chars: int = 14000) -> str:
+    """Padatkan dokumen panjang menjadi sumber TOC (baris-baris judul).
+
+    Dokumen bisa puluhan ribu karakter; mengirim utuh ke LLM lambat/timeout.
+    Untuk daftar isi kita hanya butuh struktur, jadi kita ambil baris yang
+    berpotensi judul di seluruh dokumen, lalu batasi panjangnya.
+    """
+    if len(text) <= max_chars:
+        return text
+
+    num_re = re.compile(r"^\s*(?:bab|chapter|bagian|part)\b", re.IGNORECASE)
+    dotted_re = re.compile(r"^\s*\d+(?:\.\d+)*[\.\)]?\s+\S")
+    lines = text.splitlines()
+    candidates: list[str] = []
+    for ln in lines:
+        s = ln.strip()
+        if not s or len(s) > 120:
+            continue
+        words = s.split()
+        is_heading = (
+            num_re.match(s)
+            or dotted_re.match(s)
+            or (s.isupper() and len(words) >= 1)
+            or (len(s) <= 70 and s == s.title())
+            or len(words) <= 8
+        )
+        if is_heading:
+            candidates.append(s)
+
+    condensed = "\n".join(candidates) if len(candidates) >= 3 else text
+    return condensed[:max_chars]
+
+
 def generate_toc(text: str) -> dict:
     """Buat Daftar Isi Otomatis: susun struktur bab/sub-bab dari dokumen."""
     llm = get_llm()
+    source = _toc_source(text)
     messages = [
         {
             "role": "system",
@@ -225,7 +259,7 @@ def generate_toc(text: str) -> dict:
                 '"number": "<1 / 1.1 / 1.1.1>"}], "markdown": "<daftar isi dalam Markdown>"}'
             ),
         },
-        {"role": "user", "content": text},
+        {"role": "user", "content": source},
     ]
     raw = llm.chat(messages, temperature=0.2, max_tokens=1200)
     try:

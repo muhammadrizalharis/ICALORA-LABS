@@ -1,8 +1,5 @@
 import type { NextConfig } from "next";
 
-// Target backend untuk proxy API (server-side). Tidak terekspos ke browser.
-const BACKEND_ORIGIN = process.env.BACKEND_ORIGIN ?? "http://127.0.0.1:58010";
-
 const nextConfig: NextConfig = {
   /* config options here */
   cacheComponents: true,
@@ -15,16 +12,9 @@ const nextConfig: NextConfig = {
       },
     },
   },
-  // Proxy same-origin: browser memanggil /api/backend/* → diteruskan ke backend.
-  // Menghindari CORS & kebutuhan forward port backend terpisah.
-  async rewrites() {
-    return [
-      {
-        source: "/api/backend/:path*",
-        destination: `${BACKEND_ORIGIN}/:path*`,
-      },
-    ];
-  },
+  // Proxy same-origin ke backend ditangani oleh Route Handler
+  // (src/app/api/backend/[...path]/route.ts) agar tidak terkena batas
+  // waktu 30 detik milik rewrites bawaan Next untuk tugas LLM yang berat.
 };
 
 export default nextConfig;
