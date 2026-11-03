@@ -26,7 +26,7 @@ const WHY = [
   { icon: "⚖️", title: "100% Legal", desc: "Hanya korpus akses-terbuka (CC0/CC-BY). Bebas masalah hak cipta." },
   { icon: "🔒", title: "Privasi Penuh", desc: "Self-hosted. Dokumen Anda tidak pernah dijual atau dibagikan." },
   { icon: "🚀", title: "Cepat & GPU", desc: "Didukung akselerasi GPU untuk hasil nyaris seketika." },
-  { icon: "💸", title: "Tanpa Biaya Mahal", desc: "Alternatif Turnitin tanpa langganan yang menguras kantong." },
+  { icon: "💸", title: "Tanpa Biaya Mahal", desc: "Deteksi plagiarisme & AI yang sah dan terpercaya, tanpa langganan yang menguras kantong." },
 ];
 
 export default function Home() {
@@ -43,7 +43,7 @@ export default function Home() {
             <div>
               <span className="inline-flex items-center gap-2 rounded-full border border-c bg-white/70 px-3 py-1 text-xs font-medium text-neutral-700 shadow-sm dark:bg-white/5 dark:text-neutral-200">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                Alternatif Turnitin yang legal & self-hosted
+                Deteksi plagiarisme & AI yang sah, transparan & terpercaya
               </span>
 
               <h1 className="mt-5 text-4xl font-extrabold leading-[1.1] tracking-tight text-neutral-900 sm:text-5xl lg:text-6xl dark:text-white">

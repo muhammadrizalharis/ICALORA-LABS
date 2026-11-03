@@ -37,6 +37,10 @@ interface Report {
   word_count: number;
   char_count: number;
   sources: Source[];
+  report_id?: string;
+  content_sha256?: string;
+  corpus_size?: number;
+  generated_at?: string;
 }
 
 function ScoreRing({ value, label, tone }: { value: number; label: string; tone: string }) {
@@ -270,8 +274,12 @@ export default function PlagiarismTool() {
   @media print{body{margin:0;}}
 </style></head><body>
 <div class="head">
-  <div><h1>Laporan Indeks Kemiripan</h1><div class="brand">ICALORA-LABS · MRH INNOVEX — Alternatif Turnitin (self-hosted)</div></div>
-  <div class="sid">Dibuat ${escHtml(now)}<br>Korpus akses-terbuka (CC0/CC-BY)</div>
+  <div><h1>Laporan Indeks Kemiripan</h1><div class="brand">ICALORA-LABS · MRH INNOVEX — Deteksi plagiarisme yang sah & terpercaya (self-hosted)</div></div>
+  <div class="sid">ID Laporan: <b>${escHtml(report.report_id || "-")}</b><br>Dibuat ${escHtml(
+    report.generated_at ? new Date(report.generated_at).toLocaleString("id-ID") : now,
+  )}<br>Dibandingkan dengan <b>${(report.corpus_size || 0).toLocaleString(
+    "id-ID",
+  )}</b> dokumen akses-terbuka (CC0/CC-BY)</div>
 </div>
 <div class="hero">
   <div class="ring ${ringCls}"><span class="big">${idx.toFixed(0)}%</span><span class="cap">SIMILARITY</span></div>
@@ -293,7 +301,13 @@ ${
 <div class="doc">${hiText || escHtml(text)}</div>
 <p class="legend">Teks yang disorot cocok dengan sumber bernomor sesuai warna pada Ringkasan Kecocokan di atas.</p>
 <h2>Sumber Teratas</h2><table>${sources}</table>
-<footer>Dibandingkan dengan korpus akses-terbuka ICALORA-LABS. Laporan ini bersifat indikatif untuk tinjauan akademik, bukan vonis plagiarisme final.</footer>
+<footer>Dibandingkan dengan <b>${(report.corpus_size || 0).toLocaleString(
+      "id-ID",
+    )}</b> dokumen korpus akses-terbuka ICALORA-LABS. ID Laporan <b>${escHtml(
+      report.report_id || "-",
+    )}</b> · Hash integritas SHA-256: ${escHtml(
+      (report.content_sha256 || "").slice(0, 32),
+    )}…<br>Laporan ini bersifat indikatif untuk tinjauan akademik, bukan vonis plagiarisme final. ID &amp; hash bersifat reproducible: teks yang sama menghasilkan ID yang sama sehingga laporan dapat diverifikasi.</footer>
 </body></html>`;
     downloadPdfReport(`laporan-kemiripan-${Date.now()}.pdf`, html);
   }
@@ -329,6 +343,18 @@ ${
 
       {report && (
         <div className="space-y-5 rounded-xl border border-c p-5">
+          {report.report_id && (
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-c bg-neutral-50 px-3 py-2 text-[11px] text-neutral-500 dark:bg-white/5 dark:text-neutral-400">
+              <span>🆔 ID Laporan: <span className="font-mono font-semibold text-neutral-700 dark:text-neutral-200">{report.report_id}</span></span>
+              <span>📚 Dibandingkan dengan <span className="font-semibold text-neutral-700 dark:text-neutral-200">{(report.corpus_size || 0).toLocaleString("id-ID")}</span> dokumen akses-terbuka</span>
+              {report.content_sha256 && (
+                <span>🔒 SHA-256: <span className="font-mono">{report.content_sha256.slice(0, 16)}…</span></span>
+              )}
+              {report.generated_at && (
+                <span>🕒 {new Date(report.generated_at).toLocaleString("id-ID")}</span>
+              )}
+            </div>
+          )}
           <div className="flex flex-wrap items-center gap-8">
             <ScoreRing
               value={report.overall_similarity}

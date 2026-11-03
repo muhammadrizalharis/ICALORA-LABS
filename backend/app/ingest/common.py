@@ -28,7 +28,7 @@ def ensure_schema() -> None:
 
 
 # Lisensi yang mengizinkan penyimpanan & pemakaian full-text pada produk
-# komersial (pengganti Turnitin). Hanya yang benar-benar permisif.
+# deteksi plagiarisme. Hanya yang benar-benar permisif.
 # NC (non-komersial) & ND (tanpa turunan) DIKECUALIKAN demi aman hukum.
 _FULLTEXT_OK = {
     "cc0",

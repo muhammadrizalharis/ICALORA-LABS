@@ -3,7 +3,7 @@
 > **Web / Produk:** ICALORA-LABS &nbsp;·&nbsp; **Perusahaan:** MRH INNOVEX
 > *"ICALORA-LABS — Where scholarship meets truth."*
 
-Platform AI akademik serba-bisa: **plagiarism checker, AI detector, paraphraser, humanizer, grammar checker, citation finder, AI grader**, dan lainnya — alternatif yang lebih terjangkau untuk Turnitin & sejenisnya, dibangun **mandiri** dengan **korpus & sumber daya milik sendiri** dari sumber **open-access yang legal**.
+Platform AI akademik serba-bisa: **plagiarism checker, AI detector, paraphraser, humanizer, grammar checker, citation finder, AI grader**, dan lainnya — solusi deteksi plagiarisme & AI yang **sah, transparan, dan terpercaya**, dibangun **mandiri** dengan **korpus & sumber daya milik sendiri** dari sumber **open-access yang legal**.
 
 ---
 

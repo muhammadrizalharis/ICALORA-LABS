@@ -36,8 +36,8 @@ const TIPS = [
 
 const FAQ = [
   {
-    q: "Apakah ICALORA-LABS seakurat Turnitin?",
-    a: "Kami membandingkan ke korpus 1 juta+ dokumen akses-terbuka dari OpenAlex, PMC, DOAJ, dan sumber publisher lainnya, lalu akan terus bertambah. Untuk teks akademik berbahasa umum, hasilnya sangat kompetitif.",
+    q: "Seberapa akurat deteksi plagiarisme ICALORA-LABS?",
+    a: "Kami membandingkan ke korpus 1 juta+ dokumen akses-terbuka dari OpenAlex, PMC, DOAJ, dan sumber publisher lainnya, lalu akan terus bertambah. Metodologi dan keterbatasannya kami buka secara transparan di halaman Metodologi. Untuk teks akademik berbahasa umum, hasilnya sangat kompetitif.",
   },
   {
     q: "Apakah data saya disimpan atau dijual?",
@@ -45,7 +45,7 @@ const FAQ = [
   },
   {
     q: "Berapa biayanya?",
-    a: "Gratis. Tujuan kami menyediakan alternatif Turnitin tanpa langganan mahal.",
+    a: "Gratis. Tujuan kami menyediakan deteksi plagiarisme yang sah dan terpercaya tanpa langganan mahal.",
   },
   {
     q: "Dari mana sumber datanya?",

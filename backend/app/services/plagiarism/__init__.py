@@ -13,7 +13,9 @@ menyusul (chunk-level).
 
 from __future__ import annotations
 
+import hashlib
 import re
+from datetime import datetime, timezone
 
 from sqlalchemy import text
 
@@ -42,7 +44,7 @@ def _sentences(s: str) -> list[str]:
 
 
 def _chunk_match(doc: str, candidates: list[dict], threshold: float = 0.55) -> dict:
-    """Pencocokan tingkat-kalimat (gaya Turnitin) terhadap dokumen kandidat.
+    """Pencocokan tingkat-kalimat (tingkat kalimat) terhadap dokumen kandidat.
 
     Untuk tiap kalimat masukan, hitung containment shingle terhadap gabungan
     shingle tiap dokumen kandidat; kalimat dengan containment tinggi ditandai
@@ -116,6 +118,32 @@ def _vec_literal(vec: list[float]) -> str:
     return "[" + ",".join(f"{x:.6f}" for x in vec) + "]"
 
 
+_corpus_cache: dict[str, object] = {"size": 0, "ts": 0.0}
+
+
+def _corpus_size() -> int:
+    """Jumlah dokumen korpus (cache 5 menit) untuk cakupan laporan yang jujur."""
+    import time
+
+    now = time.time()
+    if now - float(_corpus_cache["ts"]) < 300 and int(_corpus_cache["size"]) > 0:
+        return int(_corpus_cache["size"])
+    try:
+        with engine.connect() as conn:
+            n = conn.execute(text("SELECT count(*) FROM corpus_documents")).scalar() or 0
+    except Exception:  # noqa: BLE001
+        n = int(_corpus_cache["size"])
+    _corpus_cache["size"] = int(n)
+    _corpus_cache["ts"] = now
+    return int(n)
+
+
+def _report_id(doc: str, generated_at: datetime) -> str:
+    """ID laporan reproducible: teks sama + tanggal sama → ID sama (dapat diverifikasi)."""
+    h = hashlib.sha256(doc.encode("utf-8")).hexdigest()
+    return f"ICL-{generated_at:%Y%m%d}-{h[:10].upper()}"
+
+
 def check_plagiarism(doc: str, top_k: int = 10) -> dict:
     """Bandingkan `doc` dengan korpus; kembalikan laporan kemiripan."""
     doc = doc.strip()
@@ -154,18 +182,19 @@ def check_plagiarism(doc: str, top_k: int = 10) -> dict:
             }
         )
 
-    # Pencocokan tingkat-kalimat untuk indeks kemiripan gaya Turnitin.
+    # Pencocokan tingkat-kalimat untuk indeks kemiripan tingkat kalimat.
     chunk = _chunk_match(doc, sources)
     for s in sources:
         s.pop("_fulltext", None)
 
     sources.sort(key=lambda s: (s["lexical_similarity"], s["semantic_similarity"]), reverse=True)
-    # Indeks kemiripan utama = kecocokan leksikal/salinan (gaya Turnitin).
+    # Indeks kemiripan utama = kecocokan leksikal/salinan (tingkat kalimat).
     # Semantik dilaporkan terpisah sebagai risiko parafrase (butuh ambang tinggi).
     overall = max((s["lexical_similarity"] for s in sources), default=0.0)
     paraphrase = max((s["semantic_similarity"] for s in sources), default=0.0)
     # Gabungkan: indeks utama = maksimum antara coverage kalimat dan leksikal dokumen.
     similarity_index = max(overall, chunk["similarity_index"])
+    generated_at = datetime.now(timezone.utc)
     return {
         "overall_similarity": similarity_index,
         "document_lexical_similarity": overall,
@@ -177,4 +206,8 @@ def check_plagiarism(doc: str, top_k: int = 10) -> dict:
         "word_count": wc,
         "char_count": cc,
         "sources": sources,
+        "report_id": _report_id(doc, generated_at),
+        "content_sha256": hashlib.sha256(doc.encode("utf-8")).hexdigest(),
+        "corpus_size": _corpus_size(),
+        "generated_at": generated_at.isoformat(timespec="seconds"),
     }

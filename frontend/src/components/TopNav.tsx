@@ -13,6 +13,7 @@ const GROUPS: FeatureGroup[] = ["berat", "ringan", "api"];
 const NAV = [
   { href: "/", label: "Beranda" },
   { href: "/cara-pakai", label: "Cara Pakai" },
+  { href: "/metodologi", label: "Metodologi" },
 ];
 
 export default function TopNav() {

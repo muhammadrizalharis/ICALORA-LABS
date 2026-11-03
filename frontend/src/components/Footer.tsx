@@ -19,8 +19,8 @@ export default function Footer() {
             </span>
           </div>
           <p className="mt-4 max-w-xs text-sm leading-relaxed text-neutral-600 dark:text-neutral-400">
-            Alternatif Turnitin yang legal & self-hosted. Deteksi plagiarisme dan AI terhadap
-            1&nbsp;juta+ dokumen akses-terbuka — cepat, aman, dan transparan.
+            Platform deteksi plagiarisme & AI yang sah dan terpercaya, self-hosted. Membandingkan
+            tulisan dengan 1&nbsp;juta+ dokumen akses-terbuka — cepat, aman, dan transparan.
           </p>
           <p className="mt-4 text-xs text-neutral-500 dark:text-neutral-500">by MRH INNOVEX</p>
         </div>
@@ -46,6 +46,11 @@ export default function Footer() {
             <li>
               <Link href="/cara-pakai" className="transition hover:text-neutral-900 dark:hover:text-white">
                 Cara Pakai
+              </Link>
+            </li>
+            <li>
+              <Link href="/metodologi" className="transition hover:text-neutral-900 dark:hover:text-white">
+                Metodologi &amp; Keterbatasan
               </Link>
             </li>
             <li>
