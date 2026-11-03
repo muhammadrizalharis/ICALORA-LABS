@@ -64,6 +64,129 @@ function ringClass(v: number): string {
   return "c-green";
 }
 
+const HILITE = [
+  { bg: "#fde68a", bd: "#d97706" },
+  { bg: "#bfdbfe", bd: "#2563eb" },
+  { bg: "#bbf7d0", bd: "#16a34a" },
+  { bg: "#fbcfe8", bd: "#db2777" },
+  { bg: "#ddd6fe", bd: "#7c3aed" },
+  { bg: "#fed7aa", bd: "#ea580c" },
+  { bg: "#a5f3fc", bd: "#0891b2" },
+  { bg: "#e9d5ff", bd: "#9333ea" },
+];
+
+function escHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+interface SrcAgg {
+  key: string;
+  title: string | null;
+  doi: string | null;
+  color: number;
+  chars: number;
+  count: number;
+  pct: number;
+}
+
+function passageKey(p: MatchedPassage): string {
+  return p.source_title || (p.doc_id != null ? `doc-${p.doc_id}` : "src");
+}
+
+/** Bangun HTML dokumen dengan sorotan warna per sumber + ringkasan kontribusi. */
+function buildHighlight(
+  original: string,
+  passages: MatchedPassage[],
+  charCount: number,
+): { html: string; sources: SrcAgg[] } {
+  const map = new Map<string, SrcAgg>();
+  const order: string[] = [];
+  for (const p of passages) {
+    const key = passageKey(p);
+    if (!map.has(key)) {
+      map.set(key, {
+        key,
+        title: p.source_title,
+        doi: p.source_doi,
+        color: order.length % HILITE.length,
+        chars: 0,
+        count: 0,
+        pct: 0,
+      });
+      order.push(key);
+    }
+  }
+
+  const lower = original.toLowerCase();
+  const ranges: { start: number; end: number; key: string }[] = [];
+  for (const p of passages) {
+    const needle = p.sentence.trim().toLowerCase();
+    if (needle.length < 10) continue;
+    let idx = lower.indexOf(needle);
+    let len = needle.length;
+    if (idx < 0) {
+      const frag = needle.slice(0, 80);
+      idx = lower.indexOf(frag);
+      len = frag.length;
+      if (idx < 0) continue;
+    }
+    ranges.push({ start: idx, end: idx + len, key: passageKey(p) });
+  }
+
+  ranges.sort((a, b) => a.start - b.start);
+  const merged: { start: number; end: number; key: string }[] = [];
+  let lastEnd = -1;
+  for (const r of ranges) {
+    if (r.start >= lastEnd) {
+      merged.push(r);
+      lastEnd = r.end;
+    }
+  }
+
+  let html = "";
+  let pos = 0;
+  for (const r of merged) {
+    if (r.start > pos) html += escHtml(original.slice(pos, r.start));
+    const agg = map.get(r.key)!;
+    const c = HILITE[agg.color];
+    html += `<span class="hl" style="background:${c.bg};border-bottom:2px solid ${c.bd};">${escHtml(
+      original.slice(r.start, r.end),
+    )}</span>`;
+    agg.chars += r.end - r.start;
+    agg.count += 1;
+    pos = r.end;
+  }
+  if (pos < original.length) html += escHtml(original.slice(pos));
+
+  const sources = order
+    .map((k) => {
+      const a = map.get(k)!;
+      a.pct = Math.round((a.chars / Math.max(charCount, 1)) * 1000) / 10;
+      return a;
+    })
+    .filter((a) => a.count > 0)
+    .sort((a, b) => b.pct - a.pct);
+  return { html, sources };
+}
+
+function verdictFor(v: number): { label: string; note: string } {
+  if (v >= 40)
+    return {
+      label: "Kemiripan tinggi",
+      note: "Indeks kemiripan tinggi — banyak bagian cocok dengan sumber. Perlu ditinjau serius dan diparafrase/disitasi.",
+    };
+  if (v >= 15)
+    return {
+      label: "Kemiripan sedang",
+      note: "Terdapat kemiripan pada beberapa bagian — tinjau teks yang disorot dan pastikan sudah disitasi dengan benar.",
+    };
+  return {
+    label: "Kemiripan rendah",
+    note: "Indeks kemiripan rendah — dokumen relatif orisinal terhadap korpus yang dibandingkan.",
+  };
+}
+
+
 export default function PlagiarismTool() {
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
@@ -86,55 +209,96 @@ export default function PlagiarismTool() {
 
   function downloadReport() {
     if (!report) return;
-    const esc = (s: string) =>
-      s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     const now = new Date().toLocaleString("id-ID");
-    const passages = report.matched_passages
-      .map(
-        (p) => `<tr><td class="r">${p.match_ratio.toFixed(0)}%</td><td>&ldquo;${esc(
-          p.sentence,
-        )}&rdquo;${
-          p.source_title ? `<div class="src">↳ ${esc(p.source_title)}${p.source_doi ? ` · ${esc(p.source_doi)}` : ""}</div>` : ""
-        }</td></tr>`,
-      )
+    const idx = report.overall_similarity;
+    const v = verdictFor(idx);
+    const { html: hiText, sources: hiSources } = buildHighlight(
+      text,
+      report.matched_passages,
+      report.char_count,
+    );
+
+    const overview = hiSources
+      .map((s, i) => {
+        const c = HILITE[s.color];
+        return `<tr>
+  <td class="num"><span class="swatch" style="background:${c.bg};border:1px solid ${c.bd};">${i + 1}</span></td>
+  <td class="pct">${s.pct.toFixed(1)}%</td>
+  <td>${escHtml(s.title || "(tanpa judul)")}${
+    s.doi ? `<div class="src">${escHtml(s.doi)}</div>` : ""
+  }<div class="src">${s.count} bagian cocok</div></td>
+</tr>`;
+      })
       .join("");
+
     const sources = report.sources
       .map(
-        (s) => `<tr><td class="r">${s.similarity.toFixed(0)}%</td><td>${esc(
+        (s) => `<tr><td class="pct">${s.similarity.toFixed(0)}%</td><td>${escHtml(
           s.title || "(tanpa judul)",
-        )}<div class="src">${esc(s.source)}${s.pub_year ? ` · ${s.pub_year}` : ""}${
-          s.doi ? ` · ${esc(s.doi)}` : ""
-        }</div></td></tr>`,
+        )}<div class="src">${escHtml(s.source)}${s.pub_year ? ` · ${s.pub_year}` : ""}${
+          s.doi ? ` · ${escHtml(s.doi)}` : ""
+        } · salinan ${s.lexical_similarity.toFixed(0)}% · semantik ${s.semantic_similarity.toFixed(
+          0,
+        )}%</div></td></tr>`,
       )
       .join("");
+
+    const ringCls = ringClass(idx);
     const html = `<!doctype html><html lang="id"><head><meta charset="utf-8">
 <title>Laporan Kemiripan — ICALORA-LABS</title>
 <style>
-  body{font-family:system-ui,Segoe UI,Roboto,sans-serif;color:#1a202c;max-width:820px;margin:32px auto;padding:0 24px;}
-  h1{font-size:20px;margin:0;} .sub{color:#64748b;font-size:12px;margin-bottom:24px;}
-  .scores{display:flex;gap:24px;margin:16px 0 28px;}
-  .ring{border:4px solid;border-radius:50%;width:92px;height:92px;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;}
+  body{font-family:system-ui,Segoe UI,Roboto,sans-serif;color:#1a202c;max-width:820px;margin:28px auto;padding:0 28px;font-size:13px;line-height:1.5;}
+  .head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #0e1726;padding-bottom:12px;}
+  h1{font-size:19px;margin:0;} .brand{font-size:11px;color:#64748b;margin-top:2px;}
+  .sid{font-size:11px;color:#94a3b8;text-align:right;}
+  .hero{display:flex;gap:22px;align-items:center;margin:22px 0 10px;}
+  .ring{border:7px solid;border-radius:50%;width:112px;height:112px;display:flex;flex-direction:column;align-items:center;justify-content:center;flex:none;}
+  .ring .big{font-size:30px;font-weight:800;line-height:1;} .ring .cap{font-size:9px;letter-spacing:.5px;margin-top:3px;}
   .ring.c-red{border-color:#f87171;color:#dc2626;} .ring.c-amber{border-color:#fbbf24;color:#d97706;} .ring.c-green{border-color:#34d399;color:#059669;}
-  .lbl{font-size:11px;color:#64748b;text-align:center;margin-top:6px;max-width:100px;}
-  h2{font-size:14px;border-bottom:1px solid #e2e8f0;padding-bottom:6px;margin-top:28px;}
-  table{width:100%;border-collapse:collapse;font-size:12px;} td{padding:8px;border-bottom:1px solid #eef2f7;vertical-align:top;}
-  td.r{width:52px;font-weight:700;text-align:center;} .src{color:#94a3b8;font-size:11px;margin-top:3px;}
-  .meta{font-size:12px;color:#64748b;} footer{margin-top:40px;color:#94a3b8;font-size:11px;text-align:center;}
+  .verdict{font-size:17px;font-weight:700;} .vnote{color:#475569;font-size:12px;margin-top:4px;max-width:520px;}
+  .metrics{display:flex;gap:18px;flex-wrap:wrap;margin:8px 0 4px;font-size:12px;color:#334155;}
+  .metrics b{color:#0e1726;}
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:#0e1726;border-bottom:1px solid #e2e8f0;padding-bottom:6px;margin-top:26px;}
+  table{width:100%;border-collapse:collapse;font-size:12px;} td{padding:7px 8px;border-bottom:1px solid #eef2f7;vertical-align:top;}
+  td.pct{width:52px;font-weight:700;text-align:center;color:#0e1726;} td.num{width:30px;}
+  .swatch{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:5px;font-size:11px;font-weight:700;color:#0e1726;}
+  .src{color:#94a3b8;font-size:11px;margin-top:2px;}
+  .doc{border:1px solid #e2e8f0;border-radius:8px;padding:14px 16px;font-size:12.5px;line-height:1.75;white-space:pre-wrap;word-wrap:break-word;background:#fff;}
+  .hl{border-radius:2px;padding:0 1px;}
+  .legend{font-size:11px;color:#64748b;margin:8px 0 0;}
+  footer{margin-top:34px;color:#94a3b8;font-size:11px;text-align:center;border-top:1px solid #e2e8f0;padding-top:12px;}
   @media print{body{margin:0;}}
 </style></head><body>
-<h1>Laporan Indeks Kemiripan</h1>
-<div class="sub">ICALORA-LABS · MRH INNOVEX — dibuat ${esc(now)}</div>
-<div class="scores">
-  <div><div class="ring ${ringClass(report.overall_similarity)}">${report.overall_similarity.toFixed(0)}%</div><div class="lbl">Indeks Kemiripan (salinan)</div></div>
-  <div><div class="ring ${ringClass(report.paraphrase_similarity)}">${report.paraphrase_similarity.toFixed(0)}%</div><div class="lbl">Risiko Parafrase (semantik)</div></div>
+<div class="head">
+  <div><h1>Laporan Indeks Kemiripan</h1><div class="brand">ICALORA-LABS · MRH INNOVEX — Alternatif Turnitin (self-hosted)</div></div>
+  <div class="sid">Dibuat ${escHtml(now)}<br>Korpus akses-terbuka (CC0/CC-BY)</div>
 </div>
-<div class="meta">${report.word_count} kata · ${report.char_count} karakter · ${report.matched_sentences}/${report.total_sentences} kalimat cocok persis · ${report.sources.length} sumber dibandingkan.</div>
-${passages ? `<h2>Kalimat Terdeteksi Menyalin</h2><table>${passages}</table>` : ""}
+<div class="hero">
+  <div class="ring ${ringCls}"><span class="big">${idx.toFixed(0)}%</span><span class="cap">SIMILARITY</span></div>
+  <div><div class="verdict">${v.label}</div><div class="vnote">${v.note}</div></div>
+</div>
+<div class="metrics">
+  <div><b>${report.word_count}</b> kata</div>
+  <div><b>${report.char_count}</b> karakter</div>
+  <div><b>${report.matched_sentences}/${report.total_sentences}</b> kalimat cocok persis</div>
+  <div><b>${report.paraphrase_similarity.toFixed(0)}%</b> risiko parafrase (semantik)</div>
+  <div><b>${report.sources.length}</b> sumber dibandingkan</div>
+</div>
+${
+  overview
+    ? `<h2>Ringkasan Kecocokan (Match Overview)</h2><table>${overview}</table>`
+    : `<p class="legend">Tidak ada kalimat yang cocok persis dengan sumber.</p>`
+}
+<h2>Dokumen dengan Sorotan</h2>
+<div class="doc">${hiText || escHtml(text)}</div>
+<p class="legend">Teks yang disorot cocok dengan sumber bernomor sesuai warna pada Ringkasan Kecocokan di atas.</p>
 <h2>Sumber Teratas</h2><table>${sources}</table>
-<footer>Dibandingkan dengan korpus akses-terbuka ICALORA-LABS. Laporan ini bersifat indikatif untuk tinjauan akademik.</footer>
+<footer>Dibandingkan dengan korpus akses-terbuka ICALORA-LABS. Laporan ini bersifat indikatif untuk tinjauan akademik, bukan vonis plagiarisme final.</footer>
 </body></html>`;
     downloadPdfReport(`laporan-kemiripan-${Date.now()}.pdf`, html);
   }
+
+  const hi = report ? buildHighlight(text, report.matched_passages, report.char_count) : null;
 
   return (
     <div className="space-y-5">
@@ -168,19 +332,21 @@ ${passages ? `<h2>Kalimat Terdeteksi Menyalin</h2><table>${passages}</table>` : 
           <div className="flex flex-wrap items-center gap-8">
             <ScoreRing
               value={report.overall_similarity}
-              label="Indeks Kemiripan (salinan)"
+              label="Similarity Index"
               tone={toneForScore(report.overall_similarity)}
             />
-            <ScoreRing
-              value={report.paraphrase_similarity}
-              label="Risiko Parafrase (semantik)"
-              tone={toneForScore(report.paraphrase_similarity)}
-            />
-            <div className="text-sm text-neutral-500 dark:text-neutral-400">
-              <div>{report.word_count} kata · {report.char_count} karakter</div>
-              <div>{report.sources.length} sumber teratas ditemukan</div>
-              <div>
-                {report.matched_sentences}/{report.total_sentences} kalimat cocok persis
+            <div className="min-w-0 flex-1">
+              <div className="text-lg font-bold text-neutral-900 dark:text-neutral-100">
+                {verdictFor(report.overall_similarity).label}
+              </div>
+              <p className="mt-0.5 max-w-md text-xs text-neutral-500 dark:text-neutral-400">
+                {verdictFor(report.overall_similarity).note}
+              </p>
+              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-neutral-500 dark:text-neutral-400">
+                <span>{report.word_count} kata · {report.char_count} karakter</span>
+                <span>{report.matched_sentences}/{report.total_sentences} kalimat cocok persis</span>
+                <span>Risiko parafrase {report.paraphrase_similarity.toFixed(0)}%</span>
+                <span>{report.sources.length} sumber</span>
               </div>
               <button
                 onClick={downloadReport}
@@ -190,6 +356,48 @@ ${passages ? `<h2>Kalimat Terdeteksi Menyalin</h2><table>${passages}</table>` : 
               </button>
             </div>
           </div>
+
+          {hi && hi.sources.length > 0 && (
+            <div>
+              <div className="mb-2 text-sm font-semibold text-neutral-800 dark:text-neutral-200">
+                Ringkasan Kecocokan ({hi.sources.length} sumber)
+              </div>
+              <ul className="space-y-1.5">
+                {hi.sources.map((s, i) => (
+                  <li key={s.key} className="flex items-center gap-2 text-xs">
+                    <span
+                      className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-[11px] font-bold text-neutral-900"
+                      style={{ background: HILITE[s.color].bg, border: `1px solid ${HILITE[s.color].bd}` }}
+                    >
+                      {i + 1}
+                    </span>
+                    <span className="font-bold text-neutral-700 dark:text-neutral-200">
+                      {s.pct.toFixed(1)}%
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-neutral-500 dark:text-neutral-400">
+                      {s.title || "(tanpa judul)"}
+                      {s.doi ? ` · ${s.doi}` : ""}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {hi && (
+            <div>
+              <div className="mb-2 text-sm font-semibold text-neutral-800 dark:text-neutral-200">
+                Dokumen dengan Sorotan
+              </div>
+              <div
+                className="max-h-80 overflow-auto whitespace-pre-wrap rounded-lg border border-c bg-white p-4 text-sm leading-relaxed text-neutral-800 dark:bg-neutral-900 dark:text-neutral-100"
+                dangerouslySetInnerHTML={{ __html: hi.html || escHtml(text) }}
+              />
+              <p className="mt-1 text-[11px] text-neutral-400">
+                Bagian yang disorot cocok dengan sumber bernomor pada ringkasan di atas.
+              </p>
+            </div>
+          )}
 
           {report.matched_passages.length > 0 && (
             <div>
