@@ -12,7 +12,7 @@ import re
 
 from sqlalchemy import text
 
-from app.core.clients import engine
+from app.core.clients import corpus_size, engine
 from app.services.llm.provider import get_llm
 
 _NEAREST = text(
@@ -29,6 +29,15 @@ _NEAREST = text(
 
 def _vec_literal(vec: list[float]) -> str:
     return "[" + ",".join(f"{x:.6f}" for x in vec) + "]"
+
+
+# Perluas cakupan pencarian HNSW agar menelusuri korpus (1,2 juta+) jauh lebih
+# luas sebelum memilih kandidat terbaik — recall mendekati pemindaian penuh.
+_EF_SEARCH = 500
+
+
+def _set_ef_search(conn) -> None:
+    conn.execute(text(f"SET LOCAL hnsw.ef_search = {_EF_SEARCH}"))
 
 
 def _bibtex_key(title: str | None, year: int | None, doc_id: int) -> str:
@@ -61,7 +70,7 @@ def _format_bibtex(
     return "\n".join(lines)
 
 
-def find_citations(query: str, top_k: int = 8, min_similarity: float = 0.35) -> dict:
+def find_citations(query: str, top_k: int = 15, min_similarity: float = 0.35) -> dict:
     """Cari kandidat sitasi untuk `query` dari korpus."""
     query = query.strip()
     if not query:
@@ -71,6 +80,7 @@ def find_citations(query: str, top_k: int = 8, min_similarity: float = 0.35) -> 
     qvec = llm.embed(query[:4000])
 
     with engine.connect() as conn:
+        _set_ef_search(conn)
         rows = conn.execute(_NEAREST, {"qvec": _vec_literal(qvec), "k": top_k}).all()
 
     citations: list[dict] = []
@@ -93,4 +103,9 @@ def find_citations(query: str, top_k: int = 8, min_similarity: float = 0.35) -> 
             }
         )
 
-    return {"query": query, "count": len(citations), "citations": citations}
+    return {
+        "query": query,
+        "count": len(citations),
+        "citations": citations,
+        "corpus_size": corpus_size(),
+    }

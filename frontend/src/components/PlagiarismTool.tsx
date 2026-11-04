@@ -202,7 +202,7 @@ export default function PlagiarismTool() {
     setError(null);
     setReport(null);
     try {
-      const res = await apiPost<Report>("/tools/plagiarism", { text, top_k: 10 });
+      const res = await apiPost<Report>("/tools/plagiarism", { text, top_k: 30 });
       setReport(res);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Terjadi kesalahan");
@@ -290,7 +290,7 @@ export default function PlagiarismTool() {
   <div><b>${report.char_count}</b> karakter</div>
   <div><b>${report.matched_sentences}/${report.total_sentences}</b> kalimat cocok persis</div>
   <div><b>${report.paraphrase_similarity.toFixed(0)}%</b> risiko parafrase (semantik)</div>
-  <div><b>${report.sources.length}</b> sumber dibandingkan</div>
+  <div><b>${(report.corpus_size || 0).toLocaleString("id-ID")}</b> dokumen dibandingkan · <b>${report.sources.length}</b> sumber teratas</div>
 </div>
 ${
   overview
@@ -372,7 +372,7 @@ ${
                 <span>{report.word_count} kata · {report.char_count} karakter</span>
                 <span>{report.matched_sentences}/{report.total_sentences} kalimat cocok persis</span>
                 <span>Risiko parafrase {report.paraphrase_similarity.toFixed(0)}%</span>
-                <span>{report.sources.length} sumber</span>
+                <span>{(report.corpus_size || 0).toLocaleString("id-ID")} dokumen dibandingkan · {report.sources.length} sumber teratas</span>
               </div>
               <button
                 onClick={downloadReport}

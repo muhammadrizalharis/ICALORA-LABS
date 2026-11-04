@@ -21,6 +21,30 @@ def redis_client() -> redis.Redis:
     return redis.Redis.from_url(settings.redis_url, decode_responses=True)
 
 
+_corpus_cache: dict[str, float] = {"size": 0.0, "ts": 0.0}
+
+
+def corpus_size() -> int:
+    """Jumlah dokumen korpus (cache 5 menit) untuk cakupan laporan yang jujur.
+
+    Dipakai semua fitur berbasis korpus (plagiarisme, sitasi, publikasi) agar
+    melaporkan jumlah dokumen yang sebenarnya dibandingkan secara konsisten.
+    """
+    import time
+
+    now = time.time()
+    if now - _corpus_cache["ts"] < 300 and _corpus_cache["size"] > 0:
+        return int(_corpus_cache["size"])
+    try:
+        with engine.connect() as conn:
+            n = conn.execute(text("SELECT count(*) FROM corpus_documents")).scalar() or 0
+    except Exception:  # noqa: BLE001
+        n = int(_corpus_cache["size"])
+    _corpus_cache["size"] = float(n)
+    _corpus_cache["ts"] = now
+    return int(n)
+
+
 def s3_client():
     return boto3.client(
         "s3",

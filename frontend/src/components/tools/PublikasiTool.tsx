@@ -27,6 +27,7 @@ interface PublikasiResult {
   fields: { field: string; count: number }[];
   sources: { source: string; label: string; count: number }[];
   readiness: Readiness;
+  corpus_size?: number;
   note: string;
 }
 
@@ -42,7 +43,7 @@ export default function PublikasiTool() {
     setError(null);
     setRes(null);
     try {
-      setRes(await apiPost<PublikasiResult>("/tools/publikasi", { text, top_k: 10 }));
+      setRes(await apiPost<PublikasiResult>("/tools/publikasi", { text, top_k: 15 }));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Terjadi kesalahan.");
     } finally {
@@ -109,6 +110,12 @@ export default function PublikasiTool() {
 
           <div className="space-y-2">
             <h3 className="text-sm font-medium">Paper terbit paling relevan (acuan jurnal tujuan)</h3>
+            {res.corpus_size ? (
+              <p className="text-xs text-neutral-400">
+                Dibandingkan dengan {res.corpus_size.toLocaleString("id-ID")} dokumen korpus ·{" "}
+                {res.matches.length} paper paling relevan ditampilkan.
+              </p>
+            ) : null}
             {res.matches.map((m, i) => (
               <div key={i} className="rounded-xl border border-c surface-2 p-3">
                 <div className="flex items-start justify-between gap-2">
@@ -166,7 +173,13 @@ export default function PublikasiTool() {
                     .map((f) => `<span class="pill">${escapeHtml(f.field)} · ${f.count}</span>`)
                     .join("")}</p>`
                 : "") +
-              `<h2>Paper Terbit Paling Relevan</h2><table><thead><tr><th>Relevansi</th><th>Judul</th></tr></thead><tbody>${res.matches
+              `<h2>Paper Terbit Paling Relevan</h2>${
+                res.corpus_size
+                  ? `<p class="muted">Dibandingkan dengan ${res.corpus_size.toLocaleString(
+                      "id-ID",
+                    )} dokumen korpus · ${res.matches.length} paper teratas ditampilkan.</p>`
+                  : ""
+              }<table><thead><tr><th>Relevansi</th><th>Judul</th></tr></thead><tbody>${res.matches
                 .map(
                   (m) =>
                     `<tr><td class="r">${m.relevance}%</td><td>${escapeHtml(

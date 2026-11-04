@@ -21,6 +21,7 @@ interface CitationResult {
   query: string;
   count: number;
   citations: Citation[];
+  corpus_size?: number;
 }
 
 export default function CitationTool() {
@@ -42,7 +43,7 @@ export default function CitationTool() {
     setError(null);
     setRes(null);
     try {
-      setRes(await apiPost<CitationResult>("/tools/citations", { text, top_k: 8 }));
+      setRes(await apiPost<CitationResult>("/tools/citations", { text, top_k: 15 }));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Terjadi kesalahan.");
     } finally {
@@ -73,7 +74,11 @@ export default function CitationTool() {
       {res && (
         <div className="space-y-3">
           <p className="text-sm text-neutral-500 dark:text-neutral-400">
-            {res.count} sumber relevan ditemukan.
+            {res.count} sumber relevan ditemukan
+            {res.corpus_size
+              ? ` dari ${res.corpus_size.toLocaleString("id-ID")} dokumen korpus yang dibandingkan`
+              : ""}
+            .
           </p>
           <ReportBar
             source={text}
@@ -81,7 +86,11 @@ export default function CitationTool() {
             filename="laporan-sitasi"
             disclaimer="Daftar sitasi ditarik dari korpus akses-terbuka berdasarkan relevansi semantik; verifikasi setiap sumber sebelum dikutip. ID Laporan & hash bersifat reproducible sehingga laporan dapat diverifikasi."
             buildBody={() =>
-              `<p class="muted">${res.count} sumber relevan untuk kueri yang diberikan.</p>` +
+              `<p class="muted">${res.count} sumber relevan ditemukan${
+                res.corpus_size
+                  ? ` dari ${res.corpus_size.toLocaleString("id-ID")} dokumen korpus yang dibandingkan`
+                  : ""
+              }.</p>` +
               res.citations
                 .map(
                   (c) =>

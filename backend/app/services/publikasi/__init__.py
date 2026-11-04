@@ -14,7 +14,7 @@ from collections import Counter
 
 from sqlalchemy import text
 
-from app.core.clients import engine
+from app.core.clients import corpus_size, engine
 from app.ingest.common import decompress_text
 from app.services.llm.provider import get_llm
 
@@ -37,6 +37,15 @@ _SOURCE_LABEL = {
 
 def _vec_literal(vec: list[float]) -> str:
     return "[" + ",".join(f"{x:.6f}" for x in vec) + "]"
+
+
+# Perluas cakupan pencarian HNSW agar menelusuri korpus (1,2 juta+) jauh lebih
+# luas sebelum memilih kandidat terbaik — recall mendekati pemindaian penuh.
+_EF_SEARCH = 500
+
+
+def _set_ef_search(conn) -> None:
+    conn.execute(text(f"SET LOCAL hnsw.ef_search = {_EF_SEARCH}"))
 
 
 def _readiness(text_in: str) -> dict:
@@ -63,7 +72,7 @@ def _readiness(text_in: str) -> dict:
         return {"readiness_score": None, "advice": raw[:400]}
 
 
-def recommend_journals(doc: str, top_k: int = 10) -> dict:
+def recommend_journals(doc: str, top_k: int = 15) -> dict:
     """Rekomendasi publikasi berdasarkan kemiripan dengan paper terbit."""
     doc = doc.strip()
     if not doc:
@@ -72,6 +81,7 @@ def recommend_journals(doc: str, top_k: int = 10) -> dict:
     llm = get_llm()
     qvec = llm.embed(doc[:4000])
     with engine.connect() as conn:
+        _set_ef_search(conn)
         rows = conn.execute(_NEAREST, {"qvec": _vec_literal(qvec), "k": top_k}).all()
 
     matches: list[dict] = []
@@ -108,6 +118,7 @@ def recommend_journals(doc: str, top_k: int = 10) -> dict:
         "fields": top_fields,
         "sources": sources,
         "readiness": _readiness(doc),
+        "corpus_size": corpus_size(),
         "note": (
             "Rekomendasi berbasis kemiripan dengan paper terbit akses-terbuka. "
             "Bidang & contoh paper menjadi acuan untuk memilih jurnal tujuan."

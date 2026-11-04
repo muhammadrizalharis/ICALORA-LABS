@@ -47,7 +47,7 @@ class ParaphraseIn(TextIn):
 
 
 class PlagiarismIn(TextIn):
-    top_k: int = Field(default=10, ge=1, le=50)
+    top_k: int = Field(default=30, ge=1, le=60)
 
 
 class RewriteIn(TextIn):
@@ -69,7 +69,7 @@ class GradeIn(TextIn):
 
 
 class CitationIn(TextIn):
-    top_k: int = Field(default=8, ge=1, le=30)
+    top_k: int = Field(default=15, ge=1, le=40)
 
 
 class ResumeIn(BaseModel):
@@ -95,7 +95,7 @@ class DocChatIn(BaseModel):
 
 
 class PublikasiIn(TextIn):
-    top_k: int = Field(default=10, ge=1, le=30)
+    top_k: int = Field(default=15, ge=1, le=40)
 
 
 def _guard(text: str) -> None:

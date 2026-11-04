@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import text
 
-from app.core.clients import engine
+from app.core.clients import corpus_size, engine
 from app.ingest.common import (
     decompress_text,
     make_minhash,
@@ -118,24 +118,23 @@ def _vec_literal(vec: list[float]) -> str:
     return "[" + ",".join(f"{x:.6f}" for x in vec) + "]"
 
 
+# Perluas cakupan pencarian HNSW: semakin tinggi ef_search, semakin banyak
+# kandidat dari seluruh korpus (1,2 juta+) yang ditelusuri sebelum memilih
+# yang paling mirip — recall mendekati pemindaian penuh, bukan sekadar 10.
+_EF_SEARCH = 500
+
+
+def _set_ef_search(conn) -> None:
+    """Naikkan ef_search untuk transaksi ini agar menelusuri korpus jauh lebih luas."""
+    conn.execute(text(f"SET LOCAL hnsw.ef_search = {_EF_SEARCH}"))
+
+
 _corpus_cache: dict[str, object] = {"size": 0, "ts": 0.0}
 
 
 def _corpus_size() -> int:
     """Jumlah dokumen korpus (cache 5 menit) untuk cakupan laporan yang jujur."""
-    import time
-
-    now = time.time()
-    if now - float(_corpus_cache["ts"]) < 300 and int(_corpus_cache["size"]) > 0:
-        return int(_corpus_cache["size"])
-    try:
-        with engine.connect() as conn:
-            n = conn.execute(text("SELECT count(*) FROM corpus_documents")).scalar() or 0
-    except Exception:  # noqa: BLE001
-        n = int(_corpus_cache["size"])
-    _corpus_cache["size"] = int(n)
-    _corpus_cache["ts"] = now
-    return int(n)
+    return corpus_size()
 
 
 def _report_id(doc: str, generated_at: datetime) -> str:
@@ -144,7 +143,7 @@ def _report_id(doc: str, generated_at: datetime) -> str:
     return f"ICL-{generated_at:%Y%m%d}-{h[:10].upper()}"
 
 
-def check_plagiarism(doc: str, top_k: int = 10) -> dict:
+def check_plagiarism(doc: str, top_k: int = 30) -> dict:
     """Bandingkan `doc` dengan korpus; kembalikan laporan kemiripan."""
     doc = doc.strip()
     wc, cc = text_metrics(doc)
@@ -157,6 +156,7 @@ def check_plagiarism(doc: str, top_k: int = 10) -> dict:
     q_mh = minhash_from_bytes(q_mh_bytes) if q_mh_bytes else None
 
     with engine.connect() as conn:
+        _set_ef_search(conn)
         rows = conn.execute(_NEAREST, {"qvec": _vec_literal(qvec), "k": top_k}).all()
 
     sources: list[dict] = []
