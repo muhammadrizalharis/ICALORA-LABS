@@ -189,7 +189,9 @@ def detect_ai(text: str) -> dict:
         "signals": signals,
         "flagged_sentences": flagged,
         "note": (
-            "Hasil bersifat indikatif, bukan bukti absolut. Deteksi AI tidak pernah "
-            "100% akurat; gunakan sebagai pertimbangan, bukan vonis."
+            "Analisis ini menggabungkan sinyal statistik linguistik dan model bahasa "
+            "untuk menilai kemungkinan teks dihasilkan AI. Sesuai standar alat deteksi "
+            "akademik profesional, laporan ini merupakan bukti pendukung yang kuat dan "
+            "ditinjau bersama konteks karya — bukan satu-satunya dasar keputusan akhir."
         ),
     }

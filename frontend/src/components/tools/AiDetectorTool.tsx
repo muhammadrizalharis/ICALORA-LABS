@@ -32,6 +32,47 @@ function probColor(p: number): string {
   return "#22c55e";
 }
 
+function escHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// Sorot kalimat yang ditandai AI secara inline di dalam dokumen asli (gaya laporan akademik).
+function buildAiHighlight(text: string, flagged: string[]): string {
+  const low = text.toLowerCase();
+  const ranges: { start: number; end: number }[] = [];
+  for (const f of flagged) {
+    const needle = f.trim().toLowerCase();
+    if (!needle) continue;
+    let idx = low.indexOf(needle);
+    let len = needle.length;
+    if (idx < 0) {
+      const short = needle.slice(0, 60);
+      idx = low.indexOf(short);
+      len = short.length;
+      if (idx < 0) continue;
+    }
+    ranges.push({ start: idx, end: idx + len });
+  }
+  ranges.sort((a, b) => a.start - b.start);
+  const merged: { start: number; end: number }[] = [];
+  for (const r of ranges) {
+    const last = merged[merged.length - 1];
+    if (last && r.start < last.end) last.end = Math.max(last.end, r.end);
+    else merged.push({ ...r });
+  }
+  let out = "";
+  let cur = 0;
+  for (const r of merged) {
+    out += escHtml(text.slice(cur, r.start));
+    out += `<span class="hl" style="background:#fde68a;border-bottom:2px solid #f59e0b;border-radius:2px;padding:0 1px;">${escHtml(
+      text.slice(r.start, r.end),
+    )}</span>`;
+    cur = r.end;
+  }
+  out += escHtml(text.slice(cur));
+  return out;
+}
+
 export default function AiDetectorTool() {
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
@@ -62,13 +103,13 @@ export default function AiDetectorTool() {
 
   function downloadReport() {
     if (!res) return;
-    const esc = (s: string) =>
-      s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const esc = escHtml;
     const now = new Date().toLocaleString("id-ID");
     const prob = res.ai_probability ?? 0;
     const flagged = (res.flagged_sentences ?? [])
       .map((s) => `<li>&ldquo;${esc(s)}&rdquo;</li>`)
       .join("");
+    const hiDoc = buildAiHighlight(text, res.flagged_sentences ?? []);
     const sg = res.signals;
     const rows = [
       ["Burstiness (variasi panjang kalimat)", sg.burstiness],
@@ -95,6 +136,9 @@ export default function AiDetectorTool() {
   table{width:100%;border-collapse:collapse;font-size:12px;} td{padding:8px;border-bottom:1px solid #eef2f7;vertical-align:top;}
   td.r{width:80px;font-weight:700;text-align:right;}
   ul{font-size:12px;padding-left:18px;} li{margin:6px 0;}
+  .doc{border:1px solid #e2e8f0;border-radius:8px;padding:14px 16px;font-size:12.5px;line-height:1.75;white-space:pre-wrap;word-wrap:break-word;background:#fff;}
+  .doc .hl{background:#fde68a;border-bottom:2px solid #f59e0b;border-radius:2px;padding:0 1px;}
+  .legend{font-size:11px;color:#64748b;margin:8px 0 0;}
   footer{margin-top:40px;color:#94a3b8;font-size:11px;text-align:center;}
   @media print{body{margin:0;}}
 </style></head><body>
@@ -109,6 +153,9 @@ export default function AiDetectorTool() {
     }${typeof res.llm_probability === "number" ? ` · LLM ${res.llm_probability}%` : ""}</div></div>
 </div>
 ${flagged ? `<h2>Kalimat yang Ditandai Mirip AI</h2><ul>${flagged}</ul>` : ""}
+<h2>Dokumen dengan Sorotan</h2>
+<div class="doc">${hiDoc || esc(text)}</div>
+<p class="legend">Bagian yang disorot kuning adalah kalimat yang terindikasi berpola khas tulisan AI.</p>
 <h2>Sinyal Analisis</h2><table>${rows}</table>
 <footer>${esc(res.note)}</footer>
 </body></html>`;
@@ -188,6 +235,20 @@ ${flagged ? `<h2>Kalimat yang Ditandai Mirip AI</h2><ul>${flagged}</ul>` : ""}
                   </li>
                 ))}
               </ul>
+            </div>
+          )}
+          {res.flagged_sentences?.length > 0 && (
+            <div className="rounded-xl border border-c surface-2 p-5">
+              <div className="mb-3 text-sm font-semibold">Dokumen dengan sorotan</div>
+              <div
+                className="ai-doc whitespace-pre-wrap break-words text-sm leading-7 text-neutral-700 dark:text-neutral-200"
+                dangerouslySetInnerHTML={{
+                  __html: buildAiHighlight(text, res.flagged_sentences),
+                }}
+              />
+              <p className="mt-3 text-xs text-neutral-500 dark:text-neutral-400">
+                Bagian yang disorot adalah kalimat yang terindikasi berpola khas tulisan AI.
+              </p>
             </div>
           )}
           <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
