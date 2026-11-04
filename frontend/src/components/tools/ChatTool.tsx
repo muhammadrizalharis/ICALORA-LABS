@@ -2,6 +2,8 @@
 
 import { useRef, useState } from "react";
 import { apiPost } from "@/lib/api";
+import { escapeHtml } from "@/lib/report";
+import ReportBar from "@/components/ReportBar";
 
 interface Msg {
   role: "user" | "assistant";
@@ -59,6 +61,24 @@ export default function ChatTool() {
         {loading && <div className="text-sm text-neutral-400">Mengetik…</div>}
         <div ref={endRef} />
       </div>
+      {messages.length > 0 && (
+        <ReportBar
+          source={messages.map((m) => `${m.role}: ${m.content}`).join("\n")}
+          title="Transkrip Percakapan AI Chat"
+          filename="transkrip-ai-chat"
+          disclaimer="Transkrip percakapan dengan asisten AI sebagai arsip bahan bantu; tinjau kembali setiap jawaban sebelum digunakan. ID Laporan & hash bersifat reproducible sehingga laporan dapat diverifikasi."
+          buildBody={() =>
+            `<h2>Percakapan</h2>${messages
+              .map(
+                (m) =>
+                  `<div style="margin:10px 0"><b>${
+                    m.role === "user" ? "Pengguna" : "Asisten"
+                  }</b><br><div class="doc">${escapeHtml(m.content)}</div></div>`,
+              )
+              .join("")}`
+          }
+        />
+      )}
       {error && (
         <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700 dark:border-rose-900 dark:bg-rose-950 dark:text-rose-300">
           {error}

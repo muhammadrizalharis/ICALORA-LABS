@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { apiPost } from "@/lib/api";
-import { downloadPdfReport } from "@/lib/download";
+import ReportBar from "@/components/ReportBar";
 import TextInput from "@/components/TextInput";
 
 interface Signals {
@@ -95,16 +95,10 @@ export default function AiDetectorTool() {
 
   const p = res?.ai_probability ?? null;
 
-  function ringClass(v: number): string {
-    if (v >= 70) return "c-red";
-    if (v >= 45) return "c-amber";
-    return "c-green";
-  }
 
-  function downloadReport() {
-    if (!res) return;
+  function buildReportBody(): string {
+    if (!res) return "";
     const esc = escHtml;
-    const now = new Date().toLocaleString("id-ID");
     const prob = res.ai_probability ?? 0;
     const flagged = (res.flagged_sentences ?? [])
       .map((s) => `<li>&ldquo;${esc(s)}&rdquo;</li>`)
@@ -121,45 +115,22 @@ export default function AiDetectorTool() {
       ["Jumlah kalimat", sg.sentence_count],
       ["Jumlah kata", sg.word_count],
     ]
-      .map(([l, v]) => `<tr><td>${esc(String(l))}</td><td class="r">${v}</td></tr>`)
+      .map(([l, v]) => `<tr><td>${esc(String(l))}</td><td class="mono" style="text-align:right;font-weight:700">${v}</td></tr>`)
       .join("");
-    const html = `<!doctype html><html lang="id"><head><meta charset="utf-8">
-<title>Laporan Deteksi AI — ICALORA-LABS</title>
-<style>
-  body{font-family:system-ui,Segoe UI,Roboto,sans-serif;color:#1a202c;max-width:820px;margin:32px auto;padding:0 24px;}
-  h1{font-size:20px;margin:0;} .sub{color:#64748b;font-size:12px;margin-bottom:24px;}
-  .scores{display:flex;gap:24px;margin:16px 0 28px;align-items:center;}
-  .ring{border:4px solid;border-radius:50%;width:92px;height:92px;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;}
-  .ring.c-red{border-color:#f87171;color:#dc2626;} .ring.c-amber{border-color:#fbbf24;color:#d97706;} .ring.c-green{border-color:#34d399;color:#059669;}
-  .verdict{font-size:16px;font-weight:600;text-transform:capitalize;} .vsub{font-size:12px;color:#64748b;}
-  h2{font-size:14px;border-bottom:1px solid #e2e8f0;padding-bottom:6px;margin-top:28px;}
-  table{width:100%;border-collapse:collapse;font-size:12px;} td{padding:8px;border-bottom:1px solid #eef2f7;vertical-align:top;}
-  td.r{width:80px;font-weight:700;text-align:right;}
-  ul{font-size:12px;padding-left:18px;} li{margin:6px 0;}
-  .doc{border:1px solid #e2e8f0;border-radius:8px;padding:14px 16px;font-size:12.5px;line-height:1.75;white-space:pre-wrap;word-wrap:break-word;background:#fff;}
-  .doc .hl{background:#fde68a;border-bottom:2px solid #f59e0b;border-radius:2px;padding:0 1px;}
-  .legend{font-size:11px;color:#64748b;margin:8px 0 0;}
-  footer{margin-top:40px;color:#94a3b8;font-size:11px;text-align:center;}
-  @media print{body{margin:0;}}
-</style></head><body>
-<h1>Laporan Deteksi Tulisan AI</h1>
-<div class="sub">ICALORA-LABS · MRH INNOVEX — dibuat ${esc(now)}</div>
-<div class="scores">
-  <div class="ring ${ringClass(prob)}">${prob.toFixed(0)}%</div>
-  <div><div class="verdict">${esc(res.verdict)}</div><div class="vsub">kemungkinan ditulis AI${
-      typeof res.stat_probability === "number"
-        ? ` · statistik ${res.stat_probability}%`
-        : ""
-    }${typeof res.llm_probability === "number" ? ` · LLM ${res.llm_probability}%` : ""}</div></div>
-</div>
-${flagged ? `<h2>Kalimat yang Ditandai Mirip AI</h2><ul>${flagged}</ul>` : ""}
-<h2>Dokumen dengan Sorotan</h2>
-<div class="doc">${hiDoc || esc(text)}</div>
-<p class="legend">Bagian yang disorot kuning adalah kalimat yang terindikasi berpola khas tulisan AI.</p>
-<h2>Sinyal Analisis</h2><table>${rows}</table>
-<footer>${esc(res.note)}</footer>
-</body></html>`;
-    downloadPdfReport(`laporan-deteksi-ai-${Date.now()}.pdf`, html);
+    const pillCls = prob >= 70 ? "pill-bad" : prob >= 45 ? "pill-warn" : "pill-ok";
+    return (
+      `<div class="summary"><span class="pill ${pillCls}">${prob.toFixed(0)}% kemungkinan ditulis AI · ${esc(
+        res.verdict,
+      )}</span></div>` +
+      `<p class="muted">${
+        typeof res.stat_probability === "number" ? `Statistik ${res.stat_probability}%` : ""
+      }${typeof res.llm_probability === "number" ? ` · LLM ${res.llm_probability}%` : ""}</p>` +
+      (flagged ? `<h2>Kalimat yang Ditandai Mirip AI</h2><ul>${flagged}</ul>` : "") +
+      `<h2>Dokumen dengan Sorotan</h2><div class="doc">${hiDoc || esc(text)}</div>` +
+      `<p class="muted">Bagian yang disorot kuning adalah kalimat yang terindikasi berpola khas tulisan AI.</p>` +
+      `<h2>Sinyal Analisis</h2><table>${rows}</table>` +
+      `<p class="muted">${esc(res.note)}</p>`
+    );
   }
 
   return (
@@ -254,12 +225,13 @@ ${flagged ? `<h2>Kalimat yang Ditandai Mirip AI</h2><ul>${flagged}</ul>` : ""}
           <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
             ⚠️ {res.note}
           </p>
-          <button
-            onClick={downloadReport}
-            className="rounded-lg border border-c surface-2 px-4 py-2 text-sm font-medium hover:bg-black/5 dark:hover:bg-white/5"
-          >
-            ⬇ Unduh laporan (PDF)
-          </button>
+          <ReportBar
+            source={text}
+            title="Laporan Deteksi Tulisan AI"
+            filename="laporan-deteksi-ai"
+            disclaimer="Hasil merupakan bukti pendukung berbasis analisis statistik dan model bahasa untuk menilai kemungkinan tulisan dihasilkan AI; gunakan sebagai pertimbangan utama bersama penilaian ahli, bukan satu-satunya dasar keputusan akhir. ID Laporan & hash bersifat reproducible sehingga laporan dapat diverifikasi."
+            buildBody={buildReportBody}
+          />
         </div>
       )}
     </div>

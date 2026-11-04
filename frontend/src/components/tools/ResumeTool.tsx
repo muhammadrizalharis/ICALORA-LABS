@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { apiPost } from "@/lib/api";
+import { escapeHtml } from "@/lib/report";
+import ReportBar from "@/components/ReportBar";
 
 export default function ResumeTool() {
   const [info, setInfo] = useState("");
@@ -72,6 +74,18 @@ export default function ResumeTool() {
             </button>
           </div>
           <pre className="whitespace-pre-wrap font-mono text-xs text-neutral-900 dark:text-neutral-100">{out}</pre>
+          <div className="mt-3">
+            <ReportBar
+              source={info + "\n" + role}
+              title="Laporan Penyusunan CV"
+              filename="laporan-cv"
+              disclaimer="CV disusun otomatis dari data yang Anda masukkan sebagai bahan awal dan sebaiknya disunting kembali sesuai kebutuhan. ID Laporan & hash bersifat reproducible sehingga laporan dapat diverifikasi."
+              buildBody={() =>
+                `${role ? `<p class="muted">Target posisi: ${escapeHtml(role)}</p>` : ""}` +
+                `<h2>CV</h2><div class="doc">${escapeHtml(out)}</div>`
+              }
+            />
+          </div>
         </div>
       )}
     </div>

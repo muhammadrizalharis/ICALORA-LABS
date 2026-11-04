@@ -2,6 +2,8 @@
 
 import { useRef, useState } from "react";
 import { API_BASE } from "@/lib/api";
+import { escapeHtml } from "@/lib/report";
+import ReportBar from "@/components/ReportBar";
 
 interface Segment {
   start: number;
@@ -138,6 +140,32 @@ export default function TranskripTool() {
               {copied ? "Tersalin ✓" : "Salin Transkrip"}
             </button>
           )}
+          <ReportBar
+            source={(fileName ?? "") + "\n" + res.text}
+            title="Laporan Transkrip Audio"
+            filename="laporan-transkrip"
+            disclaimer="Transkrip dihasilkan otomatis oleh model pengenalan suara dan dapat memuat kesalahan; tinjau kembali untuk keperluan resmi. ID Laporan & hash bersifat reproducible sehingga laporan dapat diverifikasi."
+            buildBody={() =>
+              `<p class="muted">${fileName ? `Berkas: ${escapeHtml(fileName)} · ` : ""}Bahasa: ${escapeHtml(
+                res.language,
+              )} (${Math.round(res.language_probability * 100)}%) · Durasi: ${fmt(
+                res.duration,
+              )} · Model: ${escapeHtml(res.model)}</p>` +
+              `<h2>Transkrip</h2><div class="doc">${escapeHtml(
+                res.text || "(Tidak ada ucapan terdeteksi.)",
+              )}</div>` +
+              (res.segments.length
+                ? `<h2>Segmen Berwaktu</h2><table><tbody>${res.segments
+                    .map(
+                      (s) =>
+                        `<tr><td class="mono" style="width:110px">${fmt(s.start)}–${fmt(
+                          s.end,
+                        )}</td><td>${escapeHtml(s.text)}</td></tr>`,
+                    )
+                    .join("")}</tbody></table>`
+                : "")
+            }
+          />
         </div>
       )}
     </div>

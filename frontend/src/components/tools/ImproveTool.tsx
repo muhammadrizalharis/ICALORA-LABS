@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { apiPost } from "@/lib/api";
+import { escapeHtml } from "@/lib/report";
+import ReportBar from "@/components/ReportBar";
 import TextInput from "@/components/TextInput";
 
 interface ImproveResult {
@@ -84,6 +86,16 @@ export default function ImproveTool() {
           >
             {copied ? "Tersalin ✓" : "Salin Hasil"}
           </button>
+          <ReportBar
+            source={text}
+            title="Laporan Perbaikan Dokumen"
+            filename="laporan-perbaikan-dokumen"
+            disclaimer="Hasil perbaikan dihasilkan otomatis sebagai bahan bantu penyuntingan dan sebaiknya ditinjau kembali oleh penulis. ID Laporan & hash bersifat reproducible sehingga laporan dapat diverifikasi."
+            buildBody={() =>
+              `${res.goal ? `<p class="muted">Fokus perbaikan: ${escapeHtml(res.goal)}</p>` : ""}` +
+              `<h2>Dokumen Hasil Perbaikan</h2><div class="doc">${escapeHtml(res.improved)}</div>`
+            }
+          />
         </div>
       )}
     </div>

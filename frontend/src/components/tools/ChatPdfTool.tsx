@@ -2,6 +2,8 @@
 
 import { useRef, useState } from "react";
 import { apiPost, apiUpload } from "@/lib/api";
+import { escapeHtml } from "@/lib/report";
+import ReportBar from "@/components/ReportBar";
 
 interface Msg {
   role: "user" | "assistant";
@@ -109,6 +111,25 @@ export default function ChatPdfTool() {
             {loading && <div className="text-sm text-neutral-400">Membaca dokumen…</div>}
             <div ref={endRef} />
           </div>
+          {messages.length > 0 && (
+            <ReportBar
+              source={(docName ?? "") + "\n" + messages.map((m) => `${m.role}: ${m.content}`).join("\n")}
+              title="Transkrip Tanya-Jawab Dokumen (Chat PDF)"
+              filename="transkrip-chat-pdf"
+              disclaimer="Transkrip tanya-jawab berdasarkan dokumen yang diunggah sebagai arsip bahan bantu; jawaban mengacu pada isi dokumen dan sebaiknya diverifikasi. ID Laporan & hash bersifat reproducible sehingga laporan dapat diverifikasi."
+              buildBody={() =>
+                `${docName ? `<p class="muted">Dokumen: ${escapeHtml(docName)}</p>` : ""}` +
+                `<h2>Percakapan</h2>${messages
+                  .map(
+                    (m) =>
+                      `<div style="margin:10px 0"><b>${
+                        m.role === "user" ? "Pertanyaan" : "Jawaban"
+                      }</b><br><div class="doc">${escapeHtml(m.content)}</div></div>`,
+                  )
+                  .join("")}`
+              }
+            />
+          )}
           <div className="flex gap-2">
             <textarea
               value={input}

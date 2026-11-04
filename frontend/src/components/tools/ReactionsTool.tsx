@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { apiPost } from "@/lib/api";
+import { escapeHtml } from "@/lib/report";
+import ReportBar from "@/components/ReportBar";
 import TextInput from "@/components/TextInput";
 
 interface Reaction {
@@ -88,6 +90,28 @@ export default function ReactionsTool() {
               </div>
             ))}
           </div>
+          <ReportBar
+            source={text}
+            title="Laporan Prediksi Reaksi Pembaca"
+            filename="laporan-reaksi-pembaca"
+            disclaimer="Prediksi reaksi dihasilkan model bahasa sebagai simulasi persona pembaca untuk bahan evaluasi tulisan. ID Laporan & hash bersifat reproducible sehingga laporan dapat diverifikasi."
+            buildBody={() =>
+              `<p>Sentimen keseluruhan: <b>${escapeHtml(
+                res.overall_sentiment ?? "—",
+              )}</b> · Kejelasan: <b>${res.clarity_score ?? "—"}</b> · Keterlibatan: <b>${
+                res.engagement_score ?? "—"
+              }</b></p>` +
+              (res.summary ? `<p class="muted">${escapeHtml(res.summary)}</p>` : "") +
+              `<h2>Reaksi per Persona</h2>${res.reactions
+                .map(
+                  (r) =>
+                    `<div style="margin:10px 0"><b>${escapeHtml(r.persona)}</b> <span class="muted">(${escapeHtml(
+                      r.sentiment,
+                    )})</span><br>${escapeHtml(r.reaction)}</div>`,
+                )
+                .join("")}`
+            }
+          />
         </div>
       )}
     </div>

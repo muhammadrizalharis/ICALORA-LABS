@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { apiPost } from "@/lib/api";
+import { escapeHtml } from "@/lib/report";
+import ReportBar from "@/components/ReportBar";
 import TextInput from "@/components/TextInput";
 
 const TONES: { value: string; label: string }[] = [
@@ -65,9 +67,22 @@ export default function RewriteTool() {
         </div>
       )}
       {out !== null && (
-        <div className="rounded-xl border border-c surface-2 p-4">
-          <div className="mb-2 text-xs font-medium uppercase tracking-wide text-neutral-400">Hasil</div>
-          <p className="whitespace-pre-wrap text-sm text-neutral-900 dark:text-neutral-100">{out}</p>
+        <div className="space-y-2">
+          <div className="rounded-xl border border-c surface-2 p-4">
+            <div className="mb-2 text-xs font-medium uppercase tracking-wide text-neutral-400">Hasil</div>
+            <p className="whitespace-pre-wrap text-sm text-neutral-900 dark:text-neutral-100">{out}</p>
+          </div>
+          <ReportBar
+            source={text}
+            title="Laporan Tulis Ulang (Rewrite)"
+            filename="laporan-tulis-ulang"
+            disclaimer="Hasil tulis ulang dihasilkan otomatis sebagai bahan bantu penulisan dan sebaiknya ditinjau kembali oleh penulis. ID Laporan & hash bersifat reproducible sehingga laporan dapat diverifikasi."
+            buildBody={() =>
+              `<p class="muted">Gaya: ${escapeHtml(tone)}</p>` +
+              `<h2>Teks Asli</h2><div class="doc">${escapeHtml(text)}</div>` +
+              `<h2>Hasil Tulis Ulang</h2><div class="doc">${escapeHtml(out)}</div>`
+            }
+          />
         </div>
       )}
     </div>

@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { apiPost } from "@/lib/api";
+import { escapeHtml } from "@/lib/report";
+import ReportBar from "@/components/ReportBar";
 import TextInput from "@/components/TextInput";
 
 interface Match {
@@ -137,6 +139,45 @@ export default function PublikasiTool() {
             ))}
           </div>
           <p className="text-xs text-neutral-400">{res.note}</p>
+          <ReportBar
+            source={text}
+            title="Laporan Rekomendasi Publikasi"
+            filename="laporan-publikasi"
+            disclaimer="Rekomendasi publikasi dan skor kesiapan dihasilkan otomatis berdasarkan kemiripan dengan paper terbit di korpus akses-terbuka, sebagai bahan pertimbangan. ID Laporan & hash bersifat reproducible sehingga laporan dapat diverifikasi."
+            buildBody={() =>
+              (r
+                ? `<p>Skor kesiapan: <b>${r.readiness_score ?? "—"}${
+                    r.readiness_score != null ? "/100" : ""
+                  }</b></p>` +
+                  (r.advice ? `<p class="muted">${escapeHtml(r.advice)}</p>` : "") +
+                  (r.gaps && r.gaps.length
+                    ? `<h2>Yang Perlu Diperbaiki</h2><ul>${r.gaps
+                        .map((g) => `<li>${escapeHtml(g)}</li>`)
+                        .join("")}</ul>`
+                    : "") +
+                  (r.strengths && r.strengths.length
+                    ? `<h2>Kekuatan</h2><ul>${r.strengths
+                        .map((s) => `<li>${escapeHtml(s)}</li>`)
+                        .join("")}</ul>`
+                    : "")
+                : "") +
+              (res.fields.length
+                ? `<h2>Bidang Dominan</h2><p>${res.fields
+                    .map((f) => `<span class="pill">${escapeHtml(f.field)} · ${f.count}</span>`)
+                    .join("")}</p>`
+                : "") +
+              `<h2>Paper Terbit Paling Relevan</h2><table><thead><tr><th>Relevansi</th><th>Judul</th></tr></thead><tbody>${res.matches
+                .map(
+                  (m) =>
+                    `<tr><td class="r">${m.relevance}%</td><td>${escapeHtml(
+                      m.title ?? "[Judul tidak tersedia]",
+                    )}<div class="muted">${m.pub_year ?? "?"} · ${escapeHtml(m.source)}${
+                      m.doi ? ` · ${escapeHtml(m.doi)}` : ""
+                    }</div></td></tr>`,
+                )
+                .join("")}</tbody></table>`
+            }
+          />
         </div>
       )}
     </div>

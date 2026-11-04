@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { apiPost } from "@/lib/api";
+import { escapeHtml } from "@/lib/report";
+import ReportBar from "@/components/ReportBar";
 import TextInput from "@/components/TextInput";
 
 interface TocEntry {
@@ -79,6 +81,24 @@ export default function TocTool() {
           >
             {copied ? "Tersalin ✓" : "Salin Markdown"}
           </button>
+          <ReportBar
+            source={text}
+            title="Laporan Daftar Isi"
+            filename="laporan-daftar-isi"
+            disclaimer="Daftar isi disusun otomatis dari struktur dokumen dan sebaiknya diperiksa kembali. ID Laporan & hash bersifat reproducible sehingga laporan dapat diverifikasi."
+            buildBody={() =>
+              `<h2>Daftar Isi</h2><table><tbody>${res.entries
+                .map(
+                  (e) =>
+                    `<tr><td style="width:70px" class="muted">${escapeHtml(
+                      e.number,
+                    )}</td><td style="padding-left:${(e.level - 1) * 18}px">${escapeHtml(
+                      e.title,
+                    )}</td></tr>`,
+                )
+                .join("")}</tbody></table>`
+            }
+          />
         </div>
       )}
     </div>

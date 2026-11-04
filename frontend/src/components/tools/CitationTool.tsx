@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { apiPost } from "@/lib/api";
+import { escapeHtml } from "@/lib/report";
+import ReportBar from "@/components/ReportBar";
 import TextInput from "@/components/TextInput";
 
 interface Citation {
@@ -73,6 +75,27 @@ export default function CitationTool() {
           <p className="text-sm text-neutral-500 dark:text-neutral-400">
             {res.count} sumber relevan ditemukan.
           </p>
+          <ReportBar
+            source={text}
+            title="Laporan Pencarian Sitasi"
+            filename="laporan-sitasi"
+            disclaimer="Daftar sitasi ditarik dari korpus akses-terbuka berdasarkan relevansi semantik; verifikasi setiap sumber sebelum dikutip. ID Laporan & hash bersifat reproducible sehingga laporan dapat diverifikasi."
+            buildBody={() =>
+              `<p class="muted">${res.count} sumber relevan untuk kueri yang diberikan.</p>` +
+              res.citations
+                .map(
+                  (c) =>
+                    `<div style="margin:12px 0"><b>${escapeHtml(
+                      c.title ?? "[Judul tidak tersedia]",
+                    )}</b> <span class="muted">· relevansi ${c.relevance}%</span><br>` +
+                    `<span class="muted">${escapeHtml(c.source)} · ${
+                      c.pub_year ?? "n.d."
+                    }${c.doi ? ` · ${escapeHtml(c.doi)}` : ""}</span><br>` +
+                    `<span>${escapeHtml(c.apa)}</span></div>`,
+                )
+                .join("")
+            }
+          />
           {res.citations.map((c) => (
             <div key={c.doc_id} className="rounded-xl border border-c surface-2 p-4">
               <div className="flex items-start justify-between gap-3">

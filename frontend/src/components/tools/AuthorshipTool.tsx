@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { apiPost } from "@/lib/api";
+import { escapeHtml } from "@/lib/report";
+import ReportBar from "@/components/ReportBar";
 import TextInput from "@/components/TextInput";
 
 interface Profile {
@@ -60,6 +62,22 @@ function ProfileCard({ title, p }: { title: string; p: Profile }) {
       )}
     </div>
   );
+}
+
+function profileRowsHtml(p: Profile): string {
+  const rows: [string, number][] = [
+    ["Kata", p.word_count],
+    ["Kalimat", p.sentence_count],
+    ["Rata² panjang kalimat", p.avg_sentence_length],
+    ["Variasi kalimat (std)", p.sentence_length_std],
+    ["Rata² panjang kata", p.avg_word_length],
+    ["Keragaman kosakata", p.type_token_ratio],
+    ["Hapax ratio", p.hapax_ratio],
+    ["Keterbacaan (Flesch)", p.readability_flesch],
+  ];
+  return `<table><tbody>${rows
+    .map(([l, v]) => `<tr><td>${escapeHtml(l)}</td><td class="r">${v}</td></tr>`)
+    .join("")}</tbody></table>`;
 }
 
 export default function AuthorshipTool() {
@@ -128,6 +146,23 @@ export default function AuthorshipTool() {
             <ProfileCard title={res.comparison ? "Teks A" : "Profil Gaya"} p={res.profile} />
             {res.comparison && <ProfileCard title="Teks B" p={res.comparison.profile_b} />}
           </div>
+          <ReportBar
+            source={text + (res.comparison ? "\u0001" + compare : "")}
+            title="Laporan Analisis Gaya Penulisan (Authorship)"
+            filename="laporan-authorship"
+            disclaimer="Analisis stilometri menyajikan profil kuantitatif gaya penulisan sebagai bahan tinjauan; kesamaan gaya bukan bukti tunggal identitas penulis. ID Laporan & hash bersifat reproducible sehingga laporan dapat diverifikasi."
+            buildBody={() =>
+              (res.comparison
+                ? `<p>Kemiripan gaya: <b>${res.comparison.style_similarity}%</b> — ${escapeHtml(
+                    res.comparison.verdict,
+                  )}</p>`
+                : "") +
+              `<h2>${res.comparison ? "Teks A" : "Profil Gaya"}</h2>${profileRowsHtml(res.profile)}` +
+              (res.comparison
+                ? `<h2>Teks B</h2>${profileRowsHtml(res.comparison.profile_b)}`
+                : "")
+            }
+          />
         </div>
       )}
     </div>

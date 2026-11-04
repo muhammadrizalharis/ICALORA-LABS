@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { apiPost } from "@/lib/api";
+import { escapeHtml } from "@/lib/report";
+import ReportBar from "@/components/ReportBar";
 import TextInput from "@/components/TextInput";
 
 interface Finding {
@@ -131,6 +133,41 @@ export default function HiddenTextTool() {
             {copied ? "Tersalin ✓" : "Salin Teks Bersih"}
           </button>
           <p className="text-xs text-neutral-400">{res.note}</p>
+          <ReportBar
+            source={text}
+            title="Laporan Pindai Teks Tersembunyi & Typo"
+            filename="laporan-teks-tersembunyi"
+            disclaimer="Pemindaian mendeteksi karakter tak-kasatmata dan dugaan typo sebagai bahan tinjauan integritas dokumen. ID Laporan & hash bersifat reproducible sehingga laporan dapat diverifikasi."
+            buildBody={() =>
+              `<p>Tingkat risiko: <b>${escapeHtml(res.risk)}</b> · Karakter tersembunyi: <b>${
+                res.total_hidden
+              }</b> · Dugaan typo: <b>${res.typos.length}</b></p>` +
+              `<h2>Ringkasan Kategori</h2><table><tbody>${Object.entries(res.counts)
+                .map(
+                  ([k, v]) =>
+                    `<tr><td>${escapeHtml(k)}</td><td class="r">${v}</td></tr>`,
+                )
+                .join("")}</tbody></table>` +
+              (res.findings.length
+                ? `<h2>Karakter Tersembunyi</h2><table><thead><tr><th>Karakter</th><th>Codepoint</th><th>Posisi</th></tr></thead><tbody>${res.findings
+                    .map(
+                      (f) =>
+                        `<tr><td>${escapeHtml(f.category)}</td><td class="mono">${escapeHtml(
+                          f.codepoint,
+                        )}</td><td>${f.position}</td></tr>`,
+                    )
+                    .join("")}</tbody></table>`
+                : "") +
+              (res.typos.length
+                ? `<h2>Dugaan Typo</h2><ul>${res.typos
+                    .map(
+                      (t) =>
+                        `<li>${escapeHtml(t.wrong)} → <b>${escapeHtml(t.suggestion)}</b></li>`,
+                    )
+                    .join("")}</ul>`
+                : "")
+            }
+          />
         </div>
       )}
     </div>

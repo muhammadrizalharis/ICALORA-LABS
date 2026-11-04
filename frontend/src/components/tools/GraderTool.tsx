@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { apiPost } from "@/lib/api";
-import { downloadPdfReport } from "@/lib/download";
+import { escapeHtml } from "@/lib/report";
+import ReportBar from "@/components/ReportBar";
 import TextInput from "@/components/TextInput";
 
 interface Criterion {
@@ -49,50 +50,26 @@ export default function GraderTool() {
     }
   }
 
-  function downloadReport() {
-    if (!res) return;
-    const esc = (s: string) =>
-      s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    const now = new Date().toLocaleString("id-ID");
-    const ringClass = (v: number) => (v >= 80 ? "c-green" : v >= 60 ? "c-amber" : "c-red");
+  function buildReportBody(): string {
+    if (!res) return "";
+    const ringClass = (v: number) => (v >= 80 ? "ok" : v >= 60 ? "warn" : "bad");
     const criteria = res.criteria
       .map(
         (c) =>
-          `<tr><td class="r">${c.score}</td><td><b>${esc(c.name)}</b><div class="src">${esc(
-            c.feedback,
-          )}</div></td></tr>`,
+          `<tr><td class="mono" style="text-align:center;font-weight:700">${c.score}</td><td><b>${escapeHtml(
+            c.name,
+          )}</b><div class="muted">${escapeHtml(c.feedback)}</div></td></tr>`,
       )
       .join("");
-    const suggestions = res.suggestions.map((s) => `<li>${esc(s)}</li>`).join("");
-    const html = `<!doctype html><html lang="id"><head><meta charset="utf-8">
-<title>Laporan Penilaian Esai — ICALORA-LABS</title>
-<style>
-  body{font-family:system-ui,Segoe UI,Roboto,sans-serif;color:#1a202c;max-width:820px;margin:32px auto;padding:0 24px;}
-  h1{font-size:20px;margin:0;} .sub{color:#64748b;font-size:12px;margin-bottom:24px;}
-  .scores{display:flex;gap:24px;margin:16px 0 28px;align-items:center;}
-  .ring{border:4px solid;border-radius:50%;width:92px;height:92px;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:700;}
-  .ring.c-red{border-color:#f87171;color:#dc2626;} .ring.c-amber{border-color:#fbbf24;color:#d97706;} .ring.c-green{border-color:#34d399;color:#059669;}
-  .grade{font-size:18px;font-weight:600;} .gsub{font-size:12px;color:#64748b;max-width:520px;}
-  h2{font-size:14px;border-bottom:1px solid #e2e8f0;padding-bottom:6px;margin-top:28px;}
-  table{width:100%;border-collapse:collapse;font-size:12px;} td{padding:8px;border-bottom:1px solid #eef2f7;vertical-align:top;}
-  td.r{width:52px;font-weight:700;text-align:center;} .src{color:#94a3b8;font-size:11px;margin-top:3px;}
-  ul{font-size:12px;padding-left:18px;} li{margin:6px 0;}
-  footer{margin-top:40px;color:#94a3b8;font-size:11px;text-align:center;}
-  @media print{body{margin:0;}}
-</style></head><body>
-<h1>Laporan Penilaian Esai</h1>
-<div class="sub">ICALORA-LABS · MRH INNOVEX — dibuat ${esc(now)}</div>
-<div class="scores">
-  <div class="ring ${ringClass(res.overall_score ?? 0)}">${res.overall_score ?? "–"}</div>
-  <div><div class="grade">Nilai ${esc(res.grade ?? "")}</div><div class="gsub">${esc(
-      res.summary,
-    )}</div></div>
-</div>
-${criteria ? `<h2>Penilaian per Kriteria</h2><table>${criteria}</table>` : ""}
-${suggestions ? `<h2>Saran Perbaikan</h2><ul>${suggestions}</ul>` : ""}
-<footer>Dinilai oleh ICALORA-LABS. Laporan ini bersifat indikatif untuk tinjauan akademik.</footer>
-</body></html>`;
-    downloadPdfReport(`laporan-penilaian-${Date.now()}.pdf`, html);
+    const suggestions = res.suggestions.map((s) => `<li>${escapeHtml(s)}</li>`).join("");
+    return (
+      `<div class="summary"><span class="pill pill-${ringClass(
+        res.overall_score ?? 0,
+      )}">Skor ${res.overall_score ?? "–"} · Nilai ${escapeHtml(res.grade ?? "")}</span></div>` +
+      `<p>${escapeHtml(res.summary)}</p>` +
+      (criteria ? `<h2>Penilaian per Kriteria</h2><table>${criteria}</table>` : "") +
+      (suggestions ? `<h2>Saran Perbaikan</h2><ul>${suggestions}</ul>` : "")
+    );
   }
 
   return (
@@ -165,12 +142,13 @@ ${suggestions ? `<h2>Saran Perbaikan</h2><ul>${suggestions}</ul>` : ""}
               </ul>
             </div>
           )}
-          <button
-            onClick={downloadReport}
-            className="rounded-lg border border-c surface-2 px-4 py-2 text-sm font-medium hover:bg-black/5 dark:hover:bg-white/5"
-          >
-            ⬇ Unduh laporan (PDF)
-          </button>
+          <ReportBar
+            source={text + "\u0001" + (rubric || "")}
+            title="Laporan Penilaian Esai"
+            filename="laporan-penilaian"
+            disclaimer="Penilaian dihasilkan oleh model AI berdasarkan rubrik akademik sebagai bahan pertimbangan tinjauan; keputusan akhir tetap pada penilai manusia. ID Laporan & hash bersifat reproducible sehingga laporan dapat diverifikasi."
+            buildBody={buildReportBody}
+          />
         </div>
       )}
     </div>
