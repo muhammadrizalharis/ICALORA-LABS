@@ -181,8 +181,25 @@ def _get_or_create_job(target: int) -> tuple[int, str | None, int]:
             ),
             {"t": target, "p": json.dumps({"method": "s3-snapshot", "bucket": BUCKET})},
         ).scalar()
-        print(f"[ingest] job baru #{jid} target={target} (snapshot S3)")
-        return jid, None, 0
+        # Lanjutkan dari part terakhir job sebelumnya (jika ada) agar ingest MAJU
+        # ke dokumen baru, bukan mengulang parts yang sama & menghasilkan duplikat.
+        prev_cursor = conn.execute(
+            text(
+                "SELECT cursor FROM ingest_jobs "
+                "WHERE source='openalex' AND id<>:id AND cursor IS NOT NULL "
+                "ORDER BY id DESC LIMIT 1"
+            ),
+            {"id": jid},
+        ).scalar()
+        if prev_cursor:
+            conn.execute(
+                text("UPDATE ingest_jobs SET cursor=:c WHERE id=:id"),
+                {"c": prev_cursor, "id": jid},
+            )
+            print(f"[ingest] job baru #{jid} target={target}, lanjut dari part={prev_cursor}")
+        else:
+            print(f"[ingest] job baru #{jid} target={target} (snapshot S3)")
+        return jid, prev_cursor, 0
 
 
 def _update_job(job_id: int, last_part: str | None, total: int, status: str) -> None:

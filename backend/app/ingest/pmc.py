@@ -164,8 +164,24 @@ def _get_or_create_job(target: int) -> tuple[int, str | None, int]:
             ),
             {"t": target, "p": json.dumps({"method": "s3-per-article", "bucket": BUCKET})},
         ).scalar()
-        print(f"[pmc] job baru #{jid} target={target}")
-        return jid, None, 0
+        # Lanjutkan dari cursor job sebelumnya agar maju ke artikel baru (anti-duplikat).
+        prev_cursor = conn.execute(
+            text(
+                "SELECT cursor FROM ingest_jobs "
+                "WHERE source='pmc' AND id<>:id AND cursor IS NOT NULL "
+                "ORDER BY id DESC LIMIT 1"
+            ),
+            {"id": jid},
+        ).scalar()
+        if prev_cursor:
+            conn.execute(
+                text("UPDATE ingest_jobs SET cursor=:c WHERE id=:id"),
+                {"c": prev_cursor, "id": jid},
+            )
+            print(f"[pmc] job baru #{jid} target={target}, lanjut dari start_after={prev_cursor}")
+        else:
+            print(f"[pmc] job baru #{jid} target={target}")
+        return jid, prev_cursor, 0
 
 
 def _update_job(job_id: int, last_prefix: str | None, total: int, status: str) -> None:
