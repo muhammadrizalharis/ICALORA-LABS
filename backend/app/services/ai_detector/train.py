@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import random
+import re
 
 from sqlalchemy import text
 
@@ -58,6 +59,9 @@ def _human_samples(n: int) -> list[tuple[str, str]]:
         return out
 
 
+_DELIM = "#####"
+
+
 def _ai_sample(llm, title: str) -> str | None:
     topic = title.strip() or "sebuah topik penelitian umum"
     messages = [
@@ -75,6 +79,41 @@ def _ai_sample(llm, title: str) -> str | None:
         return out if len(out.split()) >= 60 else None
     except Exception:  # noqa: BLE001
         return None
+
+
+def _ai_samples_batch(llm, titles: list[str]) -> list[str | None]:
+    """Hasilkan banyak abstrak dalam SATU panggilan LLM (kurangi antre server).
+
+    Mengembalikan daftar sejajar dgn titles (None bila gagal/terlalu pendek).
+    """
+    topics = [t.strip() or "sebuah topik penelitian umum" for t in titles]
+    numbered = "\n".join(f"{i + 1}. {t}" for i, t in enumerate(topics))
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "Untuk SETIAP topik bernomor, tulis satu abstrak akademik 100-180 kata "
+                "dalam gaya formal baku. Pisahkan tiap abstrak dengan baris berisi "
+                f"'{_DELIM}'. Keluarkan HANYA teks abstrak dalam urutan yang sama, "
+                "tanpa nomor, judul, atau catatan tambahan."
+            ),
+        },
+        {"role": "user", "content": f"Topik:\n{numbered}"},
+    ]
+    try:
+        raw = llm.chat(messages, temperature=0.7, max_tokens=240 * len(titles)).strip()
+    except Exception:  # noqa: BLE001
+        return [None] * len(titles)
+    parts = [p.strip() for p in raw.split(_DELIM)]
+    # Buang penomoran sisa di awal tiap bagian.
+    cleaned = [re.sub(r"^\s*\d+[.)]\s*", "", p).strip() for p in parts if p.strip()]
+    out: list[str | None] = []
+    for i in range(len(titles)):
+        if i < len(cleaned) and len(cleaned[i].split()) >= 60:
+            out.append(cleaned[i])
+        else:
+            out.append(None)
+    return out
 
 
 def _evaluate(model, X: list[list[float]], y: list[int]) -> dict:
@@ -109,11 +148,12 @@ def main() -> None:
     ap.add_argument("--per-class", type=int, default=40)
     ap.add_argument("--test-frac", type=float, default=0.25)
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--batch", type=int, default=1, help="abstrak AI per panggilan LLM (1=andal)")
     args = ap.parse_args()
 
     print(f"[train] mengambil {args.per_class} sampel manusia dari korpus…")
     humans = _human_samples(args.per_class)
-    print(f"[train] dapat {len(humans)} sampel manusia; membuat sampel AI via LLM…")
+    print(f"[train] dapat {len(humans)} sampel manusia; membuat sampel AI via LLM (batch)…")
 
     llm = get_llm()
     X: list[list[float]] = []
@@ -121,10 +161,21 @@ def main() -> None:
     for title, body in humans:
         X.append(feature_vector(_statistical_signals(body)))
         y.append(0)  # manusia
-        ai = _ai_sample(llm, title)
-        if ai:
-            X.append(feature_vector(_statistical_signals(ai)))
-            y.append(1)  # AI
+
+    titles = [t for t, _ in humans]
+    bs = max(1, args.batch)
+    done = 0
+    for i in range(0, len(titles), bs):
+        chunk = titles[i : i + bs]
+        samples = (
+            [_ai_sample(llm, chunk[0])] if bs == 1 else _ai_samples_batch(llm, chunk)
+        )
+        for ai in samples:
+            if ai:
+                X.append(feature_vector(_statistical_signals(ai)))
+                y.append(1)  # AI
+        done += len(chunk)
+        print(f"[train]   sampel AI: {done}/{len(titles)} topik diproses", flush=True)
     pos = sum(y)
     print(f"[train] total {len(X)} sampel (AI={pos}, manusia={len(y) - pos})")
 
