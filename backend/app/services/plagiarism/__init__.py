@@ -26,7 +26,6 @@ from app.ingest.common import (
     minhash_from_bytes,
     text_metrics,
 )
-from app.services.embedding import embed_chunks
 from app.services.llm.provider import get_llm
 
 _SHINGLE = 5
@@ -124,16 +123,10 @@ def _vec_literal(vec: list[float]) -> str:
 # yang paling mirip — recall mendekati pemindaian penuh, bukan sekadar 10.
 _EF_SEARCH = 500
 
-# Saat dokumen panjang dicari per-jendela, kita menjalankan banyak pencarian
-# (satu per jendela) lalu menggabungkan hasilnya. Gabungan antar-jendela sudah
-# memperluas recall, jadi tiap pencarian cukup memakai ef_search lebih kecil
-# agar total tetap cepat.
-_EF_SEARCH_MULTI = 200
 
-
-def _set_ef_search(conn, value: int = _EF_SEARCH) -> None:
-    """Atur ef_search untuk transaksi ini agar menelusuri korpus lebih luas."""
-    conn.execute(text(f"SET LOCAL hnsw.ef_search = {value}"))
+def _set_ef_search(conn) -> None:
+    """Naikkan ef_search untuk transaksi ini agar menelusuri korpus jauh lebih luas."""
+    conn.execute(text(f"SET LOCAL hnsw.ef_search = {_EF_SEARCH}"))
 
 
 _corpus_cache: dict[str, object] = {"size": 0, "ts": 0.0}
@@ -158,33 +151,17 @@ def check_plagiarism(doc: str, top_k: int = 30) -> dict:
         return {"overall_similarity": 0.0, "sources": [], "word_count": 0, "char_count": 0}
 
     llm = get_llm()
+    qvec = llm.embed(doc[:4000])
     q_mh_bytes = make_minhash(doc)
     q_mh = minhash_from_bytes(q_mh_bytes) if q_mh_bytes else None
 
-    # Embed SELURUH dokumen per-jendela, lalu cari tetangga terdekat untuk tiap
-    # jendela dan gabungkan — agar penyalinan di bagian mana pun (bukan hanya
-    # pembuka) ikut tertangkap. Jumlah sumber akhir tetap `top_k` teratas.
-    qvecs = embed_chunks(llm, doc, max_chunks=12) or [llm.embed(doc[:2000])]
-    # Satu jendela: pakai ef_search penuh. Banyak jendela: ef_search lebih kecil
-    # per pencarian karena gabungan antar-jendela sudah memperluas recall.
-    ef = _EF_SEARCH if len(qvecs) <= 1 else _EF_SEARCH_MULTI
-    per_k = max(top_k, 15)
-    best: dict[int, dict] = {}
     with engine.connect() as conn:
-        _set_ef_search(conn, ef)
-        for qv in qvecs:
-            rows = conn.execute(_NEAREST, {"qvec": _vec_literal(qv), "k": per_k}).all()
-            for r in rows:
-                cs = float(r.cos_sim) if r.cos_sim is not None else 0.0
-                cur = best.get(r.id)
-                if cur is None or cs > cur["cos"]:
-                    best[r.id] = {"row": r, "cos": cs}
-    ranked = sorted(best.values(), key=lambda x: x["cos"], reverse=True)[:top_k]
+        _set_ef_search(conn)
+        rows = conn.execute(_NEAREST, {"qvec": _vec_literal(qvec), "k": top_k}).all()
 
     sources: list[dict] = []
-    for item in ranked:
-        r = item["row"]
-        cos_sim = item["cos"]
+    for r in rows:
+        cos_sim = float(r.cos_sim) if r.cos_sim is not None else 0.0
         lexical = 0.0
         if q_mh is not None and r.minhash is not None:
             lexical = float(q_mh.jaccard(minhash_from_bytes(bytes(r.minhash))))
