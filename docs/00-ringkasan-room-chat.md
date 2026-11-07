@@ -81,9 +81,9 @@
 ## ⏭️ Titik Sambung (pembahasan terakhir)
 
 Pertanyaan terakhir di room asli: **"batas 50.000 karakter — bisa lebih?"**
-→ Batas ada di backend `MAX_CHARS = 50_000` (`backend/app/api/tools.py`) dan dipakai
-di beberapa endpoint (plagiarism, grader, dll). Bisa dinaikkan, tetapi perlu pertimbangan
-beban embedding/LLM & VRAM GPU.
+→ **Sudah diselesaikan:** batas dinaikkan menjadi `MAX_CHARS = 2_000_000`
+(`backend/app/api/tools.py`) — hanya pagar keamanan memori (server 24/7, ±340rb kata).
+Analisis semantik memakai embedding per-jendela, jadi seluruh isi dokumen tetap diperiksa.
 
 **Untuk dilanjutkan di room ini** — kandidat topik berikutnya:
 - Menaikkan / membuat batas karakter adaptif per fitur.
