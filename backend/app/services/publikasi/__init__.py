@@ -16,6 +16,7 @@ from sqlalchemy import text
 
 from app.core.clients import corpus_size, engine
 from app.ingest.common import decompress_text
+from app.services.embedding import embed_document
 from app.services.llm.provider import get_llm
 
 _NEAREST = text(
@@ -79,7 +80,7 @@ def recommend_journals(doc: str, top_k: int = 15) -> dict:
         return {"matches": [], "fields": [], "sources": [], "readiness": {}}
 
     llm = get_llm()
-    qvec = llm.embed(doc[:4000])
+    qvec = embed_document(llm, doc)
     with engine.connect() as conn:
         _set_ef_search(conn)
         rows = conn.execute(_NEAREST, {"qvec": _vec_literal(qvec), "k": top_k}).all()

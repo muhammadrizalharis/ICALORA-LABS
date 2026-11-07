@@ -91,17 +91,19 @@ interface SrcAgg {
   chars: number;
   count: number;
   pct: number;
+  num: number;
 }
 
 function passageKey(p: MatchedPassage): string {
   return p.source_title || (p.doc_id != null ? `doc-${p.doc_id}` : "src");
 }
 
-/** Bangun HTML dokumen dengan sorotan warna per sumber + ringkasan kontribusi. */
+/** Bangun HTML dokumen dengan sorotan warna + badge nomor per sumber. */
 function buildHighlight(
   original: string,
   passages: MatchedPassage[],
   charCount: number,
+  linked = false,
 ): { html: string; sources: SrcAgg[] } {
   const map = new Map<string, SrcAgg>();
   const order: string[] = [];
@@ -116,6 +118,7 @@ function buildHighlight(
         chars: 0,
         count: 0,
         pct: 0,
+        num: 0,
       });
       order.push(key);
     }
@@ -147,20 +150,11 @@ function buildHighlight(
     }
   }
 
-  let html = "";
-  let pos = 0;
   for (const r of merged) {
-    if (r.start > pos) html += escHtml(original.slice(pos, r.start));
     const agg = map.get(r.key)!;
-    const c = HILITE[agg.color];
-    html += `<span class="hl" style="background:${c.bg};border-bottom:2px solid ${c.bd};">${escHtml(
-      original.slice(r.start, r.end),
-    )}</span>`;
     agg.chars += r.end - r.start;
     agg.count += 1;
-    pos = r.end;
   }
-  if (pos < original.length) html += escHtml(original.slice(pos));
 
   const sources = order
     .map((k) => {
@@ -170,6 +164,26 @@ function buildHighlight(
     })
     .filter((a) => a.count > 0)
     .sort((a, b) => b.pct - a.pct);
+  sources.forEach((a, i) => {
+    a.num = i + 1;
+  });
+
+  let html = "";
+  let pos = 0;
+  for (const r of merged) {
+    if (r.start > pos) html += escHtml(original.slice(pos, r.start));
+    const agg = map.get(r.key)!;
+    const c = HILITE[agg.color];
+    const badge = linked
+      ? `<a class="hlnum" href="#src-${agg.num}" style="background:${c.bd};">${agg.num}</a>`
+      : `<span class="hlnum" style="background:${c.bd};">${agg.num}</span>`;
+    html += `<span class="hl" style="background:${c.bg};border-bottom:2px solid ${c.bd};">${badge}${escHtml(
+      original.slice(r.start, r.end),
+    )}</span>`;
+    pos = r.end;
+  }
+  if (pos < original.length) html += escHtml(original.slice(pos));
+
   return { html, sources };
 }
 
@@ -220,13 +234,14 @@ export default function PlagiarismTool() {
       text,
       report.matched_passages,
       report.char_count,
+      true,
     );
 
     const overview = hiSources
       .map((s, i) => {
         const c = HILITE[s.color];
-        return `<tr>
-  <td class="num"><span class="swatch" style="background:${c.bg};border:1px solid ${c.bd};">${i + 1}</span></td>
+        return `<tr id="src-${i + 1}">
+  <td class="num"><span class="swatch" style="background:${c.bd};">${i + 1}</span></td>
   <td class="pct">${s.pct.toFixed(1)}%</td>
   <td>${escHtml(s.title || "(tanpa judul)")}${
     s.doi ? `<div class="src">${escHtml(s.doi)}</div>` : ""
@@ -265,10 +280,12 @@ export default function PlagiarismTool() {
   h2{font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:#0e1726;border-bottom:1px solid #e2e8f0;padding-bottom:6px;margin-top:26px;}
   table{width:100%;border-collapse:collapse;font-size:12px;} td{padding:7px 8px;border-bottom:1px solid #eef2f7;vertical-align:top;}
   td.pct{width:52px;font-weight:700;text-align:center;color:#0e1726;} td.num{width:30px;}
-  .swatch{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:5px;font-size:11px;font-weight:700;color:#0e1726;}
+  .swatch{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;font-size:11px;font-weight:700;color:#fff;}
   .src{color:#94a3b8;font-size:11px;margin-top:2px;}
-  .doc{border:1px solid #e2e8f0;border-radius:8px;padding:14px 16px;font-size:12.5px;line-height:1.75;white-space:pre-wrap;word-wrap:break-word;background:#fff;}
+  .doc{border:1px solid #e2e8f0;border-radius:8px;padding:14px 16px 14px 30px;font-size:12.5px;line-height:1.9;white-space:pre-wrap;word-wrap:break-word;background:#fff;}
   .hl{border-radius:2px;padding:0 1px;}
+  .hlnum{display:inline-block;min-width:14px;height:14px;line-height:14px;padding:0 3px;margin:0 3px 0 -18px;border-radius:7px;color:#fff;font-size:9px;font-weight:700;text-align:center;vertical-align:middle;text-decoration:none;}
+  a.hlnum{text-decoration:none;}
   .legend{font-size:11px;color:#64748b;margin:8px 0 0;}
   footer{margin-top:34px;color:#94a3b8;font-size:11px;text-align:center;border-top:1px solid #e2e8f0;padding-top:12px;}
   @media print{body{margin:0;}}
@@ -299,7 +316,7 @@ ${
 }
 <h2>Dokumen dengan Sorotan</h2>
 <div class="doc">${hiText || escHtml(text)}</div>
-<p class="legend">Teks yang disorot cocok dengan sumber bernomor sesuai warna pada Ringkasan Kecocokan di atas.</p>
+<p class="legend">Setiap teks tersorot diberi <b>penanda nomor bulat</b> sesuai sumbernya pada Ringkasan Kecocokan di atas. Klik penanda untuk melompat ke sumber terkait.</p>
 <h2>Sumber Teratas</h2><table>${sources}</table>
 <footer>Dibandingkan dengan <b>${(report.corpus_size || 0).toLocaleString(
       "id-ID",

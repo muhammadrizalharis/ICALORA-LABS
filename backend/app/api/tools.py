@@ -35,7 +35,11 @@ from app.services.transkrip import (
 
 router = APIRouter(prefix="/tools", tags=["tools"])
 
-MAX_CHARS = 50_000
+# Tidak ada batas fungsional untuk panjang teks. Angka ini hanya pagar
+# keamanan agar server (dibagi 24/7) tidak kehabisan memori pada input
+# ekstrem — setara buku/tesis sangat panjang (~340rb kata). Analisis semantik
+# memakai embedding per-jendela, jadi seluruh isi dokumen tetap diperiksa.
+MAX_CHARS = 2_000_000
 
 
 class TextIn(BaseModel):
@@ -100,7 +104,13 @@ class PublikasiIn(TextIn):
 
 def _guard(text: str) -> None:
     if len(text) > MAX_CHARS:
-        raise HTTPException(status_code=413, detail=f"Teks melebihi {MAX_CHARS} karakter.")
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"Teks melebihi batas keamanan server ({MAX_CHARS:,} karakter). "
+                "Pisahkan dokumen menjadi beberapa bagian."
+            ),
+        )
 
 
 def _log(request: Request, tool: str, title: str, preview: str, result: dict) -> None:
@@ -205,7 +215,10 @@ def rewrite_ep(body: RewriteIn, request: Request) -> dict:
 def chat_ep(body: ChatIn, request: Request) -> dict:
     total = sum(len(m.content) for m in body.messages)
     if total > MAX_CHARS:
-        raise HTTPException(status_code=413, detail=f"Percakapan melebihi {MAX_CHARS} karakter.")
+        raise HTTPException(
+            status_code=413,
+            detail=f"Percakapan melebihi batas keamanan server ({MAX_CHARS:,} karakter).",
+        )
     try:
         res = chat([m.model_dump() for m in body.messages], body.system)
         last = next((m.content for m in reversed(body.messages) if m.role == "user"), "")
@@ -240,7 +253,13 @@ def reader_reactions_ep(body: TextIn, request: Request) -> dict:
 @router.post("/resume")
 def resume_ep(body: ResumeIn, request: Request) -> dict:
     if len(body.info) > MAX_CHARS:
-        raise HTTPException(status_code=413, detail=f"Teks melebihi {MAX_CHARS} karakter.")
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"Teks melebihi batas keamanan server ({MAX_CHARS:,} karakter). "
+                "Pisahkan dokumen menjadi beberapa bagian."
+            ),
+        )
     try:
         res = build_resume(body.info, body.target_role)
         _log(request, "resume-builder", "Resume Builder", body.info[:200], res)
