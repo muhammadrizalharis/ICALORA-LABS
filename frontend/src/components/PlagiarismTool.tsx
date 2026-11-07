@@ -79,6 +79,10 @@ const HILITE = [
   { bg: "#e9d5ff", bd: "#9333ea" },
 ];
 
+// Ambang filter "Exclude" pada laporan.
+const MIN_WORDS = 8; // kecocokan < 8 kata dianggap terlalu pendek
+const MIN_PCT = 1.0; // sumber yang menyumbang < 1% dianggap kecil
+
 function escHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
@@ -104,11 +108,15 @@ function buildHighlight(
   passages: MatchedPassage[],
   charCount: number,
   linked = false,
+  opts: { minWords?: number; exclude?: Set<string> } = {},
 ): { html: string; sources: SrcAgg[] } {
+  const minWords = opts.minWords ?? 0;
+  const exclude = opts.exclude ?? new Set<string>();
   const map = new Map<string, SrcAgg>();
   const order: string[] = [];
   for (const p of passages) {
     const key = passageKey(p);
+    if (exclude.has(key)) continue;
     if (!map.has(key)) {
       map.set(key, {
         key,
@@ -127,8 +135,11 @@ function buildHighlight(
   const lower = original.toLowerCase();
   const ranges: { start: number; end: number; key: string }[] = [];
   for (const p of passages) {
+    const key = passageKey(p);
+    if (exclude.has(key)) continue;
     const needle = p.sentence.trim().toLowerCase();
     if (needle.length < 10) continue;
+    if (minWords > 0 && needle.split(/\s+/).filter(Boolean).length < minWords) continue;
     let idx = lower.indexOf(needle);
     let len = needle.length;
     if (idx < 0) {
@@ -210,6 +221,8 @@ export default function PlagiarismTool() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<Report | null>(null);
+  const [exShort, setExShort] = useState(false);
+  const [exSmall, setExSmall] = useState(false);
 
   async function run() {
     setLoading(true);
@@ -225,17 +238,30 @@ export default function PlagiarismTool() {
     }
   }
 
+  function hiOpts(): { minWords: number; exclude: Set<string> } {
+    let exclude = new Set<string>();
+    if (exSmall && report) {
+      const base = buildHighlight(text, report.matched_passages, report.char_count);
+      exclude = new Set(base.sources.filter((s) => s.pct < MIN_PCT).map((s) => s.key));
+    }
+    return { minWords: exShort ? MIN_WORDS : 0, exclude };
+  }
+
   function downloadReport() {
     if (!report) return;
     const now = new Date().toLocaleString("id-ID");
-    const idx = report.overall_similarity;
-    const v = verdictFor(idx);
     const { html: hiText, sources: hiSources } = buildHighlight(
       text,
       report.matched_passages,
       report.char_count,
       true,
+      hiOpts(),
     );
+    const idx =
+      exShort || exSmall
+        ? Math.min(100, Math.round(hiSources.reduce((a, s) => a + s.pct, 0) * 10) / 10)
+        : report.overall_similarity;
+    const v = verdictFor(idx);
 
     const overview = hiSources
       .map((s, i) => {
@@ -329,7 +355,14 @@ ${
     downloadPdfReport(`laporan-kemiripan-${Date.now()}.pdf`, html);
   }
 
-  const hi = report ? buildHighlight(text, report.matched_passages, report.char_count) : null;
+  const hi = report
+    ? buildHighlight(text, report.matched_passages, report.char_count, false, hiOpts())
+    : null;
+  const filtersActive = exShort || exSmall;
+  const shownIndex =
+    report && hi && filtersActive
+      ? Math.min(100, Math.round(hi.sources.reduce((a, s) => a + s.pct, 0) * 10) / 10)
+      : report?.overall_similarity ?? 0;
 
   return (
     <div className="space-y-5">
@@ -374,16 +407,16 @@ ${
           )}
           <div className="flex flex-wrap items-center gap-8">
             <ScoreRing
-              value={report.overall_similarity}
-              label="Similarity Index"
-              tone={toneForScore(report.overall_similarity)}
+              value={shownIndex}
+              label={filtersActive ? "Similarity (disesuaikan)" : "Similarity Index"}
+              tone={toneForScore(shownIndex)}
             />
             <div className="min-w-0 flex-1">
               <div className="text-lg font-bold text-neutral-900 dark:text-neutral-100">
-                {verdictFor(report.overall_similarity).label}
+                {verdictFor(shownIndex).label}
               </div>
               <p className="mt-0.5 max-w-md text-xs text-neutral-500 dark:text-neutral-400">
-                {verdictFor(report.overall_similarity).note}
+                {verdictFor(shownIndex).note}
               </p>
               <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-neutral-500 dark:text-neutral-400">
                 <span>{report.word_count} kata · {report.char_count} karakter</span>
@@ -398,6 +431,27 @@ ${
                 ⬇ Unduh Laporan (PDF)
               </button>
             </div>
+          </div>
+
+          <div className="rounded-lg border border-c bg-neutral-50 px-3 py-2.5 dark:bg-white/5">
+            <div className="mb-1.5 text-xs font-semibold text-neutral-700 dark:text-neutral-200">
+              Pengaturan Exclude (skor dihitung ulang)
+            </div>
+            <div className="flex flex-wrap gap-x-5 gap-y-1.5 text-xs text-neutral-600 dark:text-neutral-300">
+              <label className="inline-flex cursor-pointer items-center gap-2">
+                <input type="checkbox" checked={exShort} onChange={(e) => setExShort(e.target.checked)} />
+                Kecualikan kecocokan pendek (&lt; {MIN_WORDS} kata)
+              </label>
+              <label className="inline-flex cursor-pointer items-center gap-2">
+                <input type="checkbox" checked={exSmall} onChange={(e) => setExSmall(e.target.checked)} />
+                Kecualikan sumber kecil (&lt; {MIN_PCT}%)
+              </label>
+            </div>
+            {filtersActive && (
+              <p className="mt-1.5 text-[11px] text-neutral-400">
+                Skor disesuaikan dari {report.overall_similarity.toFixed(1)}% → {shownIndex.toFixed(1)}% setelah filter diterapkan.
+              </p>
+            )}
           </div>
 
           {hi && hi.sources.length > 0 && (
