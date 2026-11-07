@@ -13,6 +13,7 @@ import re
 from sqlalchemy import text
 
 from app.core.clients import corpus_size, engine
+from app.services.embedding import embed_document
 from app.services.llm.provider import get_llm
 
 _NEAREST = text(
@@ -77,7 +78,7 @@ def find_citations(query: str, top_k: int = 15, min_similarity: float = 0.35) ->
         return {"query": "", "count": 0, "citations": []}
 
     llm = get_llm()
-    qvec = llm.embed(query[:4000])
+    qvec = embed_document(llm, query)
 
     with engine.connect() as conn:
         _set_ef_search(conn)
