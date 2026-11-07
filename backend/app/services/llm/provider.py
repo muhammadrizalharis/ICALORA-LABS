@@ -55,11 +55,12 @@ class LLMProvider(Protocol):
 class OllamaProvider:
     """Adapter untuk Ollama (API lokal /api/chat & /api/embeddings)."""
 
-    def __init__(self, base_url: str, model: str, embed_model: str, timeout: int):
+    def __init__(self, base_url: str, model: str, embed_model: str, timeout: int, keep_alive: str = "5m"):
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.embed_model = embed_model
         self.timeout = timeout
+        self.keep_alive = keep_alive
 
     def chat(
         self, messages: list[dict], temperature: float = 0.2, max_tokens: int | None = None
@@ -67,13 +68,19 @@ class OllamaProvider:
         options: dict = {"temperature": temperature}
         if max_tokens:
             options["num_predict"] = max_tokens
-        payload = {"model": self.model, "messages": messages, "stream": False, "options": options}
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "stream": False,
+            "options": options,
+            "keep_alive": self.keep_alive,
+        }
         with httpx.Client(timeout=self.timeout) as client:
             resp = _post_with_retry(client, f"{self.base_url}/api/chat", payload)
             return resp.json()["message"]["content"].strip()
 
     def embed(self, text: str) -> list[float]:
-        payload = {"model": self.embed_model, "prompt": text}
+        payload = {"model": self.embed_model, "prompt": text, "keep_alive": self.keep_alive}
         with httpx.Client(timeout=self.timeout) as client:
             resp = _post_with_retry(client, f"{self.base_url}/api/embeddings", payload)
             return resp.json()["embedding"]
@@ -82,7 +89,7 @@ class OllamaProvider:
         """Embed banyak teks dalam satu panggilan (GPU) via /api/embed."""
         if not texts:
             return []
-        payload = {"model": self.embed_model, "input": texts}
+        payload = {"model": self.embed_model, "input": texts, "keep_alive": self.keep_alive}
         with httpx.Client(timeout=self.timeout) as client:
             resp = _post_with_retry(client, f"{self.base_url}/api/embed", payload)
             return resp.json()["embeddings"]
@@ -95,5 +102,6 @@ def get_llm() -> LLMProvider:
             model=settings.ollama_model,
             embed_model=settings.ollama_embed_model,
             timeout=settings.llm_timeout,
+            keep_alive=settings.ollama_keep_alive,
         )
     raise ValueError(f"Provider LLM tidak dikenal: {settings.llm_provider}")

@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     ollama_model: str = Field(default="qwen2.5:7b-instruct")
     ollama_embed_model: str = Field(default="bge-m3")
     llm_timeout: int = Field(default=120)
+    # Durasi model tetap dimuat di VRAM setelah panggilan terakhir. "5m" = 5 menit
+    # (default Ollama), "0" = langsung dilepas setelah tiap panggilan (hemat VRAM
+    # saat server dibagi 24/7), "-1" = selalu residen. Dapat diubah via .env.
+    ollama_keep_alive: str = Field(default="5m")
 
     # Ingest korpus
     contact_email: str = Field(default="")  # mailto polite-pool OpenAlex/Crossref
