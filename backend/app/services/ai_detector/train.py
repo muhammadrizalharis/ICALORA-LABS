@@ -71,15 +71,44 @@ def _ai_sample(llm, title: str) -> str | None:
         {"role": "user", "content": f"Topik/judul: {topic}"},
     ]
     try:
-        out = llm.chat(messages, temperature=0.7, max_tokens=320).strip()
+        out = llm.chat(messages, temperature=0.7, max_tokens=256).strip()
         return out if len(out.split()) >= 60 else None
     except Exception:  # noqa: BLE001
         return None
 
 
+def _evaluate(model, X: list[list[float]], y: list[int]) -> dict:
+    """Metrik pada data held-out (threshold 0.5). Fokus: false-positive rate."""
+    tp = tn = fp = fn = 0
+    for xi, yi in zip(X, y):
+        pred = 1 if model.predict_proba(xi) >= 0.5 else 0
+        if yi == 1 and pred == 1:
+            tp += 1
+        elif yi == 0 and pred == 0:
+            tn += 1
+        elif yi == 0 and pred == 1:
+            fp += 1  # manusia salah dituduh AI (paling berbahaya)
+        else:
+            fn += 1
+    n = tp + tn + fp + fn
+    humans = tn + fp
+    ai = tp + fn
+    return {
+        "n": n,
+        "accuracy": round((tp + tn) / n, 3) if n else None,
+        "false_positive_rate": round(fp / humans, 3) if humans else None,
+        "false_negative_rate": round(fn / ai, 3) if ai else None,
+        "precision": round(tp / (tp + fp), 3) if (tp + fp) else None,
+        "recall": round(tp / (tp + fn), 3) if (tp + fn) else None,
+        "confusion": {"tp": tp, "tn": tn, "fp": fp, "fn": fn},
+    }
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--per-class", type=int, default=40)
+    ap.add_argument("--test-frac", type=float, default=0.25)
+    ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
 
     print(f"[train] mengambil {args.per_class} sampel manusia dari korpus…")
@@ -97,13 +126,38 @@ def main() -> None:
             X.append(feature_vector(_statistical_signals(ai)))
             y.append(1)  # AI
     pos = sum(y)
-    print(f"[train] total {len(X)} sampel (AI={pos}, manusia={len(y) - pos}); melatih…")
+    print(f"[train] total {len(X)} sampel (AI={pos}, manusia={len(y) - pos})")
 
-    if pos < 5 or (len(y) - pos) < 5:
-        raise SystemExit("[train] sampel terlalu sedikit untuk melatih model.")
+    if pos < 8 or (len(y) - pos) < 8:
+        raise SystemExit("[train] sampel terlalu sedikit untuk melatih + validasi.")
 
-    model = train(X, y)
+    # Split train/held-out terstratifikasi agar kedua kelas ada di test set.
+    rng = random.Random(args.seed)
+    idx0 = [i for i, v in enumerate(y) if v == 0]
+    idx1 = [i for i, v in enumerate(y) if v == 1]
+    rng.shuffle(idx0)
+    rng.shuffle(idx1)
+    n_test0 = max(1, int(len(idx0) * args.test_frac))
+    n_test1 = max(1, int(len(idx1) * args.test_frac))
+    test_idx = set(idx0[:n_test0] + idx1[:n_test1])
+    Xtr = [X[i] for i in range(len(X)) if i not in test_idx]
+    ytr = [y[i] for i in range(len(y)) if i not in test_idx]
+    Xte = [X[i] for i in sorted(test_idx)]
+    yte = [y[i] for i in sorted(test_idx)]
+    print(f"[train] split: latih={len(Xtr)} held-out={len(Xte)}; melatih…")
+
+    model = train(Xtr, ytr)
+    metrics = _evaluate(model, Xte, yte)
+    model.meta["validation"] = metrics
+    model.meta["per_class"] = args.per_class
     save(model)
+
+    print("[train] === VALIDASI (held-out) ===")
+    print(f"  akurasi            : {metrics['accuracy']}")
+    print(f"  false-positive rate: {metrics['false_positive_rate']}  (manusia dituduh AI)")
+    print(f"  false-negative rate: {metrics['false_negative_rate']}  (AI lolos)")
+    print(f"  precision / recall : {metrics['precision']} / {metrics['recall']}")
+    print(f"  confusion          : {metrics['confusion']}")
     print(f"[train] selesai. akurasi latih={model.meta.get('train_accuracy')} n={model.meta.get('n')}")
 
 
