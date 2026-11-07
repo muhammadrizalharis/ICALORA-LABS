@@ -14,8 +14,24 @@ import math
 import re
 
 from app.services.llm.provider import get_llm
+from app.services.ai_detector import model as _model
 
 _WORD_RE = re.compile(r"\b[\w'-]+\b", re.UNICODE)
+
+_TRAINED = None  # cache; None=belum dicoba, False=tidak ada, else LogisticModel
+
+
+def _trained_probability(signals: dict) -> float | None:
+    """Probabilitas AILR (0-100) dari model terlatih bila tersedia."""
+    global _TRAINED
+    if _TRAINED is None:
+        _TRAINED = _model.load() or False
+    if not _TRAINED:
+        return None
+    try:
+        return round(_TRAINED.predict_proba(_model.feature_vector(signals)) * 100.0, 1)
+    except Exception:  # noqa: BLE001
+        return None
 _SENT_RE = re.compile(r"[^.!?]+[.!?]*")
 
 # Penanda "suara personal" (kontraksi/kata ganti) yang jarang pada teks AI formal.
@@ -163,8 +179,17 @@ def detect_ai(text: str) -> dict:
     stat_pct = signals["stat_score"] * 100
     analysis = _llm_analysis(text)
     llm_pct = analysis["prob"]
+    model_pct = _trained_probability(signals)
 
-    final = stat_pct if llm_pct is None else 0.45 * stat_pct + 0.55 * llm_pct
+    # Blending adaptif berdasarkan sinyal yang tersedia (model terlatih > LLM > statistik).
+    if model_pct is not None and llm_pct is not None:
+        final = 0.30 * stat_pct + 0.35 * llm_pct + 0.35 * model_pct
+    elif model_pct is not None:
+        final = 0.45 * stat_pct + 0.55 * model_pct
+    elif llm_pct is not None:
+        final = 0.45 * stat_pct + 0.55 * llm_pct
+    else:
+        final = stat_pct
     final = round(max(0.0, min(100.0, final)), 1)
 
     if final >= 70:
@@ -186,6 +211,7 @@ def detect_ai(text: str) -> dict:
         "verdict": verdict,
         "stat_probability": round(stat_pct, 1),
         "llm_probability": round(llm_pct, 1) if llm_pct is not None else None,
+        "model_probability": model_pct,
         "signals": signals,
         "flagged_sentences": flagged,
         "note": (
