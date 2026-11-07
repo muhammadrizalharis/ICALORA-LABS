@@ -1,5 +1,5 @@
 """Citation Finder — temukan sumber relevan dari korpus (1 juta+ dokumen)
-lalu format sebagai sitasi APA & BibTeX.
+lalu format sebagai sitasi APA, IEEE, MLA, Harvard, Vancouver, BibTeX & RIS.
 
 Strategi: embed teks/klaim pengguna (bge-m3, GPU) -> cari tetangga terdekat di
 corpus_embeddings (pgvector cosine). Hanya metadata publik yang dipakai
@@ -71,6 +71,50 @@ def _format_bibtex(
     return "\n".join(lines)
 
 
+def _format_ieee(title: str | None, year: int | None, doi: str | None, source: str) -> str:
+    t = (title or "[Judul tidak tersedia]").rstrip(".")
+    y = f", {year}" if year else ""
+    doi_part = f", doi: {doi}" if doi else ""
+    return f'"{t}," {source.upper()}{y}{doi_part}.'
+
+
+def _format_mla(title: str | None, year: int | None, doi: str | None, source: str) -> str:
+    t = (title or "[Judul tidak tersedia]").rstrip(".")
+    y = f", {year}" if year else ""
+    doi_part = f", https://doi.org/{doi}" if doi else ""
+    return f'"{t}." {source.upper()}{y}{doi_part}.'
+
+
+def _format_harvard(title: str | None, year: int | None, doi: str | None, source: str) -> str:
+    y = year if year else "n.d."
+    t = (title or "[Judul tidak tersedia]").rstrip(".")
+    doi_part = f" Available at: https://doi.org/{doi}" if doi else ""
+    return f"{y}. '{t}', {source.upper()}.{doi_part}".strip()
+
+
+def _format_vancouver(title: str | None, year: int | None, doi: str | None, source: str) -> str:
+    t = (title or "[Judul tidak tersedia]").rstrip(".")
+    y = f" {year}" if year else ""
+    doi_part = f" Available from: https://doi.org/{doi}" if doi else ""
+    return f"{t}. {source.upper()}.{y}.{doi_part}".strip()
+
+
+def _format_ris(
+    title: str | None, year: int | None, doi: str | None, source: str
+) -> str:
+    lines = ["TY  - JOUR"]
+    if title:
+        lines.append(f"TI  - {title}")
+    if year:
+        lines.append(f"PY  - {year}")
+    if doi:
+        lines.append(f"DO  - {doi}")
+        lines.append(f"UR  - https://doi.org/{doi}")
+    lines.append(f"DB  - {source}")
+    lines.append("ER  - ")
+    return "\n".join(lines)
+
+
 def find_citations(query: str, top_k: int = 15, min_similarity: float = 0.35) -> dict:
     """Cari kandidat sitasi untuk `query` dari korpus."""
     query = query.strip()
@@ -101,6 +145,11 @@ def find_citations(query: str, top_k: int = 15, min_similarity: float = 0.35) ->
                 "relevance": round(sim * 100, 1),
                 "apa": _format_apa(r.title, r.pub_year, r.doi, r.source),
                 "bibtex": _format_bibtex(r.title, r.pub_year, r.doi, r.source, r.id),
+                "ieee": _format_ieee(r.title, r.pub_year, r.doi, r.source),
+                "mla": _format_mla(r.title, r.pub_year, r.doi, r.source),
+                "harvard": _format_harvard(r.title, r.pub_year, r.doi, r.source),
+                "vancouver": _format_vancouver(r.title, r.pub_year, r.doi, r.source),
+                "ris": _format_ris(r.title, r.pub_year, r.doi, r.source),
             }
         )
 

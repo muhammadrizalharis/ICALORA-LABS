@@ -16,6 +16,11 @@ interface Citation {
   relevance: number;
   apa: string;
   bibtex: string;
+  ieee: string;
+  mla: string;
+  harvard: string;
+  vancouver: string;
+  ris: string;
 }
 interface CitationResult {
   query: string;
@@ -24,12 +29,36 @@ interface CitationResult {
   corpus_size?: number;
 }
 
+const STYLES = [
+  { key: "apa", label: "APA" },
+  { key: "ieee", label: "IEEE" },
+  { key: "mla", label: "MLA" },
+  { key: "harvard", label: "Harvard" },
+  { key: "vancouver", label: "Vancouver" },
+] as const;
+
+type StyleKey = (typeof STYLES)[number]["key"];
+
+function downloadText(filename: string, content: string): void {
+  const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
 export default function CitationTool() {
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [res, setRes] = useState<CitationResult | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+  const [style, setStyle] = useState<StyleKey>("apa");
 
   function copy(key: string, value: string) {
     navigator.clipboard.writeText(value);
@@ -80,6 +109,41 @@ export default function CitationTool() {
               : ""}
             .
           </p>
+          {res.count > 0 && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-neutral-500 dark:text-neutral-400">Gaya sitasi:</span>
+              {STYLES.map((s) => (
+                <button
+                  key={s.key}
+                  onClick={() => setStyle(s.key)}
+                  className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+                    style === s.key
+                      ? "bg-[color:var(--brand)] text-white"
+                      : "border border-c text-neutral-600 hover:border-[color:var(--brand)] dark:text-neutral-300"
+                  }`}
+                >
+                  {s.label}
+                </button>
+              ))}
+              <span className="mx-1 h-4 w-px bg-neutral-300 dark:bg-neutral-700" />
+              <button
+                onClick={() =>
+                  downloadText("sitasi.bib", res.citations.map((c) => c.bibtex).join("\n\n"))
+                }
+                className="rounded-full border border-c px-3 py-1 text-xs font-medium text-neutral-600 hover:border-[color:var(--brand)] dark:text-neutral-300"
+              >
+                Ekspor BibTeX (.bib)
+              </button>
+              <button
+                onClick={() =>
+                  downloadText("sitasi.ris", res.citations.map((c) => c.ris).join("\n"))
+                }
+                className="rounded-full border border-c px-3 py-1 text-xs font-medium text-neutral-600 hover:border-[color:var(--brand)] dark:text-neutral-300"
+              >
+                Ekspor RIS (.ris)
+              </button>
+            </div>
+          )}
           <ReportBar
             source={text}
             title="Laporan Pencarian Sitasi"
@@ -100,7 +164,7 @@ export default function CitationTool() {
                     `<span class="muted">${escapeHtml(c.source)} · ${
                       c.pub_year ?? "n.d."
                     }${c.doi ? ` · ${escapeHtml(c.doi)}` : ""}</span><br>` +
-                    `<span>${escapeHtml(c.apa)}</span></div>`,
+                    `<span>${escapeHtml(c[style])}</span></div>`,
                 )
                 .join("")
             }
@@ -126,13 +190,16 @@ export default function CitationTool() {
                   </>
                 )}
               </div>
-              <p className="mt-2 text-xs text-neutral-600 dark:text-neutral-400">{c.apa}</p>
+              <p className="mt-2 text-xs text-neutral-600 dark:text-neutral-400">{c[style]}</p>
               <div className="mt-2 flex gap-3">
-                <button onClick={() => copy(`apa-${c.doc_id}`, c.apa)} className="text-xs text-[color:var(--brand)] hover:underline">
-                  {copied === `apa-${c.doc_id}` ? "Tersalin!" : "Salin APA"}
+                <button onClick={() => copy(`sty-${c.doc_id}`, c[style])} className="text-xs text-[color:var(--brand)] hover:underline">
+                  {copied === `sty-${c.doc_id}` ? "Tersalin!" : `Salin ${STYLES.find((s) => s.key === style)?.label}`}
                 </button>
                 <button onClick={() => copy(`bib-${c.doc_id}`, c.bibtex)} className="text-xs text-[color:var(--brand)] hover:underline">
                   {copied === `bib-${c.doc_id}` ? "Tersalin!" : "Salin BibTeX"}
+                </button>
+                <button onClick={() => copy(`ris-${c.doc_id}`, c.ris)} className="text-xs text-[color:var(--brand)] hover:underline">
+                  {copied === `ris-${c.doc_id}` ? "Tersalin!" : "Salin RIS"}
                 </button>
               </div>
             </div>
