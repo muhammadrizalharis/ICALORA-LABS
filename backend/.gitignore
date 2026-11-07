@@ -5,3 +5,4 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 *.egg-info/
+app/services/ai_detector/train_features.jsonl
