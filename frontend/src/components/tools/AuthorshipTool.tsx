@@ -23,7 +23,11 @@ interface AuthorshipResult {
   comparison?: {
     profile_b: Profile;
     style_similarity: number;
+    function_word_similarity?: number;
+    structural_similarity?: number;
+    confidence?: string;
     verdict: string;
+    note?: string;
   };
 }
 
@@ -132,13 +136,30 @@ export default function AuthorshipTool() {
       {res && (
         <div className="space-y-4">
           {res.comparison && (
-            <div className="flex items-center gap-4 rounded-xl border border-c surface-2 p-5">
+            <div className="flex items-start gap-4 rounded-xl border border-c surface-2 p-5">
               <div className="text-3xl font-bold text-[color:var(--brand)]">
                 {res.comparison.style_similarity}%
               </div>
-              <div>
-                <div className="font-semibold">Kemiripan gaya</div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold">Kemiripan gaya</span>
+                  {res.comparison.confidence && (
+                    <span className="rounded-full border border-c px-2 py-0.5 text-[11px] text-neutral-500 dark:text-neutral-400">
+                      kepercayaan: {res.comparison.confidence}
+                    </span>
+                  )}
+                </div>
                 <p className="text-sm text-neutral-500 dark:text-neutral-400">{res.comparison.verdict}</p>
+                {(res.comparison.function_word_similarity != null ||
+                  res.comparison.structural_similarity != null) && (
+                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-neutral-400">
+                    <span>kata fungsi: {res.comparison.function_word_similarity}%</span>
+                    <span>struktural: {res.comparison.structural_similarity}%</span>
+                  </div>
+                )}
+                {res.comparison.note && (
+                  <p className="mt-1 text-[11px] text-neutral-400">{res.comparison.note}</p>
+                )}
               </div>
             </div>
           )}

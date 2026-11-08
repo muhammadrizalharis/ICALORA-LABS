@@ -13,11 +13,23 @@ import re
 _WORD_RE = re.compile(r"\b[\w'-]+\b", re.UNICODE)
 _SENT_RE = re.compile(r"[^.!?]+[.!?]*")
 
-# Kata fungsi (ID + EN) — penanda gaya yang kuat dalam stylometry
+# Kata fungsi (ID + EN) — penanda gaya kuat dalam stylometry. Mencakup kata
+# ganti, kata bantu, preposisi, konjungsi, dan partikel yang dipakai di luar
+# kesadaran penulis & relatif tak bergantung topik.
 _FUNCTION_WORDS = [
+    # Indonesia
     "yang", "dan", "di", "ke", "dari", "untuk", "dengan", "pada", "adalah",
     "ini", "itu", "tidak", "akan", "atau", "karena", "sebagai", "oleh",
+    "saya", "aku", "kita", "kami", "dia", "mereka", "kamu", "anda", "nya",
+    "juga", "sudah", "telah", "masih", "bisa", "dapat", "harus", "agar",
+    "jika", "namun", "tetapi", "serta", "dalam", "tersebut", "ialah",
+    # Inggris
     "the", "and", "of", "to", "in", "a", "is", "that", "for", "with", "as",
+    "i", "you", "he", "she", "it", "we", "they", "me", "my", "your", "his",
+    "her", "its", "our", "their", "this", "these", "those", "was", "were",
+    "be", "been", "are", "am", "have", "has", "had", "do", "does", "did",
+    "not", "but", "or", "if", "so", "than", "then", "on", "at", "by", "an",
+    "from", "which", "who", "what", "when", "there", "would", "could", "should",
 ]
 
 
@@ -86,6 +98,41 @@ def _feature_vector(s: dict) -> list[float]:
     ]
 
 
+# Skala referensi (perkiraan simpangan baku prosa umum) untuk menormalkan tiap
+# fitur struktural sebelum cosine — agar tiap ciri berkontribusi setara dan
+# cosine mengukur "bentuk gaya", bukan sekadar didominasi nilai terbesar (flesch).
+_STRUCT_SCALE = [10.0, 8.0, 1.0, 15.0, 15.0, 30.0]
+
+
+def _struct_vector_norm(s: dict) -> list[float]:
+    return [v / sc for v, sc in zip(_feature_vector(s), _STRUCT_SCALE, strict=False)]
+
+
+def _fw_vector(text: str) -> list[float]:
+    """Vektor frekuensi kata fungsi (per 100 kata) atas daftar tetap.
+
+    Kata fungsi (the/and/yang/dan/…) adalah penanda kepenulisan terkuat dalam
+    stilometri karena dipakai di luar kesadaran penulis dan tak bergantung topik.
+    """
+    words = [w.lower() for w in _WORD_RE.findall(text)]
+    n = len(words) or 1
+    counts = {w: 0 for w in _FUNCTION_WORDS}
+    for w in words:
+        if w in counts:
+            counts[w] += 1
+    return [counts[w] / n * 100.0 for w in _FUNCTION_WORDS]
+
+
+def _fw_similarity(a: str, b: str) -> float:
+    """Kemiripan distribusi kata fungsi via cosine vektor frekuensi (0..1).
+
+    Cosine stabil pada daftar kata fungsi yang kaya (kata ganti, kata bantu,
+    preposisi, konjungsi): penulis berbeda memakai kata fungsi dengan proporsi
+    berbeda sehingga sudut antar-vektor melebar.
+    """
+    return _cosine(_fw_vector(a), _fw_vector(b))
+
+
 def _cosine(a: list[float], b: list[float]) -> float:
     dot = sum(x * y for x, y in zip(a, b, strict=False))
     na = math.sqrt(sum(x * x for x in a))
@@ -99,18 +146,44 @@ def analyze_authorship(text: str, compare: str | None = None) -> dict:
     text = text.strip()
     result: dict = {"profile": _stylometry(text)}
     if compare and compare.strip():
-        prof_b = _stylometry(compare.strip())
-        sim = _cosine(_feature_vector(result["profile"]), _feature_vector(prof_b))
+        comp = compare.strip()
+        prof_b = _stylometry(comp)
+        # Dua sinyal digabung: (1) distribusi kata fungsi — penanda kepenulisan
+        # terkuat; (2) ciri struktural ternormalisasi. Bobot condong ke kata
+        # fungsi karena paling diskriminatif & tak bergantung topik.
+        fw_sim = _fw_similarity(text, comp)
+        struct_sim = _cosine(_struct_vector_norm(result["profile"]), _struct_vector_norm(prof_b))
+        sim = 0.5 * fw_sim + 0.5 * struct_sim
         sim_pct = round(sim * 100, 1)
-        if sim_pct >= 92:
+        # Kepercayaan bergantung panjang sampel: di bawah ~300 kata, frekuensi
+        # kata fungsi belum stabil -> hasil hanya indikatif.
+        min_words = min(result["profile"]["word_count"], prof_b["word_count"])
+        if min_words >= 300:
+            confidence = "tinggi"
+        elif min_words >= 120:
+            confidence = "sedang"
+        else:
+            confidence = "rendah"
+        if sim_pct >= 85:
             verdict = "gaya sangat mirip (kemungkinan penulis sama)"
-        elif sim_pct >= 80:
-            verdict = "gaya mirip"
+        elif sim_pct >= 70:
+            verdict = "gaya mirip (tidak konklusif)"
         else:
             verdict = "gaya berbeda (kemungkinan penulis berbeda)"
+        if confidence == "rendah":
+            verdict += " — kepercayaan rendah (sampel terlalu pendek)"
         result["comparison"] = {
             "profile_b": prof_b,
             "style_similarity": sim_pct,
+            "function_word_similarity": round(fw_sim * 100, 1),
+            "structural_similarity": round(struct_sim * 100, 1),
+            "confidence": confidence,
             "verdict": verdict,
+            "note": (
+                "Stilometri bersifat indikatif, bukan bukti. Butuh sampel cukup "
+                "panjang (idealnya >300 kata) agar frekuensi kata fungsi stabil; "
+                "register yang sama (mis. sama-sama formal) dapat menaikkan "
+                "kemiripan meski penulis berbeda."
+            ),
         }
     return result
