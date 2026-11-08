@@ -261,6 +261,7 @@ export default function PlagiarismTool() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<Report | null>(null);
+  const [docTitle, setDocTitle] = useState("");
   const [exShort, setExShort] = useState(false);
   const [exSmall, setExSmall] = useState(false);
   const [exQuotes, setExQuotes] = useState(false);
@@ -378,7 +379,9 @@ export default function PlagiarismTool() {
   @media print{body{margin:0;}}
 </style></head><body>
 <div class="head">
-  <div><h1>Laporan Indeks Kemiripan</h1><div class="brand">ICALORA-LABS · MRH INNOVEX — Deteksi plagiarisme yang sah & terpercaya (self-hosted)</div></div>
+  <div><h1>Laporan Indeks Kemiripan</h1><div class="brand">${
+    docTitle.trim() ? `${escHtml(docTitle.trim())} · ` : ""
+  }ICALORA-LABS · MRH INNOVEX — Deteksi plagiarisme yang sah &amp; terpercaya (self-hosted)</div></div>
   <div class="sid">ID Laporan: <b>${escHtml(report.report_id || "-")}</b><br>Dibuat ${escHtml(
     report.generated_at ? new Date(report.generated_at).toLocaleString("id-ID") : now,
   )}<br>Dibandingkan dengan <b>${(report.corpus_size || 0).toLocaleString(
@@ -433,24 +436,71 @@ ${
 
   return (
     <div className="space-y-5">
-      <TextInput
-        value={text}
-        onChange={setText}
-        placeholder="Tempel teks/abstrak yang ingin diperiksa keasliannya…"
-        rows={10}
-      />
-      <div className="flex items-center gap-3">
-        <button
-          onClick={run}
-          disabled={loading || text.trim().length === 0}
-          className="rounded-lg bg-neutral-900 px-5 py-2 text-sm font-medium text-white disabled:opacity-40 dark:bg-neutral-100 dark:text-neutral-900"
-        >
-          {loading ? "Memeriksa…" : "Periksa Kemiripan"}
-        </button>
-        <span className="text-xs text-neutral-400 dark:text-neutral-500">
-          Dibandingkan dengan korpus akses-terbuka ICALORA-LABS.
+      <div className="flex items-center gap-3 rounded-xl border border-c bg-[color:var(--brand-soft)] px-4 py-3 text-sm text-neutral-700 dark:text-neutral-200">
+        <span className="text-lg">⏱️</span>
+        <span>
+          Perkiraan pemeriksaan: <b>instan</b> — hasil & highlight muncul dalam hitungan detik,
+          langsung di layar.
         </span>
       </div>
+
+      <div>
+        <label className="mb-1.5 block text-xs font-medium text-neutral-600 dark:text-neutral-300">
+          Judul Dokumen (opsional)
+        </label>
+        <input
+          value={docTitle}
+          onChange={(e) => setDocTitle(e.target.value)}
+          placeholder="Masukkan judul dokumen…"
+          className="mb-3 w-full rounded-lg border border-c surface px-3 py-2 text-sm text-neutral-900 outline-none focus:border-[color:var(--brand)] dark:text-neutral-100 dark:placeholder:text-neutral-500"
+        />
+        <TextInput
+          value={text}
+          onChange={setText}
+          placeholder="Tempel teks/abstrak, atau unggah berkas .pdf/.docx/.txt untuk diperiksa keasliannya…"
+          rows={10}
+        />
+      </div>
+
+      <div className="flex items-start gap-3 rounded-xl border border-c bg-[color:var(--brand-soft)] px-4 py-3">
+        <span className="text-lg">✨</span>
+        <div className="text-sm">
+          <div className="font-semibold text-neutral-800 dark:text-neutral-100">
+            ICALORA-LABS memakai engine orisinal: ICALORA Similarity Checker
+          </div>
+          <p className="mt-0.5 text-neutral-600 dark:text-neutral-300">
+            Dokumenmu diperiksa langsung dengan engine plagiarisme milik ICALORA-LABS, lengkap
+            dengan laporan sumber dan highlight per halaman.
+          </p>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-neutral-700 dark:text-neutral-200">
+        <span className="font-medium">Filter Tambahan:</span>
+        <label className="inline-flex cursor-pointer items-center gap-2">
+          <input type="checkbox" checked={exBib} onChange={(e) => setExBib(e.target.checked)} />
+          Tanpa daftar pustaka
+        </label>
+        <label className="inline-flex cursor-pointer items-center gap-2">
+          <input type="checkbox" checked={exQuotes} onChange={(e) => setExQuotes(e.target.checked)} />
+          Tanpa kutipan
+        </label>
+        <label className="inline-flex cursor-pointer items-center gap-2">
+          <input type="checkbox" checked={exShort} onChange={(e) => setExShort(e.target.checked)} />
+          Exclude match (kecocokan pendek)
+        </label>
+      </div>
+
+      <button
+        onClick={run}
+        disabled={loading || text.trim().length === 0}
+        className="w-full rounded-xl bg-[color:var(--brand)] px-5 py-3 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
+      >
+        {loading ? "Memeriksa…" : "Periksa Kemiripan"}
+      </button>
+      <p className="text-center text-xs text-neutral-400 dark:text-neutral-500">
+        Dibandingkan dengan korpus akses-terbuka ICALORA-LABS · laporan dapat diunduh sebagai PDF.
+      </p>
 
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
@@ -460,6 +510,11 @@ ${
 
       {report && (
         <div className="space-y-5 rounded-xl border border-c p-5">
+          {docTitle.trim() && (
+            <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
+              {docTitle.trim()}
+            </h2>
+          )}
           {report.report_id && (
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-c bg-neutral-50 px-3 py-2 text-[11px] text-neutral-500 dark:bg-white/5 dark:text-neutral-400">
               <span>🆔 ID Laporan: <span className="font-mono font-semibold text-neutral-700 dark:text-neutral-200">{report.report_id}</span></span>
