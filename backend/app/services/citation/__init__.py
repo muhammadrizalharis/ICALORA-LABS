@@ -19,10 +19,10 @@ from app.services.llm.provider import get_llm
 _NEAREST = text(
     """
     SELECT d.id, d.source, d.external_id, d.doi, d.title, d.pub_year,
-           1 - (e.embedding <=> CAST(:qvec AS vector)) AS cos_sim
+           1 - (e.embedding <=> CAST(:qvec AS halfvec(1024))) AS cos_sim
     FROM corpus_embeddings e
     JOIN corpus_documents d ON d.id = e.doc_id
-    ORDER BY e.embedding <=> CAST(:qvec AS vector)
+    ORDER BY e.embedding <=> CAST(:qvec AS halfvec(1024))
     LIMIT :k
     """
 )
@@ -86,10 +86,10 @@ def _format_mla(title: str | None, year: int | None, doi: str | None, source: st
 
 
 def _format_harvard(title: str | None, year: int | None, doi: str | None, source: str) -> str:
-    y = year if year else "n.d."
+    head = f"{year}." if year else "n.d."
     t = (title or "[Judul tidak tersedia]").rstrip(".")
     doi_part = f" Available at: https://doi.org/{doi}" if doi else ""
-    return f"{y}. '{t}', {source.upper()}.{doi_part}".strip()
+    return f"{head} '{t}', {source.upper()}.{doi_part}".strip()
 
 
 def _format_vancouver(title: str | None, year: int | None, doi: str | None, source: str) -> str:
