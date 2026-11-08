@@ -25,6 +25,8 @@ from app.core.clients import engine
 from app.ingest.common import (
     NUM_PERM,
     compress_text,
+    corpus_cap,
+    corpus_cap_reached,
     ensure_schema,
     license_allows_fulltext,
     make_minhash,
@@ -198,6 +200,17 @@ def _update_job(job_id: int, last_prefix: str | None, total: int, status: str) -
 def run(target: int) -> None:
     ensure_schema()
     job_id, start_after, total = _get_or_create_job(target)
+
+    cap = corpus_cap()
+    if corpus_cap_reached(exact=True):
+        print(
+            f"[pmc] korpus sudah mencapai plafon {cap} dokumen — "
+            f"tidak menambah (set ICALORA_CORPUS_MAX_DOCS utk ubah).",
+            flush=True,
+        )
+        _update_job(job_id, start_after, total, "paused")
+        return
+
     s3 = _s3()
 
     kwargs = {"Bucket": BUCKET, "Delimiter": "/"}
@@ -208,10 +221,10 @@ def run(target: int) -> None:
     buf: list[dict] = []
     last_prefix = start_after
     for page in paginator.paginate(**kwargs):
-        if _STOP or total >= target:
+        if _STOP or total >= target or corpus_cap_reached(exact=False):
             break
         for cp in page.get("CommonPrefixes", []):
-            if _STOP or total >= target:
+            if _STOP or total >= target or corpus_cap_reached(exact=False):
                 break
             prefix = cp["Prefix"]
             if not prefix.startswith("PMC"):
@@ -229,7 +242,11 @@ def run(target: int) -> None:
     if buf:
         total += _persist(buf)
         buf.clear()
-    status = "done" if total >= target else "paused"
+    if corpus_cap_reached(exact=False):
+        status = "paused"
+        print(f"[pmc] plafon korpus {cap} tercapai — berhenti menambah.", flush=True)
+    else:
+        status = "done" if total >= target else "paused"
     _update_job(job_id, last_prefix, total, status)
     print(f"[pmc] berhenti ({status}) pada {total} dokumen.")
 

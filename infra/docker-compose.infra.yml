@@ -11,27 +11,34 @@
 name: icalora-infra
 
 services:
-  postgres:
-    image: pgvector/pgvector:pg16
-    container_name: icalora-postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
-    ports:
-      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    security_opt:
-      - no-new-privileges:true
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    mem_limit: 8g
-    cpus: 8.0
+  # CATATAN MIGRASI STORAGE:
+  # Postgres (storage korpus, ~85 GB) telah DIPINDAH ke VM terpisah (storage-only)
+  # untuk melegakan disk server GPU. App terhubung via POSTGRES_HOST di backend/.env
+  # (diarahkan ke IP VM). Service di bawah ini DINONAKTIFKAN agar tidak membuat
+  # instance Postgres kosong yang membingungkan. Untuk menjalankan Postgres lokal
+  # lagi, hapus komentar blok ini + volume 'pgdata' di bawah, lalu set POSTGRES_HOST
+  # kembali ke 127.0.0.1.
+  # postgres:
+  #   image: pgvector/pgvector:pg16
+  #   container_name: icalora-postgres
+  #   restart: unless-stopped
+  #   environment:
+  #     POSTGRES_USER: ${POSTGRES_USER}
+  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+  #     POSTGRES_DB: ${POSTGRES_DB}
+  #   ports:
+  #     - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+  #   volumes:
+  #     - pgdata:/var/lib/postgresql/data
+  #   security_opt:
+  #     - no-new-privileges:true
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #   mem_limit: 8g
+  #   cpus: 8.0
 
   redis:
     image: redis:7.4-alpine
@@ -74,8 +81,9 @@ services:
     cpus: 4.0
 
 volumes:
-  pgdata:
-    name: icalora_pgdata
+  # pgdata dipindah ke VM (lihat catatan di service postgres yang dinonaktifkan).
+  # pgdata:
+  #   name: icalora_pgdata
   redisdata:
     name: icalora_redisdata
   seaweeddata:

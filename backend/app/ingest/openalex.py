@@ -27,6 +27,8 @@ from app.core.clients import engine
 from app.ingest.common import (
     NUM_PERM,
     compress_text,
+    corpus_cap,
+    corpus_cap_reached,
     ensure_schema,
     make_minhash,
     reconstruct_abstract,
@@ -238,6 +240,17 @@ def _stream_part(s3, key: str, target: int, total: int, buf: list[dict]) -> int:
 def run(target: int) -> None:
     ensure_schema()
     job_id, last_part, total = _get_or_create_job(target)
+
+    cap = corpus_cap()
+    if corpus_cap_reached(exact=True):
+        print(
+            f"[ingest] korpus sudah mencapai plafon {cap} dokumen — "
+            f"tidak menambah (set ICALORA_CORPUS_MAX_DOCS utk ubah).",
+            flush=True,
+        )
+        _update_job(job_id, last_part, total, "paused")
+        return
+
     s3 = _s3()
     parts = _list_parts(s3)
     print(f"[ingest] {len(parts)} part file ditemukan.")
@@ -249,7 +262,7 @@ def run(target: int) -> None:
 
     buf: list[dict] = []
     for key in parts:
-        if _STOP or total >= target:
+        if _STOP or total >= target or corpus_cap_reached(exact=False):
             break
         try:
             total = _stream_part(s3, key, target, total, buf)
@@ -267,7 +280,11 @@ def run(target: int) -> None:
         _update_job(job_id, last_part, total, "running")
         print(f"[ingest] selesai part (total {total}/{target}) {key}", flush=True)
 
-    status = "done" if total >= target else "paused"
+    if corpus_cap_reached(exact=False):
+        status = "paused"
+        print(f"[ingest] plafon korpus {cap} tercapai — berhenti menambah.", flush=True)
+    else:
+        status = "done" if total >= target else "paused"
     _update_job(job_id, last_part, total, status)
     print(f"[ingest] berhenti ({status}) pada {total} dokumen.")
 

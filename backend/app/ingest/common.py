@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
@@ -25,6 +26,38 @@ def ensure_schema() -> None:
     with engine.begin() as conn:
         for stmt in [s.strip() for s in sql.split(";") if s.strip()]:
             conn.execute(text(stmt))
+
+
+# Plafon total dokumen korpus. Mencegah korpus membengkak tak terkendali
+# (beban disk). 0 = tanpa batas. Default dibuat moderat ("jangan berlebihan").
+_DEFAULT_CORPUS_MAX_DOCS = 25_000_000
+
+
+def corpus_cap() -> int:
+    """Plafon total dokumen korpus dari env ICALORA_CORPUS_MAX_DOCS. 0 = tak terbatas."""
+    try:
+        cap = int(os.getenv("ICALORA_CORPUS_MAX_DOCS", str(_DEFAULT_CORPUS_MAX_DOCS)))
+    except ValueError:
+        cap = _DEFAULT_CORPUS_MAX_DOCS
+    return max(0, cap)
+
+
+def corpus_doc_count(exact: bool = True) -> int:
+    """Jumlah dokumen korpus. exact=False memakai estimasi pg_class (instan)."""
+    with engine.connect() as conn:
+        if exact:
+            return int(conn.execute(text("SELECT count(*) FROM corpus_documents")).scalar() or 0)
+        est = conn.execute(
+            text("SELECT reltuples::bigint FROM pg_class WHERE relname = 'corpus_documents'")
+        ).scalar()
+        return int(est or 0)
+
+
+def corpus_cap_reached(exact: bool = True) -> bool:
+    cap = corpus_cap()
+    if cap <= 0:
+        return False
+    return corpus_doc_count(exact=exact) >= cap
 
 
 # Lisensi yang mengizinkan penyimpanan & pemakaian full-text pada produk
