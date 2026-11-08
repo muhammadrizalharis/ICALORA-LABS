@@ -1,24 +1,23 @@
-"""Latih model AI Detector: manusia (korpus) vs AI (MULTI-MODEL, skema GELOMBANG).
+"""Latih model AI Detector: manusia (korpus) vs AI (MULTI-MODEL, hemat disk).
+
+Dua mode:
+  * generate  : hasilkan sampel AI memakai model tertentu sampai cache mencapai
+                --target-ai, lalu KELUAR (tanpa melatih). Dipakai driver yang
+                memuat model SATU PER SATU (pull -> generate -> rm) agar disk
+                tidak membengkak.
+  * finalize  : latih model logistik dari cache, validasi held-out, simpan
+                model.json.
+  * full      : (default) perilaku lama — isi human, generate, lalu latih.
 
 Contoh:
-    python -m app.services.ai_detector.train --per-class 5000
+    python -m app.services.ai_detector.train generate \
+        --local-models qwen2.5:7b-instruct --shared-models gemma4:latest,gpt-oss:latest \
+        --target-ai 2600 --per-class 5000
+    python -m app.services.ai_detector.train finalize --test-frac 0.2
 
-Sampel manusia = teks nyata dari korpus akses-terbuka. Sampel AI dibuat oleh
-BANYAK model LLM dari DUA endpoint:
-  * instance khusus milik user (GPU1, port 11500) — Qwen, Llama, Mistral, Phi, Gemma2
-  * Ollama bersama (port 11434) — gemma4, gpt-oss, dll.
-Memakai banyak arsitektur membuat detektor tidak sekadar menghafal satu gaya.
-
-SKEMA GELOMBANG (sesuai permintaan): tiap gelombang menjalankan
-  - N_LOCAL model serentak di instance user, DAN
-  - N_SHARED model serentak di Ollama bersama
-Setelah satu gelombang selesai (kuota sampel gelombang tercapai / batas waktu),
-sistem MENDINGINKAN beberapa detik, lalu menjalankan gelombang berikutnya
-dengan ROTASI set model lain. Begitu seterusnya hingga target tercapai.
-Ini menjaga beban terkendali (tidak semua model sekaligus) & sopan ke GPU
-bersama, sambil tetap mengumpulkan diversitas model yang kaya.
-
-Fitur tiap sampel di-cache ke JSONL bertahap → aman terhadap gangguan (resume).
+Sampel manusia = teks nyata korpus akses-terbuka. Sampel AI dibuat BANYAK model
+(beragam arsitektur) dalam beragam gaya & temperatur, supaya detektor general.
+Fitur di-cache ke JSONL bertahap -> aman terhadap gangguan (resume).
 """
 
 from __future__ import annotations
@@ -45,23 +44,6 @@ _NUM_CTX = 4096
 
 _LOCAL = os.environ.get("ICALORA_AI_ENDPOINT", "http://127.0.0.1:11500")
 _SHARED = os.environ.get("ICALORA_SHARED_ENDPOINT", "http://127.0.0.1:11434")
-
-# Kolam model per endpoint (dirotasi antar-gelombang).
-_LOCAL_MODELS = ["qwen2.5:7b-instruct", "llama3.2:latest", "mistral:7b", "phi3:mini", "gemma2:9b"]
-_SHARED_MODELS = ["gemma4:latest", "gpt-oss:latest", "gemma3:27b"]
-
-
-def _pool(env: str, default: list[str]) -> list[str]:
-    raw = os.environ.get(env)
-    if raw:
-        try:
-            v = json.loads(raw)
-            if isinstance(v, list) and v:
-                return v
-        except json.JSONDecodeError:
-            pass
-    return default
-
 
 _AI_STYLES = [
     "Tulis satu abstrak akademik (120-200 kata) gaya formal baku.",
@@ -153,98 +135,92 @@ def _load_cache() -> tuple[list[list[float]], list[int], set[int]]:
     return X, y, used_ids
 
 
-def _run_wave(wave_lanes: list[tuple[str, str]], wave_quota: int, titles: list[str],
-              ti_box: list[int], fh, X, y, lock: threading.Lock, total_box: list[int],
-              target: int, wave_max_seconds: int) -> int:
-    """Jalankan satu gelombang: tiap lane (endpoint,model) satu worker serentak.
-    Berhenti saat kuota gelombang tercapai, judul habis, target total tercapai,
-    atau melewati batas waktu. Kembalikan jumlah sampel yang dihasilkan gelombang."""
-    wave_count = [0]
-    deadline = time.time() + wave_max_seconds
+def _count_ai() -> int:
+    """Hitung sampel AI (label 1) yang sudah ada di cache tanpa memuat semua fitur."""
+    if not _CACHE_PATH.exists():
+        return 0
+    n = 0
+    for line in _CACHE_PATH.read_text(encoding="utf-8").splitlines():
+        if '"label": 1' in line:
+            n += 1
+    return n
+
+
+def _fill_humans(target: int, fh) -> int:
+    """Pastikan cache punya `target` sampel manusia. Kembalikan jumlah akhir."""
+    _X, y, used_ids = _load_cache()
+    n_h = sum(1 for v in y if v == 0)
+    if n_h >= target:
+        return n_h
+    need = target - n_h
+    print(f"[gen] mengambil {need} sampel manusia…", flush=True)
+    for doc_id, _title, body in _human_samples(need, used_ids):
+        feat = feature_vector(_statistical_signals(body))
+        fh.write(json.dumps({"label": 0, "feat": feat, "src_id": doc_id}) + "\n")
+        fh.flush()
+        n_h += 1
+    print(f"[gen] sampel manusia kini={n_h}", flush=True)
+    return n_h
+
+
+def _generate_ai(lanes: list[tuple[str, str]], target_ai: int, titles: list[str],
+                 fh, lock: threading.Lock, max_seconds: int, concurrency: int) -> int:
+    """Pool `concurrency` worker; tiap worker memilih lane (endpoint,model) ACAK
+    per permintaan. Membatasi beban server (sopan) sekaligus menjaga diversitas
+    model. Berhenti saat cache AI >= target_ai, judul habis, atau lewat waktu.
+    Kembalikan jumlah AI akhir."""
+    state = {"ai": _count_ai(), "ti": 0}
+    deadline = time.time() + max_seconds
 
     def next_title() -> str | None:
         with lock:
-            if ti_box[0] >= len(titles):
+            if state["ti"] >= len(titles):
                 return None
-            t = titles[ti_box[0]]
-            ti_box[0] += 1
+            t = titles[state["ti"]]
+            state["ti"] += 1
             return t
 
-    def worker(endpoint: str, model: str, wid: int) -> None:
+    def worker(wid: int) -> None:
         rng = random.Random(10_000 + wid + int(time.time()) % 1000)
         fails = 0
         with httpx.Client() as client:
             while True:
                 with lock:
-                    if wave_count[0] >= wave_quota or total_box[0] >= target:
+                    if state["ai"] >= target_ai:
                         return
                 if time.time() > deadline:
                     return
                 title = next_title()
                 if title is None:
                     return
+                endpoint, model = rng.choice(lanes)
                 txt = _generate(client, endpoint, model, title, rng)
                 if not txt:
                     fails += 1
-                    if fails >= 15:
-                        print(f"[train]   lane {model}@{endpoint} berhenti (15 gagal)", flush=True)
+                    if fails >= 30:
+                        print(f"[gen]   worker {wid} berhenti (30 gagal beruntun)", flush=True)
                         return
                     continue
                 fails = 0
                 feat = feature_vector(_statistical_signals(txt))
                 with lock:
-                    if wave_count[0] >= wave_quota or total_box[0] >= target:
+                    if state["ai"] >= target_ai:
                         return
-                    X.append(feat)
-                    y.append(1)
                     fh.write(json.dumps({"label": 1, "feat": feat, "src_id": None, "gen": model}) + "\n")
                     fh.flush()
-                    wave_count[0] += 1
-                    total_box[0] += 1
-                    c = total_box[0]
+                    state["ai"] += 1
+                    c = state["ai"]
                 if c % 25 == 0:
-                    print(f"[train]   sampel AI: {c}/{target}", flush=True)
+                    print(f"[gen]   sampel AI: {c}/{target_ai}", flush=True)
 
     threads = []
-    for wid, (endpoint, model) in enumerate(wave_lanes):
-        t = threading.Thread(target=worker, args=(endpoint, model, wid), daemon=True)
+    for wid in range(max(1, concurrency)):
+        t = threading.Thread(target=worker, args=(wid,), daemon=True)
         t.start()
         threads.append(t)
     for t in threads:
         t.join()
-    return wave_count[0]
-
-
-def _generate_ai(target: int, start_count: int, titles: list[str], fh, X, y, lock: threading.Lock,
-                 n_local: int, n_shared: int, wave_size: int, cooldown: int, wave_max_seconds: int) -> None:
-    """Loop gelombang: tiap gelombang = n_local model lokal + n_shared model bersama,
-    serentak; lalu dinginkan `cooldown` detik; rotasi set model berikutnya."""
-    local_pool = _pool("ICALORA_LOCAL_MODELS", _LOCAL_MODELS)
-    shared_pool = _pool("ICALORA_SHARED_MODELS", _SHARED_MODELS)
-    total_box = [start_count]
-    ti_box = [0]
-    li = si = 0
-    wave_no = 0
-    while total_box[0] < target and ti_box[0] < len(titles):
-        wave_no += 1
-        lanes: list[tuple[str, str]] = []
-        picked_local, picked_shared = [], []
-        for _ in range(n_local):
-            if local_pool:
-                m = local_pool[li % len(local_pool)]; li += 1
-                lanes.append((_LOCAL, m)); picked_local.append(m)
-        for _ in range(n_shared):
-            if shared_pool:
-                m = shared_pool[si % len(shared_pool)]; si += 1
-                lanes.append((_SHARED, m)); picked_shared.append(m)
-        print(f"[train] === GELOMBANG {wave_no}: saya={picked_local} | ollama={picked_shared} "
-              f"(kuota {wave_size}) ===", flush=True)
-        made = _run_wave(lanes, wave_size, titles, ti_box, fh, X, y, lock, total_box, target, wave_max_seconds)
-        print(f"[train] gelombang {wave_no} selesai: +{made} (total AI={total_box[0]}/{target})", flush=True)
-        if total_box[0] >= target or ti_box[0] >= len(titles):
-            break
-        print(f"[train] mendinginkan {cooldown}s…", flush=True)
-        time.sleep(cooldown)
+    return state["ai"]
 
 
 def _evaluate(model, X: list[list[float]], y: list[int]) -> dict:
@@ -273,56 +249,44 @@ def _evaluate(model, X: list[list[float]], y: list[int]) -> dict:
     }
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--per-class", type=int, default=5000)
-    ap.add_argument("--test-frac", type=float, default=0.2)
-    ap.add_argument("--seed", type=int, default=42)
-    ap.add_argument("--n-local", type=int, default=2, help="model lokal serentak per gelombang")
-    ap.add_argument("--n-shared", type=int, default=2, help="model Ollama bersama serentak per gelombang")
-    ap.add_argument("--wave-size", type=int, default=200, help="sampel AI per gelombang")
-    ap.add_argument("--cooldown", type=int, default=120, help="jeda pendingin antar-gelombang (detik)")
-    ap.add_argument("--wave-max-seconds", type=int, default=1800, help="batas waktu satu gelombang")
-    ap.add_argument("--fresh", action="store_true", help="abaikan cache, mulai dari nol")
-    args = ap.parse_args()
-    rng = random.Random(args.seed)
+def _parse_models(s: str) -> list[str]:
+    return [m.strip() for m in s.split(",") if m.strip()]
 
-    if args.fresh and _CACHE_PATH.exists():
-        _CACHE_PATH.unlink()
 
-    X, y, used_ids = _load_cache()
-    n_h = sum(1 for v in y if v == 0)
-    n_a = sum(1 for v in y if v == 1)
-    print(f"[train] cache awal: manusia={n_h} AI={n_a} (target {args.per_class}/kelas)", flush=True)
+def _lanes_from_args(local: str, shared: str) -> list[tuple[str, str]]:
+    lanes: list[tuple[str, str]] = []
+    for m in _parse_models(local):
+        lanes.append((_LOCAL, m))
+    for m in _parse_models(shared):
+        lanes.append((_SHARED, m))
+    return lanes
 
+
+def cmd_generate(args) -> None:
+    random.seed(args.seed)
     fh = _CACHE_PATH.open("a", encoding="utf-8")
     try:
-        if n_h < args.per_class:
-            need = args.per_class - n_h
-            print(f"[train] mengambil {need} sampel manusia tambahan…", flush=True)
-            humans = _human_samples(need, used_ids)
-            for doc_id, _title, body in humans:
-                feat = feature_vector(_statistical_signals(body))
-                X.append(feat)
-                y.append(0)
-                used_ids.add(doc_id)
-                fh.write(json.dumps({"label": 0, "feat": feat, "src_id": doc_id}) + "\n")
-                fh.flush()
-            n_h = sum(1 for v in y if v == 0)
-            print(f"[train] sampel manusia kini={n_h}", flush=True)
-
-        if n_a < args.per_class:
-            topics = [t for _id, t, _b in _human_samples(args.per_class + 2000, set())]
-            lock = threading.Lock()
-            _generate_ai(args.per_class, n_a, topics, fh, X, y, lock,
-                         args.n_local, args.n_shared, args.wave_size, args.cooldown, args.wave_max_seconds)
+        _fill_humans(args.per_class, fh)
+        lanes = _lanes_from_args(args.local_models, args.shared_models)
+        if not lanes:
+            print("[gen] tidak ada model; lewati generate.", flush=True)
+            return
+        print(f"[gen] lanes={[m for _e,m in lanes]} target_ai={args.target_ai}", flush=True)
+        topics = [t for _id, t, _b in _human_samples(args.target_ai + 2000, set())]
+        lock = threading.Lock()
+        final = _generate_ai(lanes, args.target_ai, topics, fh, lock, args.max_seconds, args.concurrency)
+        print(f"[gen] selesai. AI di cache={final}", flush=True)
     finally:
         fh.close()
 
+
+def cmd_finalize(args) -> None:
+    rng = random.Random(args.seed)
+    X, y, _ = _load_cache()
     pos = sum(y)
-    print(f"[train] total {len(X)} sampel (AI={pos}, manusia={len(y) - pos})", flush=True)
+    print(f"[fin] total {len(X)} sampel (AI={pos}, manusia={len(y) - pos})", flush=True)
     if pos < 10 or (len(y) - pos) < 10:
-        raise SystemExit("[train] sampel terlalu sedikit untuk melatih + validasi.")
+        raise SystemExit("[fin] sampel terlalu sedikit untuk melatih + validasi.")
 
     idx0 = [i for i, v in enumerate(y) if v == 0]
     idx1 = [i for i, v in enumerate(y) if v == 1]
@@ -335,24 +299,48 @@ def main() -> None:
     ytr = [y[i] for i in range(len(y)) if i not in test_idx]
     Xte = [X[i] for i in sorted(test_idx)]
     yte = [y[i] for i in sorted(test_idx)]
-    print(f"[train] split: latih={len(Xtr)} held-out={len(Xte)}; melatih…", flush=True)
+    print(f"[fin] split: latih={len(Xtr)} held-out={len(Xte)}; melatih…", flush=True)
 
     model = train(Xtr, ytr)
     metrics = _evaluate(model, Xte, yte)
     model.meta["validation"] = metrics
-    model.meta["per_class"] = args.per_class
     model.meta["n_human"] = len(y) - pos
     model.meta["n_ai"] = pos
-    model.meta["ai_models"] = _pool("ICALORA_LOCAL_MODELS", _LOCAL_MODELS) + _pool("ICALORA_SHARED_MODELS", _SHARED_MODELS)
     save(model)
 
-    print("[train] === VALIDASI (held-out) ===", flush=True)
+    print("[fin] === VALIDASI (held-out) ===", flush=True)
     print(f"  akurasi            : {metrics['accuracy']}")
     print(f"  false-positive rate: {metrics['false_positive_rate']}  (manusia dituduh AI)")
     print(f"  false-negative rate: {metrics['false_negative_rate']}  (AI lolos)")
     print(f"  precision / recall : {metrics['precision']} / {metrics['recall']}")
     print(f"  confusion          : {metrics['confusion']}")
-    print(f"[train] selesai. akurasi latih={model.meta.get('train_accuracy')} n={model.meta.get('n')}", flush=True)
+    print(f"[fin] selesai. akurasi latih={model.meta.get('train_accuracy')} n={model.meta.get('n')}", flush=True)
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    sub = ap.add_subparsers(dest="mode")
+
+    g = sub.add_parser("generate", help="hasilkan sampel AI lalu keluar")
+    g.add_argument("--local-models", default="", help="daftar model instance user (koma)")
+    g.add_argument("--shared-models", default="", help="daftar model Ollama bersama (koma)")
+    g.add_argument("--target-ai", type=int, required=True, help="hentikan saat cache AI >= nilai ini")
+    g.add_argument("--per-class", type=int, default=5000, help="jumlah sampel manusia yang diinginkan")
+    g.add_argument("--max-seconds", type=int, default=7200)
+    g.add_argument("--concurrency", type=int, default=3, help="jumlah worker paralel (beban ke server)")
+    g.add_argument("--seed", type=int, default=42)
+
+    f = sub.add_parser("finalize", help="latih dari cache + simpan model.json")
+    f.add_argument("--test-frac", type=float, default=0.2)
+    f.add_argument("--seed", type=int, default=42)
+
+    args = ap.parse_args()
+    if args.mode == "generate":
+        cmd_generate(args)
+    elif args.mode == "finalize":
+        cmd_finalize(args)
+    else:
+        ap.error("pilih mode: generate | finalize")
 
 
 if __name__ == "__main__":
