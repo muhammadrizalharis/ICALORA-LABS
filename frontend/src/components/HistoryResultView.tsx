@@ -164,6 +164,7 @@ export default function HistoryResultView({ item }: { item: HistoryItemFull }) {
         <PlagiarismReport
           report={result as unknown as Report}
           docTitle={item.title ?? undefined}
+          historyId={item.id}
         />
       ) : (
         <GenericResult

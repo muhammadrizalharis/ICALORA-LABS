@@ -51,8 +51,34 @@ _BIB_RE = re.compile(
     re.UNICODE,
 )
 
-# Kelompok kecocokan berdasarkan status sitasi & kutipan (lihat docs/11 A.1).
-_MATCH_GROUP_ORDER = ["uncited", "missing_quote", "missing_citation", "cited_quoted"]
+# Kategori temuan — skema ORISINAL berbasis sifat & tingkat keparahan
+# kecocokan (bukan model status-sitasi milik alat komersial). Urutan = dari
+# paling berisiko ke paling aman.
+#   salinan_langsung : teks nyaris identik, tanpa atribusi  (paling berat)
+#   kemiripan_kuat   : tumpang-tindih leksikal tinggi tapi parsial/ditata ulang
+#   indikasi_parafrase: mirip makna, kata diubah (leksikal rendah)
+#   sumber_terkredit : dikutip & disitasi dengan benar      (tidak dihitung risiko)
+_MATCH_GROUP_ORDER = [
+    "salinan_langsung",
+    "kemiripan_kuat",
+    "indikasi_parafrase",
+    "sumber_terkredit",
+]
+
+# Ambang pencocokan tingkat-kalimat (lebih sensitif agar tumpang-tindih
+# parsial ikut tertangkap — penting untuk ketelitian akademik).
+_MATCH_MIN = 0.30      # minimum containment shingle agar dihitung sebagai temuan
+_VERBATIM_AT = 0.80    # >= ini: dianggap salinan nyaris persis
+_STRUCTURAL_AT = 0.45  # >= ini: kemiripan kuat terstruktur
+
+# Bobot kontribusi tiap kategori pada Indeks Integritas (salinan penuh = 1.0,
+# makin "longgar" makin kecil; sumber terkredit tidak menambah risiko).
+_GROUP_WEIGHT = {
+    "salinan_langsung": 1.0,
+    "kemiripan_kuat": 0.85,
+    "indikasi_parafrase": 0.6,
+    "sumber_terkredit": 0.0,
+}
 
 # Batas teks dokumen yang disimpan untuk tampilan "Dokumen dengan Sorotan".
 # Cukup untuk naskah panjang, tanpa membengkakkan riwayat (jsonb).
@@ -62,11 +88,12 @@ _MAX_DOC_DISPLAY = 60_000
 def _classify_match(
     sent: str,
     idx: int,
+    best_ratio: float,
     quoted_spans: list[tuple[int, int]],
     cite_spans: list[tuple[int, int]],
     bib_start: int | None,
 ) -> dict:
-    """Tentukan status kutipan/sitasi sebuah kalimat yang cocok."""
+    """Tentukan kategori temuan berdasar atribusi + kekuatan kecocokan."""
     if idx < 0:
         quoted = cited = in_bib = False
     else:
@@ -75,14 +102,15 @@ def _classify_match(
         quoted = any(s <= mid <= e for s, e in quoted_spans)
         cited = any(s < end + 80 and e > idx for s, e in cite_spans)
         in_bib = bib_start is not None and idx >= bib_start
+    # Dikutip DAN disitasi dengan benar → atribusi sah (bukan risiko).
     if cited and quoted:
-        group = "cited_quoted"
-    elif cited and not quoted:
-        group = "missing_quote"
-    elif quoted and not cited:
-        group = "missing_citation"
+        group = "sumber_terkredit"
+    elif best_ratio >= _VERBATIM_AT:
+        group = "salinan_langsung"
+    elif best_ratio >= _STRUCTURAL_AT:
+        group = "kemiripan_kuat"
     else:
-        group = "uncited"
+        group = "indikasi_parafrase"
     return {"quoted": quoted, "cited": cited, "in_bibliography": in_bib, "group": group}
 
 
@@ -97,12 +125,14 @@ def _sentences(s: str) -> list[str]:
     return [m.group(0).strip() for m in _SENT_RE.finditer(s) if len(m.group(0).strip()) >= 20]
 
 
-def _chunk_match(doc: str, candidates: list[dict], threshold: float = 0.55) -> dict:
+def _chunk_match(doc: str, candidates: list[dict], threshold: float = _MATCH_MIN) -> dict:
     """Pencocokan tingkat-kalimat (tingkat kalimat) terhadap dokumen kandidat.
 
     Untuk tiap kalimat masukan, hitung containment shingle terhadap gabungan
-    shingle tiap dokumen kandidat; kalimat dengan containment tinggi ditandai
-    sebagai kutipan yang cocok. Indeks kemiripan = proporsi karakter yang cocok.
+    shingle tiap dokumen kandidat; kalimat dengan containment di atas ambang
+    ditandai sebagai temuan dan diberi kategori sesuai kekuatan kecocokan.
+    Indeks Integritas = proporsi karakter yang cocok, DIBOBOT per kategori
+    (salinan penuh bobot 1.0, parsial/parafrase lebih kecil).
     """
     cand_shingles: list[tuple[dict, set[str]]] = []
     for c in candidates:
@@ -114,7 +144,7 @@ def _chunk_match(doc: str, candidates: list[dict], threshold: float = 0.55) -> d
 
     sentences = _sentences(doc)
     matched: list[dict] = []
-    matched_chars = 0
+    weighted_chars = 0.0
     total_chars = max(len(doc), 1)
 
     quoted_spans = [(m.start(), m.end()) for m in _QUOTE_RE.finditer(doc)]
@@ -141,13 +171,16 @@ def _chunk_match(doc: str, candidates: list[dict], threshold: float = 0.55) -> d
                 best_ratio = ratio
                 best_src = c
         if best_ratio >= threshold and best_src is not None:
-            matched_chars += len(sent)
             idx = doc.find(sent)
             if idx < 0:
                 idx = low_doc.find(sent.lower())
-            status = _classify_match(sent, idx, quoted_spans, cite_spans, bib_start)
-            group_chars[status["group"]] += len(sent)
-            group_count[status["group"]] += 1
+            status = _classify_match(sent, idx, best_ratio, quoted_spans, cite_spans, bib_start)
+            grp = status["group"]
+            group_chars[grp] += len(sent)
+            group_count[grp] += 1
+            # Kontribusi ke indeks: proporsi kalimat yang benar-benar cocok,
+            # dibobot kategori — bukan seluruh panjang kalimat.
+            weighted_chars += len(sent) * best_ratio * _GROUP_WEIGHT[grp]
             matched.append(
                 {
                     "sentence": sent[:300],
@@ -159,11 +192,13 @@ def _chunk_match(doc: str, candidates: list[dict], threshold: float = 0.55) -> d
                     "quoted": status["quoted"],
                     "cited": status["cited"],
                     "in_bibliography": status["in_bibliography"],
-                    "group": status["group"],
+                    "group": grp,
                 }
             )
 
-    similarity_index = round(matched_chars / total_chars * 100, 1)
+    # Indeks Integritas (leksikal berbobot): seberapa besar porsi dokumen yang
+    # tumpang-tindih dengan korpus, menimbang kekuatan tiap kecocokan.
+    integrity_index = round(weighted_chars / total_chars * 100, 1)
     matched.sort(key=lambda m: m["match_ratio"], reverse=True)
     match_groups = [
         {
@@ -174,7 +209,7 @@ def _chunk_match(doc: str, candidates: list[dict], threshold: float = 0.55) -> d
         for k in _MATCH_GROUP_ORDER
     ]
     return {
-        "similarity_index": similarity_index,
+        "similarity_index": integrity_index,
         "matched_sentences": len(matched),
         "total_sentences": len(sentences),
         "matched_passages": matched[:50],
@@ -292,20 +327,34 @@ def check_plagiarism(doc: str, top_k: int = 30) -> dict:
         s.pop("_fulltext", None)
 
     sources.sort(key=lambda s: (s["lexical_similarity"], s["semantic_similarity"]), reverse=True)
-    # Indeks kemiripan utama = kecocokan leksikal/salinan (tingkat kalimat).
-    # Semantik dilaporkan terpisah sebagai risiko parafrase (butuh ambang tinggi).
-    overall = max((s["lexical_similarity"] for s in sources), default=0.0)
+    # Komponen integritas:
+    #  - copy_index     : tumpang-tindih teks berbobot tingkat-kalimat (sensitif,
+    #                     mencakup salinan penuh + parsial + indikasi parafrase).
+    #  - lexical_doc    : kemiripan leksikal tingkat-dokumen (MinHash Jaccard).
+    #  - paraphrase     : kemiripan semantik tertinggi (parafrase kata diubah).
+    copy_index = chunk["similarity_index"]
+    lexical_doc = max((s["lexical_similarity"] for s in sources), default=0.0)
     paraphrase = max((s["semantic_similarity"] for s in sources), default=0.0)
-    # Gabungkan: indeks utama = maksimum antara coverage kalimat dan leksikal dokumen.
-    similarity_index = max(overall, chunk["similarity_index"])
+    # Kontribusi parafrase dikalibrasi konservatif: hanya kemiripan semantik
+    # sangat tinggi yang menambah indeks, agar dokumen yang sekadar SETOPIK
+    # tidak ikut terangkat (menghindari tuduhan palsu). cos 80%→0, 100%→~18%.
+    paraphrase_component = round(max(0.0, paraphrase - 80.0) / 20.0 * 18.0, 1)
+    # Indeks Integritas (gabungan) = tumpang-tindih teks + kontribusi parafrase.
+    integrity_index = round(
+        min(100.0, max(copy_index, lexical_doc) + paraphrase_component), 1
+    )
+    similarity_index = integrity_index
     generated_at = datetime.now(timezone.utc)
     total_docs = _corpus_size()
     embedded_docs = embedded_corpus_size()
     semantic_coverage = round(embedded_docs / total_docs * 100, 1) if total_docs else 0.0
     return {
-        "overall_similarity": similarity_index,
-        "document_lexical_similarity": overall,
+        "overall_similarity": integrity_index,
+        "integrity_index": integrity_index,
+        "copy_similarity": copy_index,
+        "document_lexical_similarity": lexical_doc,
         "paraphrase_similarity": paraphrase,
+        "paraphrase_component": paraphrase_component,
         "similarity_index": chunk["similarity_index"],
         "matched_sentences": chunk["matched_sentences"],
         "total_sentences": chunk["total_sentences"],

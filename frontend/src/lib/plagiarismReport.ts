@@ -36,6 +36,9 @@ export interface MatchGroup {
 
 export interface Report {
   overall_similarity: number;
+  integrity_index?: number;
+  copy_similarity?: number;
+  paraphrase_component?: number;
   document_lexical_similarity: number;
   paraphrase_similarity: number;
   similarity_index: number;
@@ -55,6 +58,8 @@ export interface Report {
   semantic_coverage_pct?: number;
   coverage_note?: string;
   generated_at?: string;
+  has_original_pdf?: boolean;
+  source_filename?: string;
 }
 
 export const HILITE = [
@@ -72,30 +77,36 @@ export const HILITE = [
 export const MIN_WORDS = 8; // kecocokan < 8 kata dianggap terlalu pendek
 export const MIN_PCT = 1.0; // sumber yang menyumbang < 1% dianggap kecil
 
-// Kelompok kecocokan (Match Groups) berdasar status sitasi & kutipan — warna orisinal ICALORA.
+// Kelompok kecocokan (Match Groups) — taksonomi orisinal ICALORA berbasis
+// tingkat keparahan & sifat kecocokan (bukan status sitasi ala Turnitin).
 export const MATCH_GROUP_META: Record<string, { label: string; dot: string; desc: string }> = {
-  uncited: {
-    label: "Tidak Disitasi/Dikutip",
-    dot: "#dc2626",
-    desc: "Cocok tanpa sitasi & tanpa tanda kutip",
+  salinan_langsung: {
+    label: "Salinan Langsung",
+    dot: "#e11d48",
+    desc: "Teks nyaris identik dengan sumber, tanpa atribusi",
   },
-  missing_quote: {
-    label: "Kutipan Hilang",
-    dot: "#ea580c",
-    desc: "Mirip sumber & disitasi, tetapi tanpa tanda kutip",
+  kemiripan_kuat: {
+    label: "Kemiripan Kuat",
+    dot: "#f97316",
+    desc: "Tumpang-tindih kata tinggi walau sebagian ditata ulang",
   },
-  missing_citation: {
-    label: "Sitasi Hilang",
-    dot: "#ca8a04",
-    desc: "Ada tanda kutip, tetapi tanpa sitasi",
+  indikasi_parafrase: {
+    label: "Indikasi Parafrase",
+    dot: "#eab308",
+    desc: "Kemiripan makna dengan sebagian kata diubah",
   },
-  cited_quoted: {
-    label: "Disitasi & Dikutip",
-    dot: "#16a34a",
-    desc: "Ada sitasi dan tanda kutip",
+  sumber_terkredit: {
+    label: "Sumber Terkredit",
+    dot: "#22c55e",
+    desc: "Dikutip dan disitasi dengan benar — bukan risiko",
   },
 };
-export const MATCH_GROUP_ORDER = ["uncited", "missing_quote", "missing_citation", "cited_quoted"];
+export const MATCH_GROUP_ORDER = [
+  "salinan_langsung",
+  "kemiripan_kuat",
+  "indikasi_parafrase",
+  "sumber_terkredit",
+];
 
 export function escHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -260,9 +271,10 @@ export function buildReportHtml(args: {
     hiOpts,
   );
   const filtered = hiOpts.minWords > 0 || hiOpts.exclude.size > 0;
+  const headline = report.integrity_index ?? report.overall_similarity;
   const idx = filtered
     ? Math.min(100, Math.round(hiSources.reduce((a, s) => a + s.pct, 0) * 10) / 10)
-    : report.overall_similarity;
+    : headline;
   const v = verdictFor(idx);
 
   const overview = hiSources

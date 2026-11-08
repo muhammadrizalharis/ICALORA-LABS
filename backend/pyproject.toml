@@ -20,6 +20,7 @@ dependencies = [
     "zstandard>=0.22",
     "faster-whisper>=1.0",
     "weasyprint>=60",
+    "pymupdf>=1.24",
 ]
 
 [project.optional-dependencies]

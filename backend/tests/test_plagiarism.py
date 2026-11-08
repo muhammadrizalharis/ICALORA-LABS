@@ -80,15 +80,33 @@ def test_classify_match_groups():
     )
     qs, cs, bib_start = _spans(doc)
 
-    cited_unquoted = "Menurut Smith (2020), pembelajaran mesin penting."
-    quoted_uncited = '"Deep learning mengubah analisis citra medis modern."'
-    plain = "Kalimat biasa tanpa penanda apa pun di sini."
+    verbatim = "Kalimat biasa tanpa penanda apa pun di sini."
+    structural = "Menurut Smith (2020), pembelajaran mesin penting."
     bib_entry = "Smith J. 2020."
 
-    assert _classify_match(cited_unquoted, doc.find(cited_unquoted), qs, cs, bib_start)["group"] == "missing_quote"
-    assert _classify_match(quoted_uncited, doc.find(quoted_uncited), qs, cs, bib_start)["group"] == "missing_citation"
-    assert _classify_match(plain, doc.find(plain), qs, cs, bib_start)["group"] == "uncited"
-    assert _classify_match(bib_entry, doc.find(bib_entry), qs, cs, bib_start)["in_bibliography"] is True
+    # Tanpa atribusi, kekuatan kecocokan menentukan kategori.
+    assert (
+        _classify_match(verbatim, doc.find(verbatim), 0.9, qs, cs, bib_start)["group"]
+        == "salinan_langsung"
+    )
+    assert (
+        _classify_match(verbatim, doc.find(verbatim), 0.5, qs, cs, bib_start)["group"]
+        == "kemiripan_kuat"
+    )
+    assert (
+        _classify_match(verbatim, doc.find(verbatim), 0.35, qs, cs, bib_start)["group"]
+        == "indikasi_parafrase"
+    )
+    assert (
+        _classify_match(structural, doc.find(structural), 0.9, qs, cs, bib_start)["cited"]
+        is True
+    )
+    assert (
+        _classify_match(bib_entry, doc.find(bib_entry), 0.9, qs, cs, bib_start)[
+            "in_bibliography"
+        ]
+        is True
+    )
 
 
 def test_classify_cited_and_quoted():
@@ -97,8 +115,8 @@ def test_classify_cited_and_quoted():
     doc = '"Model ini memberikan akurasi tinggi pada data uji" (Jones, 2019).'
     qs, cs, bib_start = _spans(doc)
     sent = '"Model ini memberikan akurasi tinggi pada data uji"'
-    st = _classify_match(sent, doc.find(sent), qs, cs, bib_start)
-    assert st["group"] == "cited_quoted"
+    st = _classify_match(sent, doc.find(sent), 0.95, qs, cs, bib_start)
+    assert st["group"] == "sumber_terkredit"
     assert st["quoted"] and st["cited"]
 
 
@@ -112,13 +130,13 @@ def test_chunk_match_includes_group_metadata():
             "_fulltext": sentence + " Additional unrelated trailing context here.",
         }
     ]
-    res = _chunk_match(sentence, candidates, threshold=0.55)
+    res = _chunk_match(sentence, candidates)
     assert "match_groups" in res
     assert {g["type"] for g in res["match_groups"]} == {
-        "uncited",
-        "missing_quote",
-        "missing_citation",
-        "cited_quoted",
+        "salinan_langsung",
+        "kemiripan_kuat",
+        "indikasi_parafrase",
+        "sumber_terkredit",
     }
-    assert res["matched_passages"][0]["group"] == "uncited"
+    assert res["matched_passages"][0]["group"] == "salinan_langsung"
     assert res["matched_passages"][0]["char_len"] > 0

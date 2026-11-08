@@ -15,6 +15,10 @@
 - [x] Retensi riwayat **3 hari** (auto-purge `purge_expired_history`, filter interval di query).
 - [x] Laporan plagiarisme ala Turnitin: dokumen penuh + highlight multi-warna, Match Groups, Top Sources, filter pengecualian (bibliografi/kutipan), ring skor (`PlagiarismReport.tsx`, `lib/plagiarismReport.ts`).
 - [x] Tombol **Lihat Laporan (PDF)** & **Unduh Laporan** pada report plagiarisme.
+- [x] **Laporan berformat identik dengan berkas asli**: unggah PDF → berkas asli disimpan di VM (tabel `tool_file`, bytea), laporan dirender dengan PyMuPDF = sampul ringkasan integritas + highlight ditimpakan langsung di atas halaman dokumen asli (`plagiarism/report_pdf.py`, endpoint `/tools/plagiarism-file` & `/tools/plagiarism-report/{id}`).
+- [x] **Taksonomi kecocokan orisinal** (bukan tiruan Turnitin/Mulfu): Salinan Langsung / Kemiripan Kuat / Indikasi Parafrase / Sumber Terkredit — berbasis keparahan & sifat kecocokan.
+- [x] **Indeks integritas gabungan** lebih kritis untuk akademik: menggabungkan salinan langsung + kemiripan leksikal + komponen parafrase semantik, ambang pencocokan diperketat (0.55→0.30).
+- [x] Penyimpanan berkas di **VM Postgres** (bukan disk HPC) + ikut **auto-purge 3 hari** dan cascade saat riwayat dihapus.
 - [x] Backend menyimpan `document_text` (cap 60k) + `document_truncated` untuk highlight sisi klien.
 - [x] Semua tool "rich" dikonversi ke alur redirect-ke-Beranda (Grader, Resume, Citation, AI-Detector, Authorship, Hidden-text, Publikasi, Writing-report, Transkrip, Rewrite, TOC, Improve, Reactions).
 - [x] Unified history viewer (`HistoryResultView.tsx`) + `GenericResult` sebagai fallback.

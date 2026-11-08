@@ -120,7 +120,15 @@ def purge_expired_history() -> int:
     retensi: lebih dari N hari, berkas dihapus permanen.
     """
     days = max(1, int(settings.history_retention_days))
+    ensure_file_schema()
     with engine.begin() as c:
+        c.execute(
+            text(
+                "DELETE FROM tool_file "
+                "WHERE created_at < now() - make_interval(days => :days)"
+            ),
+            {"days": days},
+        )
         res = c.execute(
             text(
                 "DELETE FROM tool_history "
@@ -131,15 +139,55 @@ def purge_expired_history() -> int:
     return res.rowcount or 0
 
 
-def record_history(
-    user_id: int, tool: str, title: str, input_preview: str, result: dict
-) -> None:
+_FILE_SCHEMA_READY = False
+
+
+def ensure_file_schema() -> None:
+    """Buat tabel penyimpanan berkas asli (di VM Postgres) bila belum ada.
+
+    Berkas asli (mis. PDF) disimpan sebagai bytea DI VM yang sama dengan
+    riwayat — tidak menyentuh disk HPC — dan ikut kebijakan hapus 3 hari.
+    """
+    global _FILE_SCHEMA_READY
+    if _FILE_SCHEMA_READY:
+        return
     with engine.begin() as c:
         c.execute(
             text(
                 """
+                CREATE TABLE IF NOT EXISTS tool_file (
+                    id          bigserial PRIMARY KEY,
+                    user_id     bigint NOT NULL,
+                    history_id  bigint,
+                    filename    text,
+                    mime        text,
+                    byte_size   bigint,
+                    sha256      text,
+                    data        bytea NOT NULL,
+                    created_at  timestamptz NOT NULL DEFAULT now()
+                )
+                """
+            )
+        )
+        c.execute(
+            text("CREATE INDEX IF NOT EXISTS idx_tool_file_history ON tool_file(history_id)")
+        )
+        c.execute(
+            text("CREATE INDEX IF NOT EXISTS idx_tool_file_user ON tool_file(user_id)")
+        )
+    _FILE_SCHEMA_READY = True
+
+
+def record_history(
+    user_id: int, tool: str, title: str, input_preview: str, result: dict
+) -> int | None:
+    with engine.begin() as c:
+        row = c.execute(
+            text(
+                """
                 INSERT INTO tool_history (user_id, tool, title, input_preview, result)
                 VALUES (:uid, :tool, :title, :prev, CAST(:res AS jsonb))
+                RETURNING id
                 """
             ),
             {
@@ -149,11 +197,69 @@ def record_history(
                 "prev": input_preview[:500] if input_preview else None,
                 "res": json.dumps(result)[:200000],
             },
-        )
+        ).first()
     try:
         purge_expired_history()
     except Exception:  # noqa: BLE001, S110
         pass
+    return int(row.id) if row else None
+
+
+def save_tool_file(
+    user_id: int,
+    history_id: int | None,
+    filename: str | None,
+    mime: str | None,
+    data: bytes,
+    sha256: str | None = None,
+) -> int | None:
+    """Simpan berkas asli di VM (bytea). Kembalikan id baris."""
+    ensure_file_schema()
+    with engine.begin() as c:
+        row = c.execute(
+            text(
+                """
+                INSERT INTO tool_file
+                    (user_id, history_id, filename, mime, byte_size, sha256, data)
+                VALUES (:uid, :hid, :fn, :mime, :sz, :sha, :data)
+                RETURNING id
+                """
+            ),
+            {
+                "uid": user_id,
+                "hid": history_id,
+                "fn": (filename or "")[:300] or None,
+                "mime": (mime or "")[:120] or None,
+                "sz": len(data),
+                "sha": sha256,
+                "data": data,
+            },
+        ).first()
+    return int(row.id) if row else None
+
+
+def get_tool_file_by_history(user_id: int, history_id: int) -> dict | None:
+    """Ambil berkas asli untuk sebuah riwayat (hanya dalam masa retensi)."""
+    ensure_file_schema()
+    days = max(1, int(settings.history_retention_days))
+    with engine.connect() as c:
+        r = c.execute(
+            text(
+                "SELECT filename, mime, byte_size, data FROM tool_file "
+                "WHERE user_id = :uid AND history_id = :hid "
+                "AND created_at >= now() - make_interval(days => :days) "
+                "ORDER BY id DESC LIMIT 1"
+            ),
+            {"uid": user_id, "hid": history_id, "days": days},
+        ).first()
+    if not r:
+        return None
+    return {
+        "filename": r.filename,
+        "mime": r.mime,
+        "byte_size": r.byte_size,
+        "data": bytes(r.data) if r.data is not None else b"",
+    }
 
 
 def list_history(user_id: int, tool: str | None = None, limit: int = 50) -> list[dict]:
@@ -209,7 +315,12 @@ def get_history_item(user_id: int, item_id: int) -> dict | None:
 
 
 def delete_history_item(user_id: int, item_id: int) -> bool:
+    ensure_file_schema()
     with engine.begin() as c:
+        c.execute(
+            text("DELETE FROM tool_file WHERE user_id = :uid AND history_id = :id"),
+            {"uid": user_id, "id": item_id},
+        )
         res = c.execute(
             text("DELETE FROM tool_history WHERE user_id = :uid AND id = :id"),
             {"uid": user_id, "id": item_id},

@@ -14,6 +14,8 @@ interface TextInputProps {
   onChange: (v: string) => void;
   placeholder?: string;
   rows?: number;
+  /** Dipanggil dengan berkas asli saat diunggah (null bila pengguna mengetik/menempel). */
+  onFile?: (file: File | null) => void;
 }
 
 const ACCEPT = ".txt,.md,.csv,.tex,.pdf,.docx";
@@ -23,6 +25,7 @@ export default function TextInput({
   onChange,
   placeholder = "Tempel atau ketik teks di sini…",
   rows = 8,
+  onFile,
 }: TextInputProps) {
   const [mode, setMode] = useState<"paste" | "upload">("paste");
   const [dragOver, setDragOver] = useState(false);
@@ -37,6 +40,7 @@ export default function TextInput({
     try {
       const res = await apiUpload<ExtractResult>("/tools/extract-text", file);
       onChange(res.text);
+      onFile?.(file);
       setFileInfo(`${res.filename} · ${res.chars.toLocaleString("id-ID")} karakter diekstrak`);
       setMode("paste");
     } catch (e) {
@@ -84,7 +88,10 @@ export default function TextInput({
       {mode === "paste" ? (
         <textarea
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => {
+            onChange(e.target.value);
+            onFile?.(null);
+          }}
           placeholder={placeholder}
           rows={rows}
           className="w-full resize-y rounded-xl border border-c surface p-4 text-sm text-neutral-900 outline-none focus:border-[color:var(--brand)] dark:text-neutral-100 dark:placeholder:text-neutral-500"

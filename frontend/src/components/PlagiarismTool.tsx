@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { apiPost } from "@/lib/api";
+import { apiPost, apiUpload } from "@/lib/api";
 import TextInput from "@/components/TextInput";
 import { useJobLauncher } from "@/lib/useJobs";
 import { jobTitle } from "@/lib/jobs";
@@ -9,14 +9,19 @@ import { jobTitle } from "@/lib/jobs";
 export default function PlagiarismTool() {
   const [text, setText] = useState("");
   const [docTitle, setDocTitle] = useState("");
+  const [file, setFile] = useState<File | null>(null);
   const launch = useJobLauncher();
 
   function run() {
     if (!text.trim()) return;
+    const original = file;
     launch({
       tool: "plagiarism-checker",
-      title: docTitle.trim() || jobTitle(text),
-      run: () => apiPost("/tools/plagiarism", { text, top_k: 30 }),
+      title: docTitle.trim() || (original ? original.name : jobTitle(text)),
+      run: () =>
+        original
+          ? apiUpload("/tools/plagiarism-file?top_k=30", original)
+          : apiPost("/tools/plagiarism", { text, top_k: 30 }),
     });
   }
 
@@ -43,6 +48,7 @@ export default function PlagiarismTool() {
         <TextInput
           value={text}
           onChange={setText}
+          onFile={setFile}
           placeholder="Tempel teks/abstrak, atau unggah berkas .pdf/.docx/.txt untuk diperiksa keasliannya…"
           rows={10}
         />

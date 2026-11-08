@@ -5,7 +5,13 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from app.services.ai_detector import detect_ai
-from app.services.auth import optional_user_from_request, record_history
+from app.services.auth import (
+    get_history_item,
+    get_tool_file_by_history,
+    optional_user_from_request,
+    record_history,
+    save_tool_file,
+)
 from app.services.authorship import analyze_authorship
 from app.services.citation import find_citations
 from app.services.file_extract import MAX_UPLOAD_BYTES, extract_text
@@ -24,6 +30,7 @@ from app.services.llm.tasks import (
     rewrite,
 )
 from app.services.plagiarism import check_plagiarism
+from app.services.plagiarism.report_pdf import build_report_pdf
 from app.services.publikasi import recommend_journals
 from app.services.report import MAX_HTML_BYTES, render_pdf
 from app.services.text_tools import analyze_text
@@ -198,6 +205,82 @@ def plagiarism_ep(body: PlagiarismIn, request: Request) -> dict:
         return res
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Cek plagiarisme gagal: {exc}") from exc
+
+
+@router.post("/plagiarism-file")
+async def plagiarism_file_ep(  # noqa: B008
+    request: Request,
+    file: UploadFile = File(...),  # noqa: B008
+    top_k: int = 30,
+) -> dict:
+    """Cek plagiarisme dari BERKAS asli; simpan PDF asli di VM untuk laporan
+    berformat identik (sorotan di atas dokumen asli)."""
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Berkas kosong.")
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413, detail=f"Berkas melebihi {MAX_UPLOAD_BYTES // (1024 * 1024)} MB."
+        )
+    try:
+        text = extract_text(file.filename or "", data).strip()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not text:
+        raise HTTPException(status_code=422, detail="Tidak ada teks yang dapat diekstrak.")
+    _guard(text)
+    try:
+        res = check_plagiarism(text, min(max(top_k, 1), 60))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Cek plagiarisme gagal: {exc}") from exc
+
+    is_pdf = (file.filename or "").lower().endswith(".pdf")
+    res["has_original_pdf"] = is_pdf
+    res["source_filename"] = file.filename
+    try:
+        user = optional_user_from_request(request)
+        if user:
+            hist_id = record_history(
+                user["id"], "plagiarism-checker", file.filename or "Cek Plagiarisme",
+                text[:200], res,
+            )
+            if hist_id and is_pdf:
+                save_tool_file(
+                    user["id"], hist_id, file.filename, "application/pdf", data,
+                    res.get("content_sha256"),
+                )
+    except Exception:  # noqa: BLE001, S110
+        pass
+    return res
+
+
+@router.get("/plagiarism-report/{history_id}")
+def plagiarism_report_ep(history_id: int, request: Request, dl: int = 0) -> Response:
+    """Laporan PDF berformat identik dengan berkas asli (sorotan + sampul)."""
+    user = optional_user_from_request(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Perlu login.")
+    item = get_history_item(user["id"], history_id)
+    if not item or item.get("tool") != "plagiarism-checker":
+        raise HTTPException(status_code=404, detail="Riwayat tidak ditemukan.")
+    f = get_tool_file_by_history(user["id"], history_id)
+    if not f or not f.get("data"):
+        raise HTTPException(
+            status_code=404,
+            detail="Dokumen asli tidak tersedia (kedaluwarsa atau bukan unggahan PDF).",
+        )
+    try:
+        pdf = build_report_pdf(f["data"], item["result"] or {})
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Render laporan gagal: {exc}") from exc
+    base = (f.get("filename") or "laporan").rsplit(".", 1)[0]
+    name = f"laporan-integritas-{base}.pdf"
+    disp = "attachment" if dl else "inline"
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'{disp}; filename="{name}"'},
+    )
 
 
 @router.post("/rewrite")

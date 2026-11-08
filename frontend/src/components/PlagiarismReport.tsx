@@ -38,10 +38,12 @@ interface Props {
   /** Teks dokumen asli untuk sorotan. Default: report.document_text. */
   documentText?: string;
   docTitle?: string;
+  /** ID riwayat; bila ada + has_original_pdf, aktifkan laporan berformat identik. */
+  historyId?: number;
 }
 
 /** Laporan kemiripan interaktif — dipakai di halaman tool & penampil riwayat. */
-export default function PlagiarismReport({ report, documentText, docTitle = "" }: Props) {
+export default function PlagiarismReport({ report, documentText, docTitle = "", historyId }: Props) {
   const [exShort, setExShort] = useState(false);
   const [exSmall, setExSmall] = useState(false);
   const [exQuotes, setExQuotes] = useState(false);
@@ -112,28 +114,60 @@ export default function PlagiarismReport({ report, documentText, docTitle = "" }
 
   const hi = buildHighlight(text, activePassages(), report.char_count, false, hiOpts());
   const filtersActive = exShort || exSmall || exQuotes || exBib;
+  const headlineIndex = report.integrity_index ?? report.overall_similarity;
   const shownIndex = filtersActive
     ? Math.min(100, Math.round(hi.sources.reduce((a, s) => a + s.pct, 0) * 10) / 10)
-    : report.overall_similarity;
+    : headlineIndex;
+
+  const hasOriginal = Boolean(report.has_original_pdf && historyId);
+  const originalReportUrl = (dl: boolean) =>
+    `${API_BASE}/tools/plagiarism-report/${historyId}${dl ? "?dl=1" : ""}`;
 
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center gap-2">
-        <button
-          onClick={viewReport}
-          disabled={busy}
-          className="rounded-lg bg-[color:var(--brand)] px-4 py-2 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
-        >
-          👁 Lihat Laporan (PDF)
-        </button>
-        <button
-          onClick={downloadReport}
-          disabled={busy}
-          className="rounded-lg border border-c px-4 py-2 text-xs font-medium text-neutral-700 hover:bg-neutral-100 disabled:opacity-50 dark:text-neutral-200 dark:hover:bg-white/5"
-        >
-          ⬇ Unduh Laporan
-        </button>
+        {hasOriginal ? (
+          <>
+            <a
+              href={originalReportUrl(false)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-lg bg-[color:var(--brand)] px-4 py-2 text-xs font-semibold text-white hover:opacity-90"
+            >
+              👁 Lihat Laporan (format asli)
+            </a>
+            <a
+              href={originalReportUrl(true)}
+              className="rounded-lg border border-c px-4 py-2 text-xs font-medium text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-white/5"
+            >
+              ⬇ Unduh Laporan (format asli)
+            </a>
+          </>
+        ) : (
+          <>
+            <button
+              onClick={viewReport}
+              disabled={busy}
+              className="rounded-lg bg-[color:var(--brand)] px-4 py-2 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
+            >
+              👁 Lihat Laporan (PDF)
+            </button>
+            <button
+              onClick={downloadReport}
+              disabled={busy}
+              className="rounded-lg border border-c px-4 py-2 text-xs font-medium text-neutral-700 hover:bg-neutral-100 disabled:opacity-50 dark:text-neutral-200 dark:hover:bg-white/5"
+            >
+              ⬇ Unduh Laporan
+            </button>
+          </>
+        )}
       </div>
+      {hasOriginal && (
+        <p className="-mt-3 text-[11px] text-neutral-400">
+          Laporan mempertahankan tata letak berkas asli; temuan ditandai langsung di atas halaman
+          dokumen beserta sampul ringkasan integritas.
+        </p>
+      )}
 
       {report.report_id && (
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-c bg-neutral-50 px-3 py-2 text-[11px] text-neutral-500 dark:bg-white/5 dark:text-neutral-400">
@@ -181,6 +215,9 @@ export default function PlagiarismReport({ report, documentText, docTitle = "" }
             <span>
               {report.matched_sentences}/{report.total_sentences} kalimat cocok persis
             </span>
+            {typeof report.copy_similarity === "number" && (
+              <span>Salinan langsung {report.copy_similarity.toFixed(0)}%</span>
+            )}
             <span>
               Risiko parafrase {report.paraphrase_similarity.toFixed(0)}% (semantik ~
               {(report.semantic_coverage_pct ?? 0).toFixed(0)}% korpus)
@@ -246,7 +283,7 @@ export default function PlagiarismReport({ report, documentText, docTitle = "" }
         </div>
         {filtersActive && (
           <p className="mt-1.5 text-[11px] text-neutral-400">
-            Skor disesuaikan dari {report.overall_similarity.toFixed(1)}% → {shownIndex.toFixed(1)}%
+            Skor disesuaikan dari {headlineIndex.toFixed(1)}% → {shownIndex.toFixed(1)}%
             setelah filter diterapkan.
           </p>
         )}
