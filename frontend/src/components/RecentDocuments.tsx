@@ -5,6 +5,8 @@ import Link from "next/link";
 import { API_BASE } from "@/lib/api";
 import { getFeature } from "@/lib/features";
 import { useAuth } from "@/lib/auth";
+import { useJobs, useHistoryVersion } from "@/lib/useJobs";
+import { dismissJob, type Job } from "@/lib/jobs";
 
 interface HistoryItem {
   id: number;
@@ -23,8 +25,81 @@ function fmtDate(iso: string | null): string {
   }
 }
 
+function StatusBadge({ status }: { status: "processing" | "done" | "error" }) {
+  if (status === "processing")
+    return (
+      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400">
+        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500" />
+        Sedang diproses
+      </span>
+    );
+  if (status === "error")
+    return (
+      <span className="shrink-0 rounded-full bg-rose-500/15 px-2 py-0.5 text-[11px] font-medium text-rose-600 dark:text-rose-400">
+        Gagal
+      </span>
+    );
+  return (
+    <span className="shrink-0 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+      Selesai
+    </span>
+  );
+}
+
+function JobRow({ job }: { job: Job }) {
+  const f = getFeature(job.tool);
+  const body = (
+    <>
+      <span className="inline-flex items-center gap-1.5 rounded-lg bg-[color:var(--brand-soft)] px-2.5 py-1 text-xs font-medium text-[color:var(--brand)]">
+        <span>{f?.icon ?? "📄"}</span>
+        {f?.name ?? job.tool}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-medium text-neutral-900 dark:text-neutral-100">
+          {job.title}
+        </div>
+        <div className="truncate text-xs text-neutral-400">
+          {job.status === "processing"
+            ? "Dokumen sedang diperiksa di server…"
+            : job.status === "error"
+              ? job.error ?? "Terjadi kesalahan."
+              : "Pemeriksaan selesai."}
+        </div>
+      </div>
+      <StatusBadge status={job.status} />
+    </>
+  );
+
+  if (job.status === "done" && job.historyId) {
+    return (
+      <Link
+        href={`/dashboard/history/view/${job.historyId}`}
+        className="flex items-center gap-3 rounded-xl border border-emerald-300/50 surface-2 px-4 py-3 transition hover:border-[color:var(--brand)]"
+      >
+        {body}
+      </Link>
+    );
+  }
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-c surface-2 px-4 py-3">
+      {body}
+      {job.status === "error" && (
+        <button
+          onClick={() => dismissJob(job.tempId)}
+          className="shrink-0 text-xs text-neutral-400 hover:text-rose-500"
+          title="Tutup"
+        >
+          ✕
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function RecentDocuments({ limit = 6 }: { limit?: number }) {
   const { historyRetentionDays } = useAuth();
+  const jobs = useJobs();
+  const historyVersion = useHistoryVersion();
   const [items, setItems] = useState<HistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -48,7 +123,13 @@ export default function RecentDocuments({ limit = 6 }: { limit?: number }) {
     return () => {
       alive = false;
     };
-  }, [limit]);
+  }, [limit, historyVersion]);
+
+  // Jangan tampilkan dobel: sembunyikan riwayat yang sudah diwakili kartu job "selesai".
+  const doneJobIds = new Set(
+    jobs.filter((j) => j.status === "done" && j.historyId).map((j) => j.historyId),
+  );
+  const visibleItems = items.filter((it) => !doneJobIds.has(it.id));
 
   return (
     <div>
@@ -62,15 +143,18 @@ export default function RecentDocuments({ limit = 6 }: { limit?: number }) {
         Hasil tersimpan maksimal {historyRetentionDays} hari, lalu dihapus otomatis dari server.
       </p>
 
-      {loading ? (
+      {loading && jobs.length === 0 ? (
         <p className="text-sm text-neutral-400">Memuat…</p>
-      ) : items.length === 0 ? (
+      ) : jobs.length === 0 && visibleItems.length === 0 ? (
         <div className="rounded-xl border border-dashed border-c p-8 text-center text-sm text-neutral-400">
           Belum ada dokumen. Mulai gunakan salah satu layanan di bawah.
         </div>
       ) : (
         <div className="space-y-2">
-          {items.map((it) => {
+          {jobs.map((j) => (
+            <JobRow key={j.tempId} job={j} />
+          ))}
+          {visibleItems.map((it) => {
             const f = getFeature(it.tool);
             return (
               <Link
@@ -93,9 +177,7 @@ export default function RecentDocuments({ limit = 6 }: { limit?: number }) {
                 <div className="hidden shrink-0 text-xs text-neutral-400 sm:block">
                   {fmtDate(it.created_at)}
                 </div>
-                <span className="shrink-0 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
-                  Selesai
-                </span>
+                <StatusBadge status="done" />
                 <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-c text-neutral-400">
                   👁
                 </span>

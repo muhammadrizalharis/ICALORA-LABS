@@ -54,6 +54,10 @@ _BIB_RE = re.compile(
 # Kelompok kecocokan berdasarkan status sitasi & kutipan (lihat docs/11 A.1).
 _MATCH_GROUP_ORDER = ["uncited", "missing_quote", "missing_citation", "cited_quoted"]
 
+# Batas teks dokumen yang disimpan untuk tampilan "Dokumen dengan Sorotan".
+# Cukup untuk naskah panjang, tanpa membengkakkan riwayat (jsonb).
+_MAX_DOC_DISPLAY = 60_000
+
 
 def _classify_match(
     sent: str,
@@ -307,6 +311,8 @@ def check_plagiarism(doc: str, top_k: int = 30) -> dict:
         "total_sentences": chunk["total_sentences"],
         "matched_passages": chunk["matched_passages"],
         "match_groups": chunk["match_groups"],
+        "document_text": doc[:_MAX_DOC_DISPLAY],
+        "document_truncated": len(doc) > _MAX_DOC_DISPLAY,
         "word_count": wc,
         "char_count": cc,
         "sources": sources,

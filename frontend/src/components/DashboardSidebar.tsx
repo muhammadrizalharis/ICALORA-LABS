@@ -39,13 +39,13 @@ export default function DashboardSidebar() {
   const { user, logout } = useAuth();
 
   return (
-    <aside className="flex h-screen w-64 shrink-0 flex-col border-r border-c surface">
+    <aside className="sticky top-0 flex h-screen w-64 shrink-0 flex-col self-start border-r border-c surface">
       <div className="flex items-center gap-2 px-4 py-4">
         <Image src="/Logo Teknologi Futuristik ICALORA-LABS.png" alt="" width={28} height={28} />
         <span className="font-bold tracking-tight">ICALORA-LABS</span>
       </div>
 
-      <nav className="flex-1 overflow-y-auto px-2 pb-4">
+      <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
         <SectionLabel>Beranda</SectionLabel>
         <NavLink href="/dashboard" label="Beranda" icon="🏠" active={pathname === "/dashboard"} />
 

@@ -28,9 +28,9 @@ export default function ToolEngineBanner({ slug }: { slug: string }) {
           Ditenagai {engine}
         </div>
         <p className="mt-0.5 text-neutral-600 dark:text-neutral-300">
-          Diproses sepenuhnya di server ICALORA-LABS (self-hosted) — dokumenmu tidak dikirim ke
-          pihak ketiga. Hasil tampil instan, lengkap dengan laporan, dan tersimpan maksimal 3 hari
-          sebelum dihapus otomatis.
+          Semua pemrosesan berjalan di infrastruktur ICALORA-LABS sendiri (self-hosted); isi
+          dokumenmu tidak diteruskan ke layanan pihak ketiga. Hasilnya tersimpan paling lama 3 hari,
+          lalu dihapus otomatis demi privasi.
         </p>
       </div>
     </div>

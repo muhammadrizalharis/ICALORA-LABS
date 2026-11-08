@@ -69,6 +69,7 @@ export default function ToolRenderer({ slug }: { slug: string }) {
       <TextTool
         endpoint={simple.endpoint}
         kind={simple.kind}
+        slug={slug}
         submitLabel={simple.submitLabel}
         outputKey={simple.outputKey}
       />

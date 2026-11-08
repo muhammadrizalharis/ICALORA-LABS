@@ -1,7 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { getFeature } from "@/lib/features";
+import ReportBar from "@/components/ReportBar";
+import { escapeHtml } from "@/lib/report";
+import PlagiarismReport from "@/components/PlagiarismReport";
+import type { Report } from "@/lib/plagiarismReport";
 
 export interface HistoryItemFull {
   id: number;
@@ -82,9 +87,28 @@ function isNumericScore(v: unknown): v is number {
   return typeof v === "number" && v >= 0 && v <= 100;
 }
 
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      onClick={() => {
+        navigator.clipboard.writeText(text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      }}
+      className="text-xs text-[color:var(--brand)] hover:underline"
+    >
+      {copied ? "Tersalin!" : "Salin"}
+    </button>
+  );
+}
+
 export default function HistoryResultView({ item }: { item: HistoryItemFull }) {
   const feature = getFeature(item.tool);
   const result = item.result ?? {};
+
+  const isPlagiarism =
+    item.tool === "plagiarism-checker" && Array.isArray(result.matched_passages);
 
   const scoreEntry = SCORE_KEYS.find(
     (s) => s.key in result && typeof result[s.key] === "number",
@@ -136,6 +160,52 @@ export default function HistoryResultView({ item }: { item: HistoryItemFull }) {
         )}
       </div>
 
+      {isPlagiarism ? (
+        <PlagiarismReport
+          report={result as unknown as Report}
+          docTitle={item.title ?? undefined}
+        />
+      ) : (
+        <GenericResult
+          result={result}
+          inputPreview={item.input_preview}
+          scoreEntry={scoreEntry}
+          scoreValue={scoreValue}
+          metricEntries={metricEntries}
+          textSections={textSections}
+          sources={sources}
+          title={item.title ?? feature?.name ?? item.tool}
+        />
+      )}
+    </div>
+  );
+}
+
+interface GenericResultProps {
+  result: Record<string, unknown>;
+  inputPreview: string | null;
+  scoreEntry: { key: string; label: string } | undefined;
+  scoreValue: number | null;
+  metricEntries: [string, number][];
+  textSections: string[];
+  sources: Record<string, unknown>[];
+  title: string;
+}
+
+function GenericResult({
+  result,
+  inputPreview,
+  scoreEntry,
+  scoreValue,
+  metricEntries,
+  textSections,
+  sources,
+  title,
+}: GenericResultProps) {
+  const reportSource =
+    textSections.map((k) => result[k] as string).join("\n\n") || inputPreview || title;
+  return (
+    <div className="space-y-5">
       {(scoreValue !== null || metricEntries.length > 0) && (
         <div className="flex flex-wrap items-center gap-6 rounded-xl border border-c surface-2 p-5">
           {scoreValue !== null && scoreEntry && (
@@ -154,21 +224,24 @@ export default function HistoryResultView({ item }: { item: HistoryItemFull }) {
         </div>
       )}
 
-      {item.input_preview && (
+      {inputPreview && (
         <div className="rounded-xl border border-c surface-2 p-4">
           <div className="mb-1 text-xs font-medium text-neutral-500 dark:text-neutral-400">
             Cuplikan Dokumen
           </div>
           <p className="whitespace-pre-wrap text-sm text-neutral-700 dark:text-neutral-300">
-            {item.input_preview}
+            {inputPreview}
           </p>
         </div>
       )}
 
       {textSections.map((k) => (
         <div key={k} className="rounded-xl border border-c surface-2 p-4">
-          <div className="mb-2 text-xs font-medium text-neutral-500 dark:text-neutral-400">
-            {LABELS[k] ?? k}
+          <div className="mb-2 flex items-center justify-between">
+            <div className="text-xs font-medium text-neutral-500 dark:text-neutral-400">
+              {LABELS[k] ?? k}
+            </div>
+            <CopyButton text={result[k] as string} />
           </div>
           <p className="whitespace-pre-wrap text-sm leading-relaxed text-neutral-800 dark:text-neutral-200">
             {result[k] as string}
@@ -199,6 +272,25 @@ export default function HistoryResultView({ item }: { item: HistoryItemFull }) {
             })}
           </ul>
         </div>
+      )}
+
+      {textSections.length > 0 && (
+        <ReportBar
+          source={reportSource}
+          title={`Laporan ${title}`}
+          filename="laporan-icalora"
+          disclaimer="Hasil dibuat otomatis oleh ICALORA-LABS sebagai bahan bantu akademik. ID Laporan & hash bersifat reproducible sehingga laporan dapat diverifikasi."
+          buildBody={() =>
+            textSections
+              .map(
+                (k) =>
+                  `<h2>${escapeHtml(LABELS[k] ?? k)}</h2><div class="doc">${escapeHtml(
+                    result[k] as string,
+                  )}</div>`,
+              )
+              .join("")
+          }
+        />
       )}
 
       <details className="rounded-xl border border-c surface-2 p-4">

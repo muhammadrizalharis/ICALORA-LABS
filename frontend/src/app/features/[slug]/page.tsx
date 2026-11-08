@@ -99,6 +99,7 @@ export default async function FeaturePage({
           <TextTool
             endpoint={simple.endpoint}
             kind={simple.kind}
+            slug={feature.slug}
             submitLabel={simple.submitLabel}
             outputKey={simple.outputKey}
             placeholder={simple.placeholder}

@@ -3,15 +3,18 @@
 import { useState } from "react";
 import { apiPost } from "@/lib/api";
 import TextInput from "@/components/TextInput";
+import { useJobLauncher } from "@/lib/useJobs";
+import { jobTitle } from "@/lib/jobs";
 
 type ToolKind = "word-count" | "text-output";
 
 interface TextToolProps {
   endpoint: string;
   kind: ToolKind;
+  slug: string;
   placeholder?: string;
   submitLabel?: string;
-  outputKey?: string; // untuk kind "text-output": kunci field hasil
+  outputKey?: string; // dipertahankan untuk kompatibilitas pemanggil
 }
 
 interface WordCountResult {
@@ -34,34 +37,41 @@ function fmtTime(seconds: number): string {
 export default function TextTool({
   endpoint,
   kind,
+  slug,
   placeholder = "Tempel atau ketik teks di sini…",
   submitLabel = "Proses",
-  outputKey = "result",
 }: TextToolProps) {
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [wc, setWc] = useState<WordCountResult | null>(null);
-  const [out, setOut] = useState<string | null>(null);
+  const launch = useJobLauncher();
 
   async function handleSubmit() {
     if (!text.trim()) return;
-    setLoading(true);
-    setError(null);
-    setWc(null);
-    setOut(null);
-    try {
-      const data = await apiPost<Record<string, unknown>>(endpoint, { text });
-      if (kind === "word-count") {
+
+    // Penghitung kata bersifat instan → tetap diproses & ditampilkan di tempat.
+    if (kind === "word-count") {
+      setLoading(true);
+      setError(null);
+      setWc(null);
+      try {
+        const data = await apiPost<Record<string, unknown>>(endpoint, { text });
         setWc(data as unknown as WordCountResult);
-      } else {
-        setOut(String(data[outputKey] ?? ""));
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Terjadi kesalahan.");
+      } finally {
+        setLoading(false);
       }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Terjadi kesalahan.");
-    } finally {
-      setLoading(false);
+      return;
     }
+
+    // Tool lain: proses di latar, lalu arahkan ke Beranda.
+    launch({
+      tool: slug,
+      title: jobTitle(text),
+      run: () => apiPost<Record<string, unknown>>(endpoint, { text }),
+    });
   }
 
   return (
@@ -103,15 +113,6 @@ export default function TextTool({
               <div className="text-xs text-neutral-500 dark:text-neutral-400">{label}</div>
             </div>
           ))}
-        </div>
-      )}
-
-      {out !== null && (
-        <div className="rounded-xl border border-c surface-2 p-4">
-          <div className="mb-2 text-xs font-medium uppercase tracking-wide text-neutral-400 dark:text-neutral-500">
-            Hasil
-          </div>
-          <p className="whitespace-pre-wrap text-sm text-neutral-900 dark:text-neutral-100">{out}</p>
         </div>
       )}
     </div>
