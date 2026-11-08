@@ -22,10 +22,10 @@ from app.services.llm.provider import get_llm
 _NEAREST = text(
     """
     SELECT d.id, d.source, d.doi, d.title, d.pub_year, d.fields, d.text_zstd,
-           1 - (e.embedding <=> CAST(:qvec AS vector)) AS cos_sim
+           1 - (e.embedding <=> CAST(:qvec AS halfvec(1024))) AS cos_sim
     FROM corpus_embeddings e
     JOIN corpus_documents d ON d.id = e.doc_id
-    ORDER BY e.embedding <=> CAST(:qvec AS vector)
+    ORDER BY e.embedding <=> CAST(:qvec AS halfvec(1024))
     LIMIT :k
     """
 )
