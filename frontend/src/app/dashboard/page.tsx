@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { FEATURES, GROUP_LABEL } from "@/lib/features";
 import { useAuth } from "@/lib/auth";
+import RecentDocuments from "@/components/RecentDocuments";
 
 const activeFeatures = FEATURES.filter((f) => f.status === "active");
 
@@ -36,6 +37,10 @@ export default function DashboardHome() {
           <div className="mt-1 text-2xl font-bold">∞</div>
           <div className="text-xs text-neutral-400">Tak terbatas · semua fitur gratis</div>
         </div>
+      </div>
+
+      <div className="mt-8">
+        <RecentDocuments />
       </div>
 
       <h2 className="mb-3 mt-8 text-lg font-semibold">Layanan</h2>

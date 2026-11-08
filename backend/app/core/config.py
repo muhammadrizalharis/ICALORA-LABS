@@ -62,6 +62,7 @@ class Settings(BaseSettings):
     session_secret: str = Field(default="icalora-dev-secret-change-me")
     session_cookie: str = Field(default="icalora_session")
     session_ttl_days: int = Field(default=30)
+    history_retention_days: int = Field(default=3)
     frontend_base_url: str = Field(default="http://localhost:58030")
     allow_demo_login: bool = Field(default=True)
     google_client_id: str = Field(default="")

@@ -17,6 +17,7 @@ interface AuthState {
   user: User | null;
   googleEnabled: boolean;
   demoEnabled: boolean;
+  historyRetentionDays: number;
   refresh: () => Promise<void>;
   demoLogin: () => Promise<void>;
   logout: () => Promise<void>;
@@ -29,6 +30,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [googleEnabled, setGoogleEnabled] = useState(false);
   const [demoEnabled, setDemoEnabled] = useState(false);
+  const [historyRetentionDays, setHistoryRetentionDays] = useState(3);
 
   const refresh = useCallback(async () => {
     try {
@@ -37,6 +39,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(d.user);
       setGoogleEnabled(d.google_enabled);
       setDemoEnabled(d.demo_enabled);
+      if (typeof d.history_retention_days === "number")
+        setHistoryRetentionDays(d.history_retention_days);
     } catch {
       setUser(null);
     } finally {
@@ -63,7 +67,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthCtx.Provider
-      value={{ loading, user, googleEnabled, demoEnabled, refresh, demoLogin, logout }}
+      value={{ loading, user, googleEnabled, demoEnabled, historyRetentionDays, refresh, demoLogin, logout }}
     >
       {children}
     </AuthCtx.Provider>

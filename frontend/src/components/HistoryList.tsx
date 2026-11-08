@@ -1,8 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { API_BASE } from "@/lib/api";
 import { getFeature } from "@/lib/features";
+import { useAuth } from "@/lib/auth";
 
 interface HistoryItem {
   id: number;
@@ -22,6 +24,7 @@ function fmtDate(iso: string | null): string {
 }
 
 export default function HistoryList({ tool }: { tool?: string }) {
+  const { historyRetentionDays } = useAuth();
   const [items, setItems] = useState<HistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -81,6 +84,9 @@ export default function HistoryList({ tool }: { tool?: string }) {
 
   return (
     <div className="space-y-3">
+      <p className="text-xs text-neutral-400">
+        Hasil tersimpan maksimal {historyRetentionDays} hari, lalu dihapus otomatis dari server.
+      </p>
       {showFilters && (
         <div className="flex flex-col gap-2 sm:flex-row">
           <select
@@ -130,6 +136,12 @@ export default function HistoryList({ tool }: { tool?: string }) {
                 )}
                 <div className="mt-1 text-[11px] text-neutral-400">{fmtDate(it.created_at)}</div>
               </div>
+              <Link
+                href={`/dashboard/history/view/${it.id}`}
+                className="shrink-0 rounded-lg border border-c px-2 py-1 text-xs text-[color:var(--brand)] hover:bg-[color:var(--brand-soft)]"
+              >
+                Lihat
+              </Link>
               <button
                 onClick={() => remove(it.id)}
                 className="shrink-0 rounded-lg border border-rose-200 px-2 py-1 text-xs text-rose-600 hover:bg-rose-50 dark:border-rose-900 dark:hover:bg-rose-950"

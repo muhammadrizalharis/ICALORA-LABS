@@ -112,6 +112,25 @@ def create_demo_user() -> dict:
     return _row_to_user(r)
 
 
+def purge_expired_history() -> int:
+    """Hapus riwayat yang lebih tua dari batas retensi (default 3 hari).
+
+    Dipanggil secara oportunistik setiap kali riwayat dicatat/dibaca sehingga
+    berkas hasil tidak disimpan melampaui masa simpan — sesuai kebijakan
+    retensi: lebih dari N hari, berkas dihapus permanen.
+    """
+    days = max(1, int(settings.history_retention_days))
+    with engine.begin() as c:
+        res = c.execute(
+            text(
+                "DELETE FROM tool_history "
+                "WHERE created_at < now() - make_interval(days => :days)"
+            ),
+            {"days": days},
+        )
+    return res.rowcount or 0
+
+
 def record_history(
     user_id: int, tool: str, title: str, input_preview: str, result: dict
 ) -> None:
@@ -131,14 +150,23 @@ def record_history(
                 "res": json.dumps(result)[:200000],
             },
         )
+    try:
+        purge_expired_history()
+    except Exception:  # noqa: BLE001, S110
+        pass
 
 
 def list_history(user_id: int, tool: str | None = None, limit: int = 50) -> list[dict]:
+    try:
+        purge_expired_history()
+    except Exception:  # noqa: BLE001, S110
+        pass
+    days = max(1, int(settings.history_retention_days))
     q = (
         "SELECT id, tool, title, input_preview, created_at FROM tool_history "
-        "WHERE user_id = :uid"
+        "WHERE user_id = :uid AND created_at >= now() - make_interval(days => :days)"
     )
-    params: dict = {"uid": user_id, "limit": limit}
+    params: dict = {"uid": user_id, "limit": limit, "days": days}
     if tool:
         q += " AND tool = :tool"
         params["tool"] = tool
@@ -158,13 +186,15 @@ def list_history(user_id: int, tool: str | None = None, limit: int = 50) -> list
 
 
 def get_history_item(user_id: int, item_id: int) -> dict | None:
+    days = max(1, int(settings.history_retention_days))
     with engine.connect() as c:
         r = c.execute(
             text(
                 "SELECT id, tool, title, input_preview, result, created_at "
-                "FROM tool_history WHERE user_id = :uid AND id = :id"
+                "FROM tool_history WHERE user_id = :uid AND id = :id "
+                "AND created_at >= now() - make_interval(days => :days)"
             ),
-            {"uid": user_id, "id": item_id},
+            {"uid": user_id, "id": item_id, "days": days},
         ).first()
     if not r:
         return None

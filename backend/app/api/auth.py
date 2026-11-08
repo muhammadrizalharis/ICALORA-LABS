@@ -56,6 +56,7 @@ def me(request: Request) -> dict:
         "user": user,
         "google_enabled": bool(settings.google_client_id and settings.google_client_secret),
         "demo_enabled": settings.allow_demo_login,
+        "history_retention_days": settings.history_retention_days,
     }
 
 
