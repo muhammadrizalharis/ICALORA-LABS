@@ -36,12 +36,13 @@ CREATE EXTENSION IF NOT EXISTS vector;
 
 CREATE TABLE IF NOT EXISTS corpus_embeddings (
     doc_id    BIGINT PRIMARY KEY REFERENCES corpus_documents(id) ON DELETE CASCADE,
-    embedding vector(1024) NOT NULL
+    embedding halfvec(1024) NOT NULL
 );
 
 -- Index ANN untuk pencarian kemiripan semantik (cosine)
+-- halfvec (float16): ~50% lebih hemat disk vs vector(float32), akurasi ~setara.
 CREATE INDEX IF NOT EXISTS idx_corpus_emb_hnsw
-    ON corpus_embeddings USING hnsw (embedding vector_cosine_ops);
+    ON corpus_embeddings USING hnsw (embedding halfvec_cosine_ops);
 
 -- Status pekerjaan ingest (resumable)
 CREATE TABLE IF NOT EXISTS ingest_jobs (

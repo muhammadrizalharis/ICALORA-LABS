@@ -105,11 +105,11 @@ _NEAREST = text(
     """
     SELECT d.id, d.source, d.external_id, d.doi, d.title, d.pub_year,
            d.text_zstd, f.minhash,
-           1 - (e.embedding <=> CAST(:qvec AS vector)) AS cos_sim
+           1 - (e.embedding <=> CAST(:qvec AS halfvec(1024))) AS cos_sim
     FROM corpus_embeddings e
     JOIN corpus_documents d ON d.id = e.doc_id
     LEFT JOIN corpus_fingerprints f ON f.doc_id = d.id
-    ORDER BY e.embedding <=> CAST(:qvec AS vector)
+    ORDER BY e.embedding <=> CAST(:qvec AS halfvec(1024))
     LIMIT :k
     """
 )

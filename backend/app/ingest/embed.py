@@ -48,7 +48,7 @@ _SELECT_BATCH = text(
 )
 _INSERT_EMB = text(
     "INSERT INTO corpus_embeddings (doc_id, embedding) "
-    "VALUES (:doc_id, :embedding) ON CONFLICT (doc_id) DO NOTHING"
+    "VALUES (:doc_id, CAST(:embedding AS halfvec(1024))) ON CONFLICT (doc_id) DO NOTHING"
 )
 _MARK_DONE = text("UPDATE corpus_documents SET has_embedding = TRUE WHERE id = ANY(:ids)")
 
