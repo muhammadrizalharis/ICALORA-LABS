@@ -41,6 +41,7 @@ from app.services.ai_detector.model import feature_vector, save, train
 _WORD_MIN, _WORD_MAX = 80, 400
 _CACHE_PATH = Path(__file__).resolve().parent / "train_features.jsonl"
 _NUM_CTX = 4096
+_NUM_PREDICT = int(os.environ.get("ICALORA_NUM_PREDICT", "300"))
 
 _LOCAL = os.environ.get("ICALORA_AI_ENDPOINT", "http://127.0.0.1:11500")
 _SHARED = os.environ.get("ICALORA_SHARED_ENDPOINT", "http://127.0.0.1:11434")
@@ -103,7 +104,7 @@ def _generate(client: httpx.Client, endpoint: str, model: str, title: str, rng: 
         ],
         "stream": False,
         "keep_alive": "10m",
-        "options": {"temperature": temp, "num_predict": 300, "num_ctx": _NUM_CTX},
+        "options": {"temperature": temp, "num_predict": _NUM_PREDICT, "num_ctx": _NUM_CTX},
     }
     try:
         resp = client.post(f"{endpoint}/api/chat", json=payload, timeout=240)
