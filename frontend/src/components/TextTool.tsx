@@ -67,16 +67,16 @@ export default function TextTool({
   return (
     <div className="space-y-4">
       <TextInput value={text} onChange={setText} placeholder={placeholder} rows={8} />
-      <div className="flex items-center gap-3">
-        <button
-          onClick={handleSubmit}
-          disabled={loading || !text.trim()}
-          className="rounded-lg bg-neutral-900 px-5 py-2 text-sm font-medium text-white disabled:opacity-40 dark:bg-neutral-100 dark:text-neutral-900"
-        >
-          {loading ? "Memproses…" : submitLabel}
-        </button>
-        <span className="text-xs text-neutral-400 dark:text-neutral-500">{text.length} karakter</span>
-      </div>
+      <button
+        onClick={handleSubmit}
+        disabled={loading || !text.trim()}
+        className="w-full rounded-xl bg-[color:var(--brand)] px-5 py-3 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
+      >
+        {loading ? "Memproses…" : submitLabel}
+      </button>
+      <p className="text-center text-xs text-neutral-400 dark:text-neutral-500">
+        {text.length.toLocaleString("id-ID")} karakter
+      </p>
 
       {error && (
         <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700 dark:border-rose-900 dark:bg-rose-950 dark:text-rose-300">

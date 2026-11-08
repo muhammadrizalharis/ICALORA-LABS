@@ -48,7 +48,7 @@ export default function TocTool() {
       <button
         onClick={run}
         disabled={loading || !text.trim()}
-        className="rounded-lg bg-[color:var(--brand)] px-5 py-2 text-sm font-medium text-white disabled:opacity-40"
+        className="w-full rounded-xl bg-[color:var(--brand)] px-5 py-3 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
       >
         {loading ? "Menyusun…" : "Buat Daftar Isi"}
       </button>

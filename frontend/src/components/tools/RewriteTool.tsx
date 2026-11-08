@@ -53,14 +53,14 @@ export default function RewriteTool() {
             </option>
           ))}
         </select>
-        <button
-          onClick={run}
-          disabled={loading || !text.trim()}
-          className="rounded-lg bg-[color:var(--brand)] px-5 py-2 text-sm font-medium text-white disabled:opacity-40"
-        >
-          {loading ? "Memproses…" : "Tulis Ulang"}
-        </button>
       </div>
+      <button
+        onClick={run}
+        disabled={loading || !text.trim()}
+        className="w-full rounded-xl bg-[color:var(--brand)] px-5 py-3 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
+      >
+        {loading ? "Memproses…" : "Tulis Ulang"}
+      </button>
       {error && (
         <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700 dark:border-rose-900 dark:bg-rose-950 dark:text-rose-300">
           {error}
