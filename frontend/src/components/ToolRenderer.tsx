@@ -16,6 +16,7 @@ import HiddenTextTool from "@/components/tools/HiddenTextTool";
 import PublikasiTool from "@/components/tools/PublikasiTool";
 import ChatPdfTool from "@/components/tools/ChatPdfTool";
 import TranskripTool from "@/components/tools/TranskripTool";
+import WritingReportTool from "@/components/tools/WritingReportTool";
 
 type SimpleTool = {
   endpoint: string;
@@ -26,12 +27,6 @@ type SimpleTool = {
 
 const SIMPLE_TOOLS: Record<string, SimpleTool> = {
   "word-count": { endpoint: "/tools/word-count", kind: "word-count", submitLabel: "Hitung" },
-  "grammar-checker": {
-    endpoint: "/tools/grammar-check",
-    kind: "text-output",
-    submitLabel: "Periksa Tata Bahasa",
-    outputKey: "corrected",
-  },
   paraphraser: {
     endpoint: "/tools/paraphrase",
     kind: "text-output",
@@ -48,6 +43,7 @@ const SIMPLE_TOOLS: Record<string, SimpleTool> = {
 
 const RICH_TOOLS: Record<string, React.ComponentType> = {
   "plagiarism-checker": PlagiarismTool,
+  "grammar-checker": WritingReportTool,
   "ai-chat": ChatTool,
   "ai-rewriter": RewriteTool,
   "ai-grader": GraderTool,

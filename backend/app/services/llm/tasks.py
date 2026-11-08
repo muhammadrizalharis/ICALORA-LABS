@@ -25,21 +25,102 @@ def _extract_json(raw: str):
         raise
 
 
+def _text_metrics(text: str) -> dict:
+    """Metrik tulisan deterministik (dihitung di Python, bukan LLM)."""
+    chars = len(text)
+    words = len(re.findall(r"\w+", text, flags=re.UNICODE))
+    sent_terminators = len(re.findall(r"[.!?]+(?=\s|$)", text))
+    sentences = sent_terminators if sent_terminators else (1 if words else 0)
+    return {
+        "characters": chars,
+        "words": words,
+        "sentences": sentences,
+        "reading_time_min": round(words / 200, 1),
+        "speaking_time_min": round(words / 130, 1),
+    }
+
+
+_WRITING_CATEGORIES = {"Ketepatan", "Kejelasan", "Keterlibatan", "Penyampaian"}
+
+
+def _normalize_issue(raw: dict) -> dict | None:
+    original = str(raw.get("original") or "").strip()
+    suggestion = str(raw.get("suggestion") or "").strip()
+    if not original and not suggestion:
+        return None
+    category = str(raw.get("category") or "").strip().title()
+    if category not in _WRITING_CATEGORIES:
+        category = "Ketepatan"
+    severity = str(raw.get("severity") or "").strip().lower()
+    if severity not in {"critical", "advanced"}:
+        severity = "advanced"
+    return {
+        "category": category,
+        "severity": severity,
+        "original": original[:400],
+        "suggestion": suggestion[:400],
+        "explanation": str(raw.get("explanation") or "").strip()[:400],
+    }
+
+
 def grammar_check(text: str) -> dict:
     llm = get_llm()
     messages = [
         {
             "role": "system",
             "content": (
-                "Anda editor bahasa. Perbaiki ejaan, tata bahasa, dan tanda baca "
-                "tanpa mengubah makna atau bahasa asli teks. Balas HANYA teks hasil "
-                "perbaikan, tanpa penjelasan tambahan."
+                "Anda editor bahasa akademik. Perbaiki ejaan, tata bahasa, dan tanda "
+                "baca tanpa mengubah makna atau bahasa asli teks. Balas HANYA JSON valid "
+                "dengan bentuk: {\"corrected\": \"<teks hasil perbaikan lengkap>\", "
+                "\"issues\": [{\"category\": \"Ketepatan|Kejelasan|Keterlibatan|Penyampaian\", "
+                "\"severity\": \"critical|advanced\", \"original\": \"<potongan asli>\", "
+                "\"suggestion\": \"<perbaikan>\", \"explanation\": \"<alasan singkat>\"}]}. "
+                "Gunakan 'critical' untuk kesalahan yang mengubah makna/ejaan fatal, "
+                "'advanced' untuk perbaikan gaya. Jangan tambahkan teks di luar JSON."
             ),
         },
         {"role": "user", "content": text},
     ]
-    corrected = llm.chat(messages, temperature=0.1)
-    return {"corrected": corrected}
+    raw = llm.chat(messages, temperature=0.1)
+
+    corrected = text
+    issues: list[dict] = []
+    try:
+        data = _extract_json(raw)
+        if isinstance(data, dict):
+            corrected = str(data.get("corrected") or "").strip() or text
+            for item in data.get("issues") or []:
+                if isinstance(item, dict):
+                    norm = _normalize_issue(item)
+                    if norm:
+                        issues.append(norm)
+    except (json.JSONDecodeError, ValueError):
+        # LLM tidak mengembalikan JSON valid — pakai balasannya sebagai teks perbaikan.
+        corrected = raw.strip() or text
+
+    issues = issues[:40]
+    metrics = _text_metrics(text)
+    critical = sum(1 for i in issues if i["severity"] == "critical")
+    advanced = len(issues) - critical
+
+    points = critical * 3 + advanced
+    # Skor menurun seiring kepadatan masalah, tetapi tetap adil untuk teks pendek:
+    # 0 masalah -> 100; makin banyak poin relatif jumlah kata, makin rendah.
+    score = max(0, min(100, round(100 * metrics["words"] / max(1, metrics["words"] + 2 * points))))
+    better_than_percent = max(1, round(score * 0.95))
+
+    return {
+        "corrected": corrected,
+        "metrics": metrics,
+        "score": score,
+        "better_than_percent": better_than_percent,
+        "issues": issues,
+        "issue_summary": {
+            "total": len(issues),
+            "critical": critical,
+            "advanced": advanced,
+        },
+    }
 
 
 def paraphrase(text: str, style: str = "standar") -> dict:
