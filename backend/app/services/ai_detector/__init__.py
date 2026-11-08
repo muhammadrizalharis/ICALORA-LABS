@@ -11,13 +11,25 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutureTimeout
 
 from app.services.llm.provider import get_llm
 from app.services.ai_detector import model as _model
 from app.services.ai_detector.embed import embed_text
 
 _WORD_RE = re.compile(r"\b[\w'-]+\b", re.UNICODE)
+
+# Komponen LLM bersifat opsional: model embedding (acc ~0.94) sudah kuat sendiri,
+# sedangkan panggilan LLM ke Ollama bersama bisa sangat lambat saat GPU penuh.
+# ICALORA_AIDETECT_LLM=off  -> lewati LLM sepenuhnya (deteksi nyaris instan).
+# ICALORA_AIDETECT_LLM_TIMEOUT=<detik> -> batas tunggu LLM; lewati bila melebihi.
+_LLM_ENABLED = os.getenv("ICALORA_AIDETECT_LLM", "on").strip().lower() not in {"off", "0", "false", "no"}
+try:
+    _LLM_TIMEOUT = float(os.getenv("ICALORA_AIDETECT_LLM_TIMEOUT", "6"))
+except ValueError:
+    _LLM_TIMEOUT = 6.0
 
 _TRAINED = None  # cache; None=belum dicoba, False=tidak ada, else LogisticModel
 _EMB_TRAINED = None  # cache model embedding (stat+emb 1030-dim)
@@ -186,6 +198,22 @@ def _llm_analysis(text: str) -> dict:
         return {"prob": None, "sentences": []}
 
 
+def _llm_analysis_timed(text: str) -> dict:
+    """Jalankan _llm_analysis dengan batas waktu; lewati bila LLM lambat/mati.
+
+    Dinonaktifkan via ICALORA_AIDETECT_LLM=off. Bila melebihi _LLM_TIMEOUT detik,
+    komponen LLM dilewati (prob=None) dan blending bergantung pada model
+    embedding + statistik — tetap akurat namun jauh lebih cepat.
+    """
+    if not _LLM_ENABLED:
+        return {"prob": None, "sentences": []}
+    try:
+        with ThreadPoolExecutor(max_workers=1) as ex:
+            return ex.submit(_llm_analysis, text).result(timeout=_LLM_TIMEOUT)
+    except (_FutureTimeout, Exception):  # noqa: BLE001
+        return {"prob": None, "sentences": []}
+
+
 def detect_ai(text: str) -> dict:
     text = text.strip()
     words = _WORD_RE.findall(text)
@@ -200,10 +228,10 @@ def detect_ai(text: str) -> dict:
 
     signals = _statistical_signals(text)
     stat_pct = signals["stat_score"] * 100
-    analysis = _llm_analysis(text)
-    llm_pct = analysis["prob"]
     model_pct = _trained_probability(signals)
     emb_pct = _emb_trained_probability(signals, text)
+    analysis = _llm_analysis_timed(text)
+    llm_pct = analysis["prob"]
 
     # Blending adaptif berbobot: model embedding (semantik) > LLM ≈ model statistik > stat.
     # Bobot dinormalisasi atas sinyal yang tersedia → degradasi anggun bila ada yang kosong.
