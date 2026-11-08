@@ -21,10 +21,22 @@ _zc = zstd.ZstdCompressor(level=19)
 _zd = zstd.ZstdDecompressor()
 
 
-def ensure_schema() -> None:
+def ensure_schema(skip_emb_index: bool | None = None) -> None:
+    """Terapkan schema.sql.
+
+    skip_emb_index: jika True, LEWATI pembuatan index HNSW embedding. Dipakai
+    saat bulk-load embedding paralel — index HNSW mahal di-maintain per-insert
+    dan sebaiknya dibangun sekali di akhir, bukan dibuat ulang tiap worker
+    (yang justru saling mengunci). Jika None, dibaca dari env
+    ICALORA_SKIP_EMB_INDEX (1/true untuk lewati).
+    """
+    if skip_emb_index is None:
+        skip_emb_index = os.environ.get("ICALORA_SKIP_EMB_INDEX", "").lower() in ("1", "true", "yes")
     sql = (Path(__file__).parent / "schema.sql").read_text(encoding="utf-8")
     with engine.begin() as conn:
         for stmt in [s.strip() for s in sql.split(";") if s.strip()]:
+            if skip_emb_index and "hnsw" in stmt.lower():
+                continue
             conn.execute(text(stmt))
 
 
