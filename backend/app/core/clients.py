@@ -22,6 +22,7 @@ def redis_client() -> redis.Redis:
 
 
 _corpus_cache: dict[str, float] = {"size": 0.0, "ts": 0.0}
+_embedded_cache: dict[str, float] = {"size": 0.0, "ts": 0.0}
 
 
 def corpus_size() -> int:
@@ -42,6 +43,28 @@ def corpus_size() -> int:
         n = int(_corpus_cache["size"])
     _corpus_cache["size"] = float(n)
     _corpus_cache["ts"] = now
+    return int(n)
+
+
+def embedded_corpus_size() -> int:
+    """Jumlah dokumen korpus yang punya embedding semantik (cache 5 menit).
+
+    Hanya dokumen ber-embedding yang bisa ditelusuri untuk deteksi PARAFRASE
+    (pencarian vektor). Dipakai laporan agar jujur: cakupan semantik bisa lebih
+    kecil dari total korpus, sehingga `paraphrase_similarity` punya konteks.
+    """
+    import time
+
+    now = time.time()
+    if now - _embedded_cache["ts"] < 300 and _embedded_cache["size"] > 0:
+        return int(_embedded_cache["size"])
+    try:
+        with engine.connect() as conn:
+            n = conn.execute(text("SELECT count(*) FROM corpus_embeddings")).scalar() or 0
+    except Exception:  # noqa: BLE001
+        n = int(_embedded_cache["size"])
+    _embedded_cache["size"] = float(n)
+    _embedded_cache["ts"] = now
     return int(n)
 
 

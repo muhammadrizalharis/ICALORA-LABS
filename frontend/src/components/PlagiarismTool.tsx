@@ -40,6 +40,9 @@ interface Report {
   report_id?: string;
   content_sha256?: string;
   corpus_size?: number;
+  semantic_coverage_docs?: number;
+  semantic_coverage_pct?: number;
+  coverage_note?: string;
   generated_at?: string;
 }
 
@@ -332,9 +335,14 @@ export default function PlagiarismTool() {
   <div><b>${report.word_count}</b> kata</div>
   <div><b>${report.char_count}</b> karakter</div>
   <div><b>${report.matched_sentences}/${report.total_sentences}</b> kalimat cocok persis</div>
-  <div><b>${report.paraphrase_similarity.toFixed(0)}%</b> risiko parafrase (semantik)</div>
-  <div><b>${(report.corpus_size || 0).toLocaleString("id-ID")}</b> dokumen dibandingkan · <b>${report.sources.length}</b> sumber teratas</div>
+  <div><b>${report.paraphrase_similarity.toFixed(0)}%</b> risiko parafrase (semantik, ~${(report.semantic_coverage_pct ?? 0).toFixed(0)}% korpus)</div>
+  <div><b>${(report.corpus_size || 0).toLocaleString("id-ID")}</b> dokumen · deteksi salinan penuh · <b>${report.sources.length}</b> sumber teratas</div>
 </div>
+${
+  report.coverage_note
+    ? `<p class="legend">${escHtml(report.coverage_note)}</p>`
+    : ""
+}
 ${
   overview
     ? `<h2>Ringkasan Kecocokan (Match Overview)</h2><table>${overview}</table>`
@@ -421,8 +429,8 @@ ${
               <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-neutral-500 dark:text-neutral-400">
                 <span>{report.word_count} kata · {report.char_count} karakter</span>
                 <span>{report.matched_sentences}/{report.total_sentences} kalimat cocok persis</span>
-                <span>Risiko parafrase {report.paraphrase_similarity.toFixed(0)}%</span>
-                <span>{(report.corpus_size || 0).toLocaleString("id-ID")} dokumen dibandingkan · {report.sources.length} sumber teratas</span>
+                <span>Risiko parafrase {report.paraphrase_similarity.toFixed(0)}% (semantik ~{(report.semantic_coverage_pct ?? 0).toFixed(0)}% korpus)</span>
+                <span>{(report.corpus_size || 0).toLocaleString("id-ID")} dokumen (salinan: penuh) · {report.sources.length} sumber teratas</span>
               </div>
               <button
                 onClick={downloadReport}

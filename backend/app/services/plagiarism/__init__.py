@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import text
 
-from app.core.clients import corpus_size, engine
+from app.core.clients import corpus_size, embedded_corpus_size, engine
 from app.ingest.common import (
     decompress_text,
     make_minhash,
@@ -218,6 +218,9 @@ def check_plagiarism(doc: str, top_k: int = 30) -> dict:
     # Gabungkan: indeks utama = maksimum antara coverage kalimat dan leksikal dokumen.
     similarity_index = max(overall, chunk["similarity_index"])
     generated_at = datetime.now(timezone.utc)
+    total_docs = _corpus_size()
+    embedded_docs = embedded_corpus_size()
+    semantic_coverage = round(embedded_docs / total_docs * 100, 1) if total_docs else 0.0
     return {
         "overall_similarity": similarity_index,
         "document_lexical_similarity": overall,
@@ -231,6 +234,14 @@ def check_plagiarism(doc: str, top_k: int = 30) -> dict:
         "sources": sources,
         "report_id": _report_id(doc, generated_at),
         "content_sha256": hashlib.sha256(doc.encode("utf-8")).hexdigest(),
-        "corpus_size": _corpus_size(),
+        "corpus_size": total_docs,
+        "lexical_coverage": total_docs,
+        "semantic_coverage_docs": embedded_docs,
+        "semantic_coverage_pct": semantic_coverage,
+        "coverage_note": (
+            f"Deteksi salinan (leksikal) mencakup {total_docs:,} dokumen (penuh). "
+            f"Deteksi parafrase (semantik) mencakup {embedded_docs:,} dokumen "
+            f"(~{semantic_coverage}% korpus); skor parafrase adalah batas bawah."
+        ),
         "generated_at": generated_at.isoformat(timespec="seconds"),
     }
