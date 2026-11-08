@@ -2,74 +2,22 @@
 
 import { useState } from "react";
 import { apiPost } from "@/lib/api";
-import { escapeHtml } from "@/lib/report";
-import ReportBar from "@/components/ReportBar";
 import TextInput from "@/components/TextInput";
-
-interface Criterion {
-  name: string;
-  score: number;
-  feedback: string;
-}
-interface GradeResult {
-  overall_score: number | null;
-  grade: string | null;
-  criteria: Criterion[];
-  summary: string;
-  suggestions: string[];
-}
-
-function scoreColor(s: number): string {
-  if (s >= 80) return "#22c55e";
-  if (s >= 60) return "#eab308";
-  return "#ef4444";
-}
+import { useJobLauncher } from "@/lib/useJobs";
+import { jobTitle } from "@/lib/jobs";
 
 export default function GraderTool() {
   const [text, setText] = useState("");
   const [rubric, setRubric] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [res, setRes] = useState<GradeResult | null>(null);
+  const launch = useJobLauncher();
 
-  async function run() {
+  function run() {
     if (!text.trim()) return;
-    setLoading(true);
-    setError(null);
-    setRes(null);
-    try {
-      const d = await apiPost<GradeResult>("/tools/grade", {
-        text,
-        rubric: rubric.trim() || null,
-      });
-      setRes(d);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Terjadi kesalahan.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  function buildReportBody(): string {
-    if (!res) return "";
-    const ringClass = (v: number) => (v >= 80 ? "ok" : v >= 60 ? "warn" : "bad");
-    const criteria = res.criteria
-      .map(
-        (c) =>
-          `<tr><td class="mono" style="text-align:center;font-weight:700">${c.score}</td><td><b>${escapeHtml(
-            c.name,
-          )}</b><div class="muted">${escapeHtml(c.feedback)}</div></td></tr>`,
-      )
-      .join("");
-    const suggestions = res.suggestions.map((s) => `<li>${escapeHtml(s)}</li>`).join("");
-    return (
-      `<div class="summary"><span class="pill pill-${ringClass(
-        res.overall_score ?? 0,
-      )}">Skor ${res.overall_score ?? "–"} · Nilai ${escapeHtml(res.grade ?? "")}</span></div>` +
-      `<p>${escapeHtml(res.summary)}</p>` +
-      (criteria ? `<h2>Penilaian per Kriteria</h2><table>${criteria}</table>` : "") +
-      (suggestions ? `<h2>Saran Perbaikan</h2><ul>${suggestions}</ul>` : "")
-    );
+    launch({
+      tool: "ai-grader",
+      title: jobTitle(text),
+      run: () => apiPost("/tools/grade", { text, rubric: rubric.trim() || null }),
+    });
   }
 
   return (
@@ -83,74 +31,11 @@ export default function GraderTool() {
       />
       <button
         onClick={run}
-        disabled={loading || !text.trim()}
+        disabled={!text.trim()}
         className="w-full rounded-xl bg-[color:var(--brand)] px-5 py-3 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
       >
-        {loading ? "Menilai…" : "Nilai Esai"}
+        Nilai Esai
       </button>
-      {error && (
-        <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700 dark:border-rose-900 dark:bg-rose-950 dark:text-rose-300">
-          {error}
-        </div>
-      )}
-      {res && (
-        <div className="space-y-4">
-          {res.overall_score !== null && (
-            <div className="flex items-center gap-4 rounded-xl border border-c surface-2 p-5">
-              <div
-                className="flex h-20 w-20 items-center justify-center rounded-full text-2xl font-bold text-white"
-                style={{ background: scoreColor(res.overall_score) }}
-              >
-                {res.overall_score}
-              </div>
-              <div>
-                <div className="text-lg font-semibold">Nilai {res.grade ?? ""}</div>
-                <p className="text-sm text-neutral-500 dark:text-neutral-400">{res.summary}</p>
-              </div>
-            </div>
-          )}
-          {res.criteria?.length > 0 && (
-            <div className="grid gap-3 sm:grid-cols-2">
-              {res.criteria.map((c, i) => (
-                <div key={i} className="rounded-xl border border-c surface-2 p-4">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium">{c.name}</span>
-                    <span className="text-sm font-bold" style={{ color: scoreColor(c.score) }}>
-                      {c.score}
-                    </span>
-                  </div>
-                  <div className="mt-2 h-1.5 w-full rounded-full bg-neutral-200 dark:bg-neutral-800">
-                    <div
-                      className="h-1.5 rounded-full"
-                      style={{ width: `${c.score}%`, background: scoreColor(c.score) }}
-                    />
-                  </div>
-                  <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">{c.feedback}</p>
-                </div>
-              ))}
-            </div>
-          )}
-          {res.suggestions?.length > 0 && (
-            <div className="rounded-xl border border-c surface-2 p-4">
-              <div className="mb-2 text-xs font-medium uppercase tracking-wide text-neutral-400">
-                Saran Perbaikan
-              </div>
-              <ul className="list-inside list-disc space-y-1 text-sm text-neutral-700 dark:text-neutral-300">
-                {res.suggestions.map((s, i) => (
-                  <li key={i}>{s}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-          <ReportBar
-            source={text + "\u0001" + (rubric || "")}
-            title="Laporan Penilaian Esai"
-            filename="laporan-penilaian"
-            disclaimer="Penilaian dihasilkan oleh model AI berdasarkan rubrik akademik sebagai bahan pertimbangan tinjauan; keputusan akhir tetap pada penilai manusia. ID Laporan & hash bersifat reproducible sehingga laporan dapat diverifikasi."
-            buildBody={buildReportBody}
-          />
-        </div>
-      )}
     </div>
   );
 }

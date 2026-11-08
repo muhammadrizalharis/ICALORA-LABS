@@ -2,82 +2,21 @@
 
 import { useState } from "react";
 import { apiPost } from "@/lib/api";
-import { escapeHtml } from "@/lib/report";
-import ReportBar from "@/components/ReportBar";
 import TextInput from "@/components/TextInput";
-
-interface Citation {
-  doc_id: number;
-  source: string;
-  title: string | null;
-  pub_year: number | null;
-  doi: string | null;
-  url: string | null;
-  relevance: number;
-  apa: string;
-  bibtex: string;
-  ieee: string;
-  mla: string;
-  harvard: string;
-  vancouver: string;
-  ris: string;
-}
-interface CitationResult {
-  query: string;
-  count: number;
-  citations: Citation[];
-  corpus_size?: number;
-}
-
-const STYLES = [
-  { key: "apa", label: "APA" },
-  { key: "ieee", label: "IEEE" },
-  { key: "mla", label: "MLA" },
-  { key: "harvard", label: "Harvard" },
-  { key: "vancouver", label: "Vancouver" },
-] as const;
-
-type StyleKey = (typeof STYLES)[number]["key"];
-
-function downloadText(filename: string, content: string): void {
-  const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.style.display = "none";
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 10000);
-}
+import { useJobLauncher } from "@/lib/useJobs";
+import { jobTitle } from "@/lib/jobs";
 
 export default function CitationTool() {
   const [text, setText] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [res, setRes] = useState<CitationResult | null>(null);
-  const [copied, setCopied] = useState<string | null>(null);
-  const [style, setStyle] = useState<StyleKey>("apa");
+  const launch = useJobLauncher();
 
-  function copy(key: string, value: string) {
-    navigator.clipboard.writeText(value);
-    setCopied(key);
-    setTimeout(() => setCopied(null), 1500);
-  }
-
-  async function run() {
+  function run() {
     if (!text.trim()) return;
-    setLoading(true);
-    setError(null);
-    setRes(null);
-    try {
-      setRes(await apiPost<CitationResult>("/tools/citations", { text, top_k: 15 }));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Terjadi kesalahan.");
-    } finally {
-      setLoading(false);
-    }
+    launch({
+      tool: "citation-finder",
+      title: jobTitle(text),
+      run: () => apiPost("/tools/citations", { text, top_k: 15 }),
+    });
   }
 
   return (
@@ -90,122 +29,11 @@ export default function CitationTool() {
       />
       <button
         onClick={run}
-        disabled={loading || !text.trim()}
+        disabled={!text.trim()}
         className="w-full rounded-xl bg-[color:var(--brand)] px-5 py-3 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
       >
-        {loading ? "Mencari…" : "Cari Sitasi"}
+        Cari Sitasi
       </button>
-      {error && (
-        <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700 dark:border-rose-900 dark:bg-rose-950 dark:text-rose-300">
-          {error}
-        </div>
-      )}
-      {res && (
-        <div className="space-y-3">
-          <p className="text-sm text-neutral-500 dark:text-neutral-400">
-            {res.count} sumber relevan ditemukan
-            {res.corpus_size
-              ? ` dari ${res.corpus_size.toLocaleString("id-ID")} dokumen korpus yang dibandingkan`
-              : ""}
-            .
-          </p>
-          {res.count > 0 && (
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs text-neutral-500 dark:text-neutral-400">Gaya sitasi:</span>
-              {STYLES.map((s) => (
-                <button
-                  key={s.key}
-                  onClick={() => setStyle(s.key)}
-                  className={`rounded-full px-3 py-1 text-xs font-medium transition ${
-                    style === s.key
-                      ? "bg-[color:var(--brand)] text-white"
-                      : "border border-c text-neutral-600 hover:border-[color:var(--brand)] dark:text-neutral-300"
-                  }`}
-                >
-                  {s.label}
-                </button>
-              ))}
-              <span className="mx-1 h-4 w-px bg-neutral-300 dark:bg-neutral-700" />
-              <button
-                onClick={() =>
-                  downloadText("sitasi.bib", res.citations.map((c) => c.bibtex).join("\n\n"))
-                }
-                className="rounded-full border border-c px-3 py-1 text-xs font-medium text-neutral-600 hover:border-[color:var(--brand)] dark:text-neutral-300"
-              >
-                Ekspor BibTeX (.bib)
-              </button>
-              <button
-                onClick={() =>
-                  downloadText("sitasi.ris", res.citations.map((c) => c.ris).join("\n"))
-                }
-                className="rounded-full border border-c px-3 py-1 text-xs font-medium text-neutral-600 hover:border-[color:var(--brand)] dark:text-neutral-300"
-              >
-                Ekspor RIS (.ris)
-              </button>
-            </div>
-          )}
-          <ReportBar
-            source={text}
-            title="Laporan Pencarian Sitasi"
-            filename="laporan-sitasi"
-            disclaimer="Daftar sitasi ditarik dari korpus akses-terbuka berdasarkan relevansi semantik; verifikasi setiap sumber sebelum dikutip. ID Laporan & hash bersifat reproducible sehingga laporan dapat diverifikasi."
-            buildBody={() =>
-              `<p class="muted">${res.count} sumber relevan ditemukan${
-                res.corpus_size
-                  ? ` dari ${res.corpus_size.toLocaleString("id-ID")} dokumen korpus yang dibandingkan`
-                  : ""
-              }.</p>` +
-              res.citations
-                .map(
-                  (c) =>
-                    `<div style="margin:12px 0"><b>${escapeHtml(
-                      c.title ?? "[Judul tidak tersedia]",
-                    )}</b> <span class="muted">· relevansi ${c.relevance}%</span><br>` +
-                    `<span class="muted">${escapeHtml(c.source)} · ${
-                      c.pub_year ?? "n.d."
-                    }${c.doi ? ` · ${escapeHtml(c.doi)}` : ""}</span><br>` +
-                    `<span>${escapeHtml(c[style])}</span></div>`,
-                )
-                .join("")
-            }
-          />
-          {res.citations.map((c) => (
-            <div key={c.doc_id} className="rounded-xl border border-c surface-2 p-4">
-              <div className="flex items-start justify-between gap-3">
-                <h3 className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
-                  {c.title ?? "[Judul tidak tersedia]"}
-                </h3>
-                <span className="shrink-0 text-xs font-semibold text-[color:var(--brand)]">
-                  {c.relevance}%
-                </span>
-              </div>
-              <div className="mt-1 text-xs text-neutral-400">
-                {c.source} · {c.pub_year ?? "n.d."}
-                {c.doi && (
-                  <>
-                    {" · "}
-                    <a href={c.url ?? "#"} target="_blank" rel="noopener noreferrer" className="underline">
-                      {c.doi}
-                    </a>
-                  </>
-                )}
-              </div>
-              <p className="mt-2 text-xs text-neutral-600 dark:text-neutral-400">{c[style]}</p>
-              <div className="mt-2 flex gap-3">
-                <button onClick={() => copy(`sty-${c.doc_id}`, c[style])} className="text-xs text-[color:var(--brand)] hover:underline">
-                  {copied === `sty-${c.doc_id}` ? "Tersalin!" : `Salin ${STYLES.find((s) => s.key === style)?.label}`}
-                </button>
-                <button onClick={() => copy(`bib-${c.doc_id}`, c.bibtex)} className="text-xs text-[color:var(--brand)] hover:underline">
-                  {copied === `bib-${c.doc_id}` ? "Tersalin!" : "Salin BibTeX"}
-                </button>
-                <button onClick={() => copy(`ris-${c.doc_id}`, c.ris)} className="text-xs text-[color:var(--brand)] hover:underline">
-                  {copied === `ris-${c.doc_id}` ? "Tersalin!" : "Salin RIS"}
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

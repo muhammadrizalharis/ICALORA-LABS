@@ -2,55 +2,21 @@
 
 import { useState } from "react";
 import { apiPost } from "@/lib/api";
-import { escapeHtml } from "@/lib/report";
-import ReportBar from "@/components/ReportBar";
 import TextInput from "@/components/TextInput";
-
-interface Finding {
-  category: string;
-  char: string;
-  codepoint: string;
-  position: number;
-}
-interface Typo {
-  wrong: string;
-  suggestion: string;
-}
-interface HiddenResult {
-  risk: string;
-  total_hidden: number;
-  counts: Record<string, number>;
-  findings: Finding[];
-  typos: Typo[];
-  cleaned_text: string;
-  note: string;
-}
-
-const RISK_COLOR: Record<string, string> = {
-  bersih: "text-emerald-600 dark:text-emerald-400",
-  sedang: "text-amber-600 dark:text-amber-400",
-  tinggi: "text-rose-600 dark:text-rose-400",
-};
+import { useJobLauncher } from "@/lib/useJobs";
+import { jobTitle } from "@/lib/jobs";
 
 export default function HiddenTextTool() {
   const [text, setText] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [res, setRes] = useState<HiddenResult | null>(null);
-  const [copied, setCopied] = useState(false);
+  const launch = useJobLauncher();
 
-  async function run() {
+  function run() {
     if (!text.trim()) return;
-    setLoading(true);
-    setError(null);
-    setRes(null);
-    try {
-      setRes(await apiPost<HiddenResult>("/tools/hidden-text", { text, check_typos: true }));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Terjadi kesalahan.");
-    } finally {
-      setLoading(false);
-    }
+    launch({
+      tool: "hidden-text",
+      title: jobTitle(text),
+      run: () => apiPost("/tools/hidden-text", { text, check_typos: true }),
+    });
   }
 
   return (
@@ -63,113 +29,11 @@ export default function HiddenTextTool() {
       />
       <button
         onClick={run}
-        disabled={loading || !text.trim()}
+        disabled={!text.trim()}
         className="w-full rounded-xl bg-[color:var(--brand)] px-5 py-3 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
       >
-        {loading ? "Memindai…" : "Pindai"}
+        Pindai Dokumen
       </button>
-      {error && (
-        <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700 dark:border-rose-900 dark:bg-rose-950 dark:text-rose-300">
-          {error}
-        </div>
-      )}
-      {res && (
-        <div className="space-y-3">
-          <div className="rounded-xl border border-c surface-2 p-4">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-neutral-500 dark:text-neutral-400">Tingkat risiko</span>
-              <span className={`text-lg font-bold capitalize ${RISK_COLOR[res.risk] ?? ""}`}>
-                {res.risk}
-              </span>
-            </div>
-            <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-5">
-              {Object.entries(res.counts).map(([k, v]) => (
-                <div key={k} className="rounded-lg border border-c surface p-2 text-center">
-                  <div className="text-lg font-semibold">{v}</div>
-                  <div className="text-[10px] text-neutral-400">{k}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {res.findings.length > 0 && (
-            <div className="rounded-xl border border-c surface-2 p-4">
-              <h3 className="mb-2 text-sm font-medium">Karakter tersembunyi ({res.total_hidden})</h3>
-              <div className="max-h-48 space-y-1 overflow-auto text-xs">
-                {res.findings.map((f, i) => (
-                  <div key={i} className="flex justify-between gap-2 text-neutral-600 dark:text-neutral-300">
-                    <span>{f.char}</span>
-                    <span className="text-neutral-400">
-                      {f.codepoint} @ {f.position}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {res.typos.length > 0 && (
-            <div className="rounded-xl border border-c surface-2 p-4">
-              <h3 className="mb-2 text-sm font-medium">Dugaan typo ({res.typos.length})</h3>
-              <div className="flex flex-wrap gap-2 text-xs">
-                {res.typos.map((t, i) => (
-                  <span key={i} className="rounded-full border border-c px-2 py-1">
-                    <span className="text-rose-500 line-through">{t.wrong}</span> →{" "}
-                    <span className="text-emerald-500">{t.suggestion}</span>
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <button
-            onClick={() => {
-              navigator.clipboard.writeText(res.cleaned_text);
-              setCopied(true);
-              setTimeout(() => setCopied(false), 1500);
-            }}
-            className="rounded-lg border border-c px-4 py-1.5 text-xs text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-900"
-          >
-            {copied ? "Tersalin ✓" : "Salin Teks Bersih"}
-          </button>
-          <p className="text-xs text-neutral-400">{res.note}</p>
-          <ReportBar
-            source={text}
-            title="Laporan Pindai Teks Tersembunyi & Typo"
-            filename="laporan-teks-tersembunyi"
-            disclaimer="Pemindaian mendeteksi karakter tak-kasatmata dan dugaan typo sebagai bahan tinjauan integritas dokumen. ID Laporan & hash bersifat reproducible sehingga laporan dapat diverifikasi."
-            buildBody={() =>
-              `<p>Tingkat risiko: <b>${escapeHtml(res.risk)}</b> · Karakter tersembunyi: <b>${
-                res.total_hidden
-              }</b> · Dugaan typo: <b>${res.typos.length}</b></p>` +
-              `<h2>Ringkasan Kategori</h2><table><tbody>${Object.entries(res.counts)
-                .map(
-                  ([k, v]) =>
-                    `<tr><td>${escapeHtml(k)}</td><td class="r">${v}</td></tr>`,
-                )
-                .join("")}</tbody></table>` +
-              (res.findings.length
-                ? `<h2>Karakter Tersembunyi</h2><table><thead><tr><th>Karakter</th><th>Codepoint</th><th>Posisi</th></tr></thead><tbody>${res.findings
-                    .map(
-                      (f) =>
-                        `<tr><td>${escapeHtml(f.category)}</td><td class="mono">${escapeHtml(
-                          f.codepoint,
-                        )}</td><td>${f.position}</td></tr>`,
-                    )
-                    .join("")}</tbody></table>`
-                : "") +
-              (res.typos.length
-                ? `<h2>Dugaan Typo</h2><ul>${res.typos
-                    .map(
-                      (t) =>
-                        `<li>${escapeHtml(t.wrong)} → <b>${escapeHtml(t.suggestion)}</b></li>`,
-                    )
-                    .join("")}</ul>`
-                : "")
-            }
-          />
-        </div>
-      )}
     </div>
   );
 }
