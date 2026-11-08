@@ -17,7 +17,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="$ROOT/backend/.env"
 RCLONE="$HOME/bin/rclone"
 REMOTE="gdrive:ICALORA-LABS-Backups"
-CONTAINER="icalora-postgres"
+PG_IMAGE="pgvector/pgvector:pg16"
 KEEP="${KEEP:-7}"
 
 [ -f "$ENV_FILE" ] || { echo "[backup] .env tidak ditemukan: $ENV_FILE" >&2; exit 1; }
@@ -25,15 +25,19 @@ KEEP="${KEEP:-7}"
 PGUSER="$(grep -E '^POSTGRES_USER=' "$ENV_FILE" | cut -d= -f2-)"
 PGDB="$(grep -E '^POSTGRES_DB=' "$ENV_FILE" | cut -d= -f2-)"
 PGPASS="$(grep -E '^POSTGRES_PASSWORD=' "$ENV_FILE" | cut -d= -f2-)"
+# Host/port: storage Postgres kini di VM terpisah (storage-only migration).
+PGHOST="$(grep -E '^POSTGRES_HOST=' "$ENV_FILE" | cut -d= -f2-)"
+PGPORT="$(grep -E '^POSTGRES_PORT=' "$ENV_FILE" | cut -d= -f2-)"
+PGPORT="${PGPORT:-5432}"
 
 TS="$(date -u +%Y%m%dT%H%M%SZ)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 OUT="$TMP/icalora_${TS}.sql.zst"
 
-echo "[backup] pg_dump ($PGDB) -> zstd …"
-docker exec -e PGPASSWORD="$PGPASS" "$CONTAINER" \
-  pg_dump -U "$PGUSER" -d "$PGDB" --no-owner --no-privileges \
+echo "[backup] pg_dump ($PGDB @ $PGHOST:$PGPORT) -> zstd …"
+docker run --rm -e PGPASSWORD="$PGPASS" "$PG_IMAGE" \
+  pg_dump -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" --no-owner --no-privileges \
   | zstd -q -T0 -12 -o "$OUT"
 
 SIZE="$(du -h "$OUT" | cut -f1)"
