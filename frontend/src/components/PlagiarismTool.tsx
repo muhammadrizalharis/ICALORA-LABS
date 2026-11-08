@@ -24,6 +24,17 @@ interface MatchedPassage {
   source_title: string | null;
   source_doi: string | null;
   doc_id: number | null;
+  char_len?: number;
+  quoted?: boolean;
+  cited?: boolean;
+  in_bibliography?: boolean;
+  group?: string;
+}
+
+interface MatchGroup {
+  type: string;
+  count: number;
+  percent: number;
 }
 
 interface Report {
@@ -34,6 +45,7 @@ interface Report {
   matched_sentences: number;
   total_sentences: number;
   matched_passages: MatchedPassage[];
+  match_groups?: MatchGroup[];
   word_count: number;
   char_count: number;
   sources: Source[];
@@ -85,6 +97,31 @@ const HILITE = [
 // Ambang filter "Exclude" pada laporan.
 const MIN_WORDS = 8; // kecocokan < 8 kata dianggap terlalu pendek
 const MIN_PCT = 1.0; // sumber yang menyumbang < 1% dianggap kecil
+
+// Kelompok kecocokan (Match Groups) berdasar status sitasi & kutipan — warna orisinal ICALORA.
+const MATCH_GROUP_META: Record<string, { label: string; dot: string; desc: string }> = {
+  uncited: {
+    label: "Tidak Disitasi/Dikutip",
+    dot: "#dc2626",
+    desc: "Cocok tanpa sitasi & tanpa tanda kutip",
+  },
+  missing_quote: {
+    label: "Kutipan Hilang",
+    dot: "#ea580c",
+    desc: "Mirip sumber & disitasi, tetapi tanpa tanda kutip",
+  },
+  missing_citation: {
+    label: "Sitasi Hilang",
+    dot: "#ca8a04",
+    desc: "Ada tanda kutip, tetapi tanpa sitasi",
+  },
+  cited_quoted: {
+    label: "Disitasi & Dikutip",
+    dot: "#16a34a",
+    desc: "Ada sitasi dan tanda kutip",
+  },
+};
+const MATCH_GROUP_ORDER = ["uncited", "missing_quote", "missing_citation", "cited_quoted"];
 
 function escHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -226,6 +263,8 @@ export default function PlagiarismTool() {
   const [report, setReport] = useState<Report | null>(null);
   const [exShort, setExShort] = useState(false);
   const [exSmall, setExSmall] = useState(false);
+  const [exQuotes, setExQuotes] = useState(false);
+  const [exBib, setExBib] = useState(false);
 
   async function run() {
     setLoading(true);
@@ -241,10 +280,17 @@ export default function PlagiarismTool() {
     }
   }
 
+  function activePassages(): MatchedPassage[] {
+    if (!report) return [];
+    return report.matched_passages.filter(
+      (p) => !(exQuotes && p.quoted) && !(exBib && p.in_bibliography),
+    );
+  }
+
   function hiOpts(): { minWords: number; exclude: Set<string> } {
     let exclude = new Set<string>();
     if (exSmall && report) {
-      const base = buildHighlight(text, report.matched_passages, report.char_count);
+      const base = buildHighlight(text, activePassages(), report.char_count);
       exclude = new Set(base.sources.filter((s) => s.pct < MIN_PCT).map((s) => s.key));
     }
     return { minWords: exShort ? MIN_WORDS : 0, exclude };
@@ -255,13 +301,13 @@ export default function PlagiarismTool() {
     const now = new Date().toLocaleString("id-ID");
     const { html: hiText, sources: hiSources } = buildHighlight(
       text,
-      report.matched_passages,
+      activePassages(),
       report.char_count,
       true,
       hiOpts(),
     );
     const idx =
-      exShort || exSmall
+      exShort || exSmall || exQuotes || exBib
         ? Math.min(100, Math.round(hiSources.reduce((a, s) => a + s.pct, 0) * 10) / 10)
         : report.overall_similarity;
     const v = verdictFor(idx);
@@ -292,6 +338,18 @@ export default function PlagiarismTool() {
       .join("");
 
     const ringCls = ringClass(idx);
+    const groupsHtml =
+      report.match_groups && report.match_groups.some((g) => g.count > 0)
+        ? `<h2>Kelompok Kecocokan</h2><table>${MATCH_GROUP_ORDER.map((key) => {
+            const g = report.match_groups?.find((x) => x.type === key);
+            const meta = MATCH_GROUP_META[key];
+            return `<tr><td class="num"><span class="swatch" style="background:${meta.dot};">&nbsp;</span></td><td class="pct">${(
+              g?.percent ?? 0
+            ).toFixed(1)}%</td><td>${escHtml(meta.label)}<div class="src">${escHtml(
+              meta.desc,
+            )} · ${g?.count ?? 0} bagian</div></td></tr>`;
+          }).join("")}</table>`
+        : "";
     const html = `<!doctype html><html lang="id"><head><meta charset="utf-8">
 <title>Laporan Kemiripan — ICALORA-LABS</title>
 <style>
@@ -343,6 +401,7 @@ ${
     ? `<p class="legend">${escHtml(report.coverage_note)}</p>`
     : ""
 }
+${groupsHtml}
 ${
   overview
     ? `<h2>Ringkasan Kecocokan (Match Overview)</h2><table>${overview}</table>`
@@ -364,9 +423,9 @@ ${
   }
 
   const hi = report
-    ? buildHighlight(text, report.matched_passages, report.char_count, false, hiOpts())
+    ? buildHighlight(text, activePassages(), report.char_count, false, hiOpts())
     : null;
-  const filtersActive = exShort || exSmall;
+  const filtersActive = exShort || exSmall || exQuotes || exBib;
   const shownIndex =
     report && hi && filtersActive
       ? Math.min(100, Math.round(hi.sources.reduce((a, s) => a + s.pct, 0) * 10) / 10)
@@ -441,6 +500,42 @@ ${
             </div>
           </div>
 
+          {report.match_groups && report.match_groups.some((g) => g.count > 0) && (
+            <div>
+              <div className="mb-2 text-sm font-semibold text-neutral-800 dark:text-neutral-200">
+                Kelompok Kecocokan
+              </div>
+              <ul className="grid gap-2 sm:grid-cols-2">
+                {MATCH_GROUP_ORDER.map((key) => {
+                  const g = report.match_groups?.find((x) => x.type === key);
+                  const meta = MATCH_GROUP_META[key];
+                  return (
+                    <li
+                      key={key}
+                      className="flex items-center gap-3 rounded-lg border border-c px-3 py-2"
+                    >
+                      <span
+                        className="mt-0.5 h-3 w-3 shrink-0 rounded-full"
+                        style={{ background: meta.dot }}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-medium text-neutral-800 dark:text-neutral-100">
+                            {meta.label}
+                          </span>
+                          <span className="shrink-0 text-xs font-semibold text-neutral-600 dark:text-neutral-300">
+                            {g?.count ?? 0} · {(g?.percent ?? 0).toFixed(1)}%
+                          </span>
+                        </div>
+                        <p className="truncate text-[11px] text-neutral-400">{meta.desc}</p>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+
           <div className="rounded-lg border border-c bg-neutral-50 px-3 py-2.5 dark:bg-white/5">
             <div className="mb-1.5 text-xs font-semibold text-neutral-700 dark:text-neutral-200">
               Pengaturan Exclude (skor dihitung ulang)
@@ -453,6 +548,14 @@ ${
               <label className="inline-flex cursor-pointer items-center gap-2">
                 <input type="checkbox" checked={exSmall} onChange={(e) => setExSmall(e.target.checked)} />
                 Kecualikan sumber kecil (&lt; {MIN_PCT}%)
+              </label>
+              <label className="inline-flex cursor-pointer items-center gap-2">
+                <input type="checkbox" checked={exQuotes} onChange={(e) => setExQuotes(e.target.checked)} />
+                Kecualikan teks dalam kutipan
+              </label>
+              <label className="inline-flex cursor-pointer items-center gap-2">
+                <input type="checkbox" checked={exBib} onChange={(e) => setExBib(e.target.checked)} />
+                Kecualikan daftar pustaka
               </label>
             </div>
             {filtersActive && (

@@ -33,6 +33,55 @@ _SHINGLE = 5
 _SENT_RE = re.compile(r"[^.!?\n]+[.!?]?", re.UNICODE)
 _WORD_RE = re.compile(r"\w+", re.UNICODE)
 
+# Rentang teks di antara tanda kutip (minimal 10 karakter agar bukan apostrof).
+_QUOTE_RE = re.compile(r'["“”„«»][^"“”„«»]{10,}?["“”„«»]', re.UNICODE)
+
+# Penanda sitasi: (… 2020), [12]/[1-3]/[1,2], dkk./et al.
+_CITATION_RE = re.compile(
+    r"\([^()]*\b(?:19|20)\d{2}[a-z]?\b[^()]*\)"
+    r"|\[\s*\d+(?:\s*[-,]\s*\d+)*\s*\]"
+    r"|\b(?:dkk|et al)\.",
+    re.UNICODE,
+)
+
+# Awal bagian daftar pustaka / referensi (judul baris).
+_BIB_RE = re.compile(
+    r"(?i)(?:^|\n)\s*(?:daftar pustaka|daftar rujukan|referensi|references|"
+    r"bibliography|works cited)\s*(?:\n|:|$)",
+    re.UNICODE,
+)
+
+# Kelompok kecocokan berdasarkan status sitasi & kutipan (lihat docs/11 A.1).
+_MATCH_GROUP_ORDER = ["uncited", "missing_quote", "missing_citation", "cited_quoted"]
+
+
+def _classify_match(
+    sent: str,
+    idx: int,
+    quoted_spans: list[tuple[int, int]],
+    cite_spans: list[tuple[int, int]],
+    bib_start: int | None,
+) -> dict:
+    """Tentukan status kutipan/sitasi sebuah kalimat yang cocok."""
+    if idx < 0:
+        quoted = cited = in_bib = False
+    else:
+        end = idx + len(sent)
+        mid = idx + len(sent) // 2
+        quoted = any(s <= mid <= e for s, e in quoted_spans)
+        cited = any(s < end + 80 and e > idx for s, e in cite_spans)
+        in_bib = bib_start is not None and idx >= bib_start
+    if cited and quoted:
+        group = "cited_quoted"
+    elif cited and not quoted:
+        group = "missing_quote"
+    elif quoted and not cited:
+        group = "missing_citation"
+    else:
+        group = "uncited"
+    return {"quoted": quoted, "cited": cited, "in_bibliography": in_bib, "group": group}
+
+
 
 def _shingles(words: list[str], n: int = _SHINGLE) -> set[str]:
     if len(words) < n:
@@ -64,6 +113,14 @@ def _chunk_match(doc: str, candidates: list[dict], threshold: float = 0.55) -> d
     matched_chars = 0
     total_chars = max(len(doc), 1)
 
+    quoted_spans = [(m.start(), m.end()) for m in _QUOTE_RE.finditer(doc)]
+    cite_spans = [(m.start(), m.end()) for m in _CITATION_RE.finditer(doc)]
+    bib_m = _BIB_RE.search(doc)
+    bib_start = bib_m.start() if bib_m else None
+    low_doc = doc.lower()
+    group_chars = {k: 0 for k in _MATCH_GROUP_ORDER}
+    group_count = {k: 0 for k in _MATCH_GROUP_ORDER}
+
     for sent in sentences:
         words = [w.lower() for w in _WORD_RE.findall(sent)]
         sh = _shingles(words)
@@ -81,6 +138,12 @@ def _chunk_match(doc: str, candidates: list[dict], threshold: float = 0.55) -> d
                 best_src = c
         if best_ratio >= threshold and best_src is not None:
             matched_chars += len(sent)
+            idx = doc.find(sent)
+            if idx < 0:
+                idx = low_doc.find(sent.lower())
+            status = _classify_match(sent, idx, quoted_spans, cite_spans, bib_start)
+            group_chars[status["group"]] += len(sent)
+            group_count[status["group"]] += 1
             matched.append(
                 {
                     "sentence": sent[:300],
@@ -88,16 +151,30 @@ def _chunk_match(doc: str, candidates: list[dict], threshold: float = 0.55) -> d
                     "source_title": best_src.get("title"),
                     "source_doi": best_src.get("doi"),
                     "doc_id": best_src.get("doc_id"),
+                    "char_len": len(sent),
+                    "quoted": status["quoted"],
+                    "cited": status["cited"],
+                    "in_bibliography": status["in_bibliography"],
+                    "group": status["group"],
                 }
             )
 
     similarity_index = round(matched_chars / total_chars * 100, 1)
     matched.sort(key=lambda m: m["match_ratio"], reverse=True)
+    match_groups = [
+        {
+            "type": k,
+            "count": group_count[k],
+            "percent": round(group_chars[k] / total_chars * 100, 1),
+        }
+        for k in _MATCH_GROUP_ORDER
+    ]
     return {
         "similarity_index": similarity_index,
         "matched_sentences": len(matched),
         "total_sentences": len(sentences),
         "matched_passages": matched[:50],
+        "match_groups": match_groups,
     }
 
 
@@ -229,6 +306,7 @@ def check_plagiarism(doc: str, top_k: int = 30) -> dict:
         "matched_sentences": chunk["matched_sentences"],
         "total_sentences": chunk["total_sentences"],
         "matched_passages": chunk["matched_passages"],
+        "match_groups": chunk["match_groups"],
         "word_count": wc,
         "char_count": cc,
         "sources": sources,
