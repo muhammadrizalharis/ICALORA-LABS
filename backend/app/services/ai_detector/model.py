@@ -24,6 +24,7 @@ FEATURES = [
 ]
 
 MODEL_PATH = Path(__file__).resolve().parent / "model.json"
+EMB_MODEL_PATH = Path(__file__).resolve().parent / "model_emb.json"
 
 
 def feature_vector(signals: dict) -> list[float]:
@@ -39,12 +40,14 @@ class LogisticModel:
         mean: list[float],
         std: list[float],
         meta: dict | None = None,
+        feature_names: list[str] | None = None,
     ):
         self.w = np.asarray(weights, dtype=float)
         self.b = float(bias)
         self.mean = np.asarray(mean, dtype=float)
         self.std = np.asarray(std, dtype=float)
         self.meta = meta or {}
+        self.feature_names = feature_names or list(FEATURES)
 
     def predict_proba(self, x: list[float]) -> float:
         z = (np.asarray(x, dtype=float) - self.mean) / self.std
@@ -53,7 +56,7 @@ class LogisticModel:
 
     def to_dict(self) -> dict:
         return {
-            "features": FEATURES,
+            "features": self.feature_names,
             "weights": self.w.tolist(),
             "bias": self.b,
             "mean": self.mean.tolist(),
@@ -63,11 +66,15 @@ class LogisticModel:
 
     @classmethod
     def from_dict(cls, d: dict) -> "LogisticModel":
-        return cls(d["weights"], d["bias"], d["mean"], d["std"], d.get("meta"))
+        return cls(
+            d["weights"], d["bias"], d["mean"], d["std"],
+            d.get("meta"), d.get("features"),
+        )
 
 
 def train(
-    X: list[list[float]], y: list[int], epochs: int = 600, lr: float = 0.3, l2: float = 1e-3
+    X: list[list[float]], y: list[int], epochs: int = 600, lr: float = 0.3, l2: float = 1e-3,
+    feature_names: list[str] | None = None,
 ) -> LogisticModel:
     """Latih logistic regression dgn gradient descent atas fitur terstandarisasi."""
     Xa = np.asarray(X, dtype=float)
@@ -92,7 +99,9 @@ def train(
     preds = (1.0 / (1.0 + np.exp(-(Z @ w + b)))) >= 0.5
     acc = float((preds == (ya >= 0.5)).mean())
     return LogisticModel(
-        w.tolist(), b, mean.tolist(), std.tolist(), meta={"train_accuracy": round(acc, 3), "n": n}
+        w.tolist(), b, mean.tolist(), std.tolist(),
+        meta={"train_accuracy": round(acc, 3), "n": n},
+        feature_names=feature_names,
     )
 
 

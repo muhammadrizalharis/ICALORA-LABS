@@ -6,3 +6,4 @@ __pycache__/
 .ruff_cache/
 *.egg-info/
 app/services/ai_detector/train_features.jsonl
+app/services/ai_detector/train_emb.jsonl

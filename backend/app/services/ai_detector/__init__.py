@@ -15,10 +15,12 @@ import re
 
 from app.services.llm.provider import get_llm
 from app.services.ai_detector import model as _model
+from app.services.ai_detector.embed import embed_text
 
 _WORD_RE = re.compile(r"\b[\w'-]+\b", re.UNICODE)
 
 _TRAINED = None  # cache; None=belum dicoba, False=tidak ada, else LogisticModel
+_EMB_TRAINED = None  # cache model embedding (stat+emb 1030-dim)
 
 
 def _trained_probability(signals: dict) -> float | None:
@@ -30,6 +32,27 @@ def _trained_probability(signals: dict) -> float | None:
         return None
     try:
         return round(_TRAINED.predict_proba(_model.feature_vector(signals)) * 100.0, 1)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _emb_trained_probability(signals: dict, text: str) -> float | None:
+    """Probabilitas (0-100) dari model stat+embedding bila model & endpoint tersedia.
+
+    Menghitung embedding teks saat inferensi; bila endpoint embedding mati/gagal,
+    kembalikan None agar sistem degradasi anggun ke sinyal lain.
+    """
+    global _EMB_TRAINED
+    if _EMB_TRAINED is None:
+        _EMB_TRAINED = _model.load(_model.EMB_MODEL_PATH) or False
+    if not _EMB_TRAINED:
+        return None
+    emb = embed_text(text)
+    if emb is None:
+        return None
+    try:
+        vec = _model.feature_vector(signals) + emb
+        return round(_EMB_TRAINED.predict_proba(vec) * 100.0, 1)
     except Exception:  # noqa: BLE001
         return None
 _SENT_RE = re.compile(r"[^.!?]+[.!?]*")
@@ -180,16 +203,19 @@ def detect_ai(text: str) -> dict:
     analysis = _llm_analysis(text)
     llm_pct = analysis["prob"]
     model_pct = _trained_probability(signals)
+    emb_pct = _emb_trained_probability(signals, text)
 
-    # Blending adaptif berdasarkan sinyal yang tersedia (model terlatih > LLM > statistik).
-    if model_pct is not None and llm_pct is not None:
-        final = 0.30 * stat_pct + 0.35 * llm_pct + 0.35 * model_pct
-    elif model_pct is not None:
-        final = 0.45 * stat_pct + 0.55 * model_pct
-    elif llm_pct is not None:
-        final = 0.45 * stat_pct + 0.55 * llm_pct
-    else:
-        final = stat_pct
+    # Blending adaptif berbobot: model embedding (semantik) > LLM ≈ model statistik > stat.
+    # Bobot dinormalisasi atas sinyal yang tersedia → degradasi anggun bila ada yang kosong.
+    components: list[tuple[float, float]] = [(stat_pct, 0.15)]
+    if llm_pct is not None:
+        components.append((llm_pct, 0.25))
+    if model_pct is not None:
+        components.append((model_pct, 0.20))
+    if emb_pct is not None:
+        components.append((emb_pct, 0.55))
+    total_w = sum(w for _v, w in components)
+    final = sum(v * w for v, w in components) / total_w
     final = round(max(0.0, min(100.0, final)), 1)
 
     if final >= 70:
@@ -212,6 +238,7 @@ def detect_ai(text: str) -> dict:
         "stat_probability": round(stat_pct, 1),
         "llm_probability": round(llm_pct, 1) if llm_pct is not None else None,
         "model_probability": model_pct,
+        "emb_model_probability": emb_pct,
         "signals": signals,
         "flagged_sentences": flagged,
         "note": (

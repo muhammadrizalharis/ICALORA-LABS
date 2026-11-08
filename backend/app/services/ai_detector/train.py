@@ -36,10 +36,19 @@ from sqlalchemy import text
 from app.core.clients import engine
 from app.ingest.common import decompress_text
 from app.services.ai_detector import _statistical_signals
-from app.services.ai_detector.model import feature_vector, save, train
+from app.services.ai_detector.embed import EMB_DIM, EMB_ENDPOINT, embed_text
+from app.services.ai_detector.model import (
+    EMB_MODEL_PATH,
+    FEATURES,
+    LogisticModel,
+    feature_vector,
+    save,
+    train,
+)
 
 _WORD_MIN, _WORD_MAX = 80, 400
 _CACHE_PATH = Path(__file__).resolve().parent / "train_features.jsonl"
+_EMB_CACHE_PATH = Path(__file__).resolve().parent / "train_emb.jsonl"
 _NUM_CTX = 4096
 _NUM_PREDICT = int(os.environ.get("ICALORA_NUM_PREDICT", "300"))
 
@@ -318,6 +327,186 @@ def cmd_finalize(args) -> None:
     print(f"[fin] selesai. akurasi latih={model.meta.get('train_accuracy')} n={model.meta.get('n')}", flush=True)
 
 
+# ─────────────────────────── EMBEDDING (1024-dim bge-m3) ───────────────────────────
+
+def _emb_count_ai() -> int:
+    if not _EMB_CACHE_PATH.exists():
+        return 0
+    n = 0
+    for line in _EMB_CACHE_PATH.read_text(encoding="utf-8").splitlines():
+        if '"label": 1' in line:
+            n += 1
+    return n
+
+
+def _load_emb_cache() -> tuple[list[list[float]], list[int], set[int]]:
+    """Muat cache embedding; tiap X = feat(6) + emb(1024) = 1030 dim."""
+    X: list[list[float]] = []
+    y: list[int] = []
+    used_ids: set[int] = set()
+    if not _EMB_CACHE_PATH.exists():
+        return X, y, used_ids
+    for line in _EMB_CACHE_PATH.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+            feat = [float(v) for v in rec["feat"]]
+            emb = [float(v) for v in rec["emb"]]
+            if len(emb) != EMB_DIM:
+                continue
+            X.append(feat + emb)
+            y.append(int(rec["label"]))
+            if rec.get("src_id") is not None:
+                used_ids.add(int(rec["src_id"]))
+        except (json.JSONDecodeError, KeyError, ValueError):
+            continue
+    return X, y, used_ids
+
+
+def _fill_humans_emb(target: int, fh, client: httpx.Client) -> int:
+    """Pastikan cache embedding punya `target` sampel manusia (feat + emb)."""
+    _X, y, used_ids = _load_emb_cache()
+    n_h = sum(1 for v in y if v == 0)
+    if n_h >= target:
+        return n_h
+    need = target - n_h
+    print(f"[emb] mengambil+meng-embed {need} sampel manusia…", flush=True)
+    for doc_id, _title, body in _human_samples(need, used_ids):
+        emb = embed_text(body, client, EMB_ENDPOINT)
+        if emb is None:
+            continue
+        feat = feature_vector(_statistical_signals(body))
+        fh.write(json.dumps({"label": 0, "feat": feat, "emb": emb, "src_id": doc_id}) + "\n")
+        fh.flush()
+        n_h += 1
+        if n_h % 100 == 0:
+            print(f"[emb]   manusia: {n_h}/{target}", flush=True)
+    print(f"[emb] sampel manusia kini={n_h}", flush=True)
+    return n_h
+
+
+def _generate_ai_emb(lanes: list[tuple[str, str]], target_ai: int, titles: list[str],
+                     fh, lock: threading.Lock, max_seconds: int, concurrency: int) -> int:
+    """Seperti _generate_ai tetapi tiap teks AI juga di-embed (feat + emb)."""
+    state = {"ai": _emb_count_ai(), "ti": 0}
+    deadline = time.time() + max_seconds
+
+    def next_title() -> str | None:
+        with lock:
+            if state["ti"] >= len(titles):
+                return None
+            t = titles[state["ti"]]
+            state["ti"] += 1
+            return t
+
+    def worker(wid: int) -> None:
+        rng = random.Random(20_000 + wid + int(time.time()) % 1000)
+        fails = 0
+        with httpx.Client() as client:
+            while True:
+                with lock:
+                    if state["ai"] >= target_ai:
+                        return
+                if time.time() > deadline:
+                    return
+                title = next_title()
+                if title is None:
+                    return
+                endpoint, model = rng.choice(lanes)
+                txt = _generate(client, endpoint, model, title, rng)
+                if not txt:
+                    fails += 1
+                    if fails >= 30:
+                        print(f"[emb]   worker {wid} berhenti (30 gagal beruntun)", flush=True)
+                        return
+                    continue
+                emb = embed_text(txt, client, EMB_ENDPOINT)
+                if emb is None:
+                    fails += 1
+                    continue
+                fails = 0
+                feat = feature_vector(_statistical_signals(txt))
+                with lock:
+                    if state["ai"] >= target_ai:
+                        return
+                    fh.write(json.dumps({"label": 1, "feat": feat, "emb": emb, "src_id": None, "gen": model}) + "\n")
+                    fh.flush()
+                    state["ai"] += 1
+                    c = state["ai"]
+                if c % 25 == 0:
+                    print(f"[emb]   sampel AI: {c}/{target_ai}", flush=True)
+
+    threads = []
+    for wid in range(max(1, concurrency)):
+        t = threading.Thread(target=worker, args=(wid,), daemon=True)
+        t.start()
+        threads.append(t)
+    for t in threads:
+        t.join()
+    return state["ai"]
+
+
+def cmd_build_emb(args) -> None:
+    random.seed(args.seed)
+    fh = _EMB_CACHE_PATH.open("a", encoding="utf-8")
+    try:
+        with httpx.Client() as client:
+            _fill_humans_emb(args.per_class, fh, client)
+        lanes = _lanes_from_args(args.local_models, args.shared_models)
+        if not lanes:
+            print("[emb] tidak ada model; lewati generate.", flush=True)
+            return
+        print(f"[emb] lanes={[m for _e, m in lanes]} target_ai={args.target_ai}", flush=True)
+        topics = [t for _id, t, _b in _human_samples(args.target_ai + 2000, set())]
+        lock = threading.Lock()
+        final = _generate_ai_emb(lanes, args.target_ai, topics, fh, lock, args.max_seconds, args.concurrency)
+        print(f"[emb] selesai. AI di cache={final}", flush=True)
+    finally:
+        fh.close()
+
+
+def cmd_finalize_emb(args) -> None:
+    rng = random.Random(args.seed)
+    X, y, _ = _load_emb_cache()
+    pos = sum(y)
+    print(f"[fin-emb] total {len(X)} sampel (AI={pos}, manusia={len(y) - pos}), dim={len(X[0]) if X else 0}", flush=True)
+    if pos < 10 or (len(y) - pos) < 10:
+        raise SystemExit("[fin-emb] sampel terlalu sedikit untuk melatih + validasi.")
+
+    idx0 = [i for i, v in enumerate(y) if v == 0]
+    idx1 = [i for i, v in enumerate(y) if v == 1]
+    rng.shuffle(idx0)
+    rng.shuffle(idx1)
+    n_test0 = max(1, int(len(idx0) * args.test_frac))
+    n_test1 = max(1, int(len(idx1) * args.test_frac))
+    test_idx = set(idx0[:n_test0] + idx1[:n_test1])
+    Xtr = [X[i] for i in range(len(X)) if i not in test_idx]
+    ytr = [y[i] for i in range(len(y)) if i not in test_idx]
+    Xte = [X[i] for i in sorted(test_idx)]
+    yte = [y[i] for i in sorted(test_idx)]
+    print(f"[fin-emb] split: latih={len(Xtr)} held-out={len(Xte)}; melatih (1030-dim, L2 kuat)…", flush=True)
+
+    names = list(FEATURES) + [f"emb_{i}" for i in range(EMB_DIM)]
+    model = train(Xtr, ytr, epochs=args.epochs, lr=args.lr, l2=args.l2, feature_names=names)
+    metrics = _evaluate(model, Xte, yte)
+    model.meta["validation"] = metrics
+    model.meta["n_human"] = len(y) - pos
+    model.meta["n_ai"] = pos
+    model.meta["kind"] = "stat+emb"
+    model.meta["emb_dim"] = EMB_DIM
+    save(model, EMB_MODEL_PATH)
+
+    print("[fin-emb] === VALIDASI (held-out) ===", flush=True)
+    print(f"  akurasi            : {metrics['accuracy']}")
+    print(f"  false-positive rate: {metrics['false_positive_rate']}  (manusia dituduh AI)")
+    print(f"  false-negative rate: {metrics['false_negative_rate']}  (AI lolos)")
+    print(f"  precision / recall : {metrics['precision']} / {metrics['recall']}")
+    print(f"  confusion          : {metrics['confusion']}")
+    print(f"[fin-emb] selesai → {EMB_MODEL_PATH.name}", flush=True)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="mode")
@@ -335,13 +524,33 @@ def main() -> None:
     f.add_argument("--test-frac", type=float, default=0.2)
     f.add_argument("--seed", type=int, default=42)
 
+    be = sub.add_parser("build-emb", help="hasilkan sampel AI + embed (feat+emb) lalu keluar")
+    be.add_argument("--local-models", default="", help="daftar model instance user (koma)")
+    be.add_argument("--shared-models", default="", help="daftar model Ollama bersama (koma)")
+    be.add_argument("--target-ai", type=int, required=True, help="hentikan saat cache-emb AI >= nilai ini")
+    be.add_argument("--per-class", type=int, default=3000, help="jumlah sampel manusia yang diinginkan")
+    be.add_argument("--max-seconds", type=int, default=7200)
+    be.add_argument("--concurrency", type=int, default=4, help="jumlah worker paralel")
+    be.add_argument("--seed", type=int, default=42)
+
+    fe = sub.add_parser("finalize-emb", help="latih model stat+emb (1030-dim) → model_emb.json")
+    fe.add_argument("--test-frac", type=float, default=0.2)
+    fe.add_argument("--seed", type=int, default=42)
+    fe.add_argument("--epochs", type=int, default=1200)
+    fe.add_argument("--lr", type=float, default=0.2)
+    fe.add_argument("--l2", type=float, default=1e-2)
+
     args = ap.parse_args()
     if args.mode == "generate":
         cmd_generate(args)
     elif args.mode == "finalize":
         cmd_finalize(args)
+    elif args.mode == "build-emb":
+        cmd_build_emb(args)
+    elif args.mode == "finalize-emb":
+        cmd_finalize_emb(args)
     else:
-        ap.error("pilih mode: generate | finalize")
+        ap.error("pilih mode: generate | finalize | build-emb | finalize-emb")
 
 
 if __name__ == "__main__":
