@@ -36,10 +36,10 @@ _WS_RE = re.compile(r"\s+")
 _DOI_RE = re.compile(r"10\.\d{4,9}/[-._;()/:A-Za-z0-9]+", re.UNICODE)
 _WORD_RE = re.compile(r"[A-Za-z\u00C0-\u024F]{2,}", re.UNICODE)
 _UA = {"User-Agent": "ICALORA-LABS/1.0 (academic integrity; mailto:noreply@icalora-labs.local)"}
-_TIMEOUT = httpx.Timeout(25.0, connect=8.0)
-_MAX_SENTENCES = 24
-_PER_PROVIDER = 4  # kandidat teratas per kalimat per provider
-_CONCURRENCY = 12  # batasi koneksi serempak agar provider tidak menolak
+_TIMEOUT = httpx.Timeout(22.0, connect=8.0)
+_MAX_SENTENCES = 36
+_PER_PROVIDER = 8  # kandidat teratas per kalimat per provider
+_CONCURRENCY = 20  # batasi koneksi serempak agar provider tidak menolak
 _MAILTO = "noreply@icalora-labs.local"  # OpenAlex/Crossref "polite pool"
 
 
@@ -141,14 +141,15 @@ async def _q_openalex(client: httpx.AsyncClient, sentence: str) -> list[dict]:
     out = []
     for w in data.get("results", [])[:_PER_PROVIDER]:
         abstract = _clean(_openalex_abstract(w.get("abstract_inverted_index")))
+        title = _clean(w.get("title") or "")
         doi = (w.get("doi") or "").replace("https://doi.org/", "") or None
         out.append(
             {
-                "title": _clean(w.get("title") or ""),
+                "title": title,
                 "doi": doi,
                 "source": "OpenAlex",
                 "url": w.get("id") or (f"https://doi.org/{doi}" if doi else None),
-                "_fulltext": abstract,
+                "_fulltext": abstract or title,
             }
         )
     return out
@@ -270,11 +271,109 @@ async def _q_core(client: httpx.AsyncClient, sentence: str) -> list[dict]:
     return out
 
 
-def _active_providers() -> list:
-    providers = [_q_openalex, _q_crossref, _q_arxiv, _q_wikipedia]
+async def _q_europepmc(client: httpx.AsyncClient, sentence: str) -> list[dict]:
+    """Europe PMC: literatur biomedis & ilmu hayati (gratis, tanpa kunci)."""
+    r = await _get_json(
+        client,
+        "https://www.ebi.ac.uk/europepmc/webservices/rest/search",
+        {
+            "query": sentence[:250],
+            "format": "json",
+            "pageSize": _PER_PROVIDER,
+            "resultType": "core",
+        },
+    )
+    if r is None:
+        return []
+    try:
+        data = r.json()
+    except Exception:  # noqa: BLE001
+        return []
+    out = []
+    for w in (data.get("resultList", {}).get("result", []) or [])[:_PER_PROVIDER]:
+        abstract = _clean(w.get("abstractText") or "")
+        title = _clean(w.get("title") or "")
+        if not (abstract or title):
+            continue
+        doi = (w.get("doi") or "").lower() or None
+        src = w.get("source")
+        pid = w.get("id")
+        url = (
+            f"https://europepmc.org/article/{src}/{pid}"
+            if src and pid
+            else (f"https://doi.org/{doi}" if doi else None)
+        )
+        out.append(
+            {
+                "title": title,
+                "doi": doi,
+                "source": "Europe PMC",
+                "url": url,
+                "_fulltext": abstract or title,
+            }
+        )
+    return out
+
+
+async def _q_semanticscholar(client: httpx.AsyncClient, sentence: str) -> list[dict]:
+    """Semantic Scholar: korpus lintas-disiplin (gratis; dibatasi laju ketat,
+    kegagalan 429 ditangani anggun sebagai hasil kosong)."""
+    r = await _get_json(
+        client,
+        "https://api.semanticscholar.org/graph/v1/paper/search",
+        {
+            "query": sentence[:250],
+            "limit": _PER_PROVIDER,
+            "fields": "title,abstract,externalIds,url",
+        },
+    )
+    if r is None:
+        return []
+    try:
+        data = r.json()
+    except Exception:  # noqa: BLE001
+        return []
+    out = []
+    for w in (data.get("data", []) or [])[:_PER_PROVIDER]:
+        abstract = _clean(w.get("abstract") or "")
+        title = _clean(w.get("title") or "")
+        if not (abstract or title):
+            continue
+        doi = ((w.get("externalIds") or {}).get("DOI") or "").lower() or None
+        out.append(
+            {
+                "title": title,
+                "doi": doi,
+                "source": "Semantic Scholar",
+                "url": w.get("url") or (f"https://doi.org/{doi}" if doi else None),
+                "_fulltext": abstract or title,
+            }
+        )
+    return out
+
+
+# Rencana penyedia: (fungsi, konkurensi-maks, jatah-kalimat). Penyedia yang
+# dibatasi laju ketat (arXiv, Semantic Scholar) diberi konkurensi & jatah
+# kalimat lebih kecil agar tidak diblokir dan tetap dalam anggaran waktu.
+_PROVIDER_PLAN: list[tuple] = [
+    (_q_openalex, 3, 12),
+    (_q_crossref, 8, _MAX_SENTENCES),
+    (_q_europepmc, 8, _MAX_SENTENCES),
+    (_q_wikipedia, 6, 22),
+    (_q_arxiv, 3, 22),
+    (_q_semanticscholar, 1, 12),
+]
+
+
+def _provider_plan() -> list[tuple]:
+    plan = list(_PROVIDER_PLAN)
     if settings.core_enabled and settings.core_api_key:
-        providers.append(_q_core)
-    return providers
+        plan.append((_q_core, 4, _MAX_SENTENCES))
+    return plan
+
+
+def _active_providers() -> list:
+    return [fn for fn, _c, _s in _provider_plan()]
 
 
 async def _q_openalex_doi(client: httpx.AsyncClient, doi: str) -> dict | None:
@@ -347,17 +446,21 @@ async def _resolve_publication(client: httpx.AsyncClient, doc: str) -> list[dict
 
 async def _gather_candidates(doc: str) -> tuple[list[dict], list[str], dict]:
     sentences = _risky_sentences(doc)
-    providers = _active_providers()
+    plan = _provider_plan()
     provider_hits: dict[str, int] = {}
     seen: dict[str, dict] = {}
     async with httpx.AsyncClient(timeout=_TIMEOUT, headers=_UA, follow_redirects=True) as client:
-        sem = asyncio.Semaphore(_CONCURRENCY)
+        gsem = asyncio.Semaphore(_CONCURRENCY)
 
-        async def _run(provider, sentence):
-            async with sem:
+        async def _run(provider, psem, sentence):
+            async with psem, gsem:
                 return await provider(client, sentence)
 
-        tasks = [_run(p, s) for s in sentences for p in providers]
+        tasks = []
+        for provider, conc, sent_budget in plan:
+            psem = asyncio.Semaphore(conc)
+            for s in sentences[:sent_budget]:
+                tasks.append(_run(provider, psem, s))
         # Resolusi identitas publikasi (DOI + judul) berjalan paralel.
         pub_task = asyncio.create_task(_resolve_publication(doc=doc, client=client))
         results = await asyncio.gather(*tasks, return_exceptions=True)
