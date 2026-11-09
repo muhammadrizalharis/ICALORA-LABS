@@ -4,12 +4,12 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/muhammadrizalharis/ICALORA-LABS/backend
-ExecStart=/home/muhammadrizalharis/ICALORA-LABS/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 58010
+WorkingDirectory=%h/ICALORA-LABS/backend
+ExecStart=%h/ICALORA-LABS/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 58010
 Restart=always
 RestartSec=3
-StandardOutput=append:/home/muhammadrizalharis/ICALORA-LABS/backend/.logs/service_backend.log
-StandardError=append:/home/muhammadrizalharis/ICALORA-LABS/backend/.logs/service_backend.log
+StandardOutput=append:%h/ICALORA-LABS/backend/.logs/service_backend.log
+StandardError=append:%h/ICALORA-LABS/backend/.logs/service_backend.log
 
 [Install]
 WantedBy=default.target
