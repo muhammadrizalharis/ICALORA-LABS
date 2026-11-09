@@ -52,15 +52,14 @@ Saat ini hanya `plagiarism-checker` yang punya view khusus; tool lain jatuh ke `
 ### 3. Login Google (kode SELESAI — tinggal kredensial & konfigurasi)
 Alur OAuth penuh sudah ada (`/auth/google/login`, `/auth/google/callback`, token exchange, userinfo, upsert user, set session). Yang kurang murni konfigurasi:
 
+- Domain publik ICALORA **sudah live**: `https://icalora-lab.calyzr-ai.my.id` (menumpang tunnel Cloudflare `calyzr-ai.my.id`, same-origin ke frontend :58030 yang proxy backend :58010).
 - [ ] Buat **OAuth 2.0 Client ID** (tipe: Web application) di Google Cloud Console.
-- [ ] Set **Authorized redirect URI** = `https://<DOMAIN-PUBLIK>/api/backend/auth/google/callback`.
-- [ ] Isi variabel di `backend/.env`:
+- [ ] Set **Authorized redirect URI** = `https://icalora-lab.calyzr-ai.my.id/api/backend/auth/google/callback`.
+- [x] Siapkan variabel URL publik di `backend/.env` (`GOOGLE_REDIRECT_URI`, `FRONTEND_BASE_URL`).
+- [ ] Isi kredensial di `backend/.env`:
   - [ ] `GOOGLE_CLIENT_ID=...`
   - [ ] `GOOGLE_CLIENT_SECRET=...`
-  - [ ] `GOOGLE_REDIRECT_URI=https://<DOMAIN-PUBLIK>/api/backend/auth/google/callback`
-  - [ ] `FRONTEND_BASE_URL=https://<DOMAIN-PUBLIK>`
-- [ ] Restart `icalora-backend.service`, verifikasi tombol "Masuk dengan Google" muncul & alur callback berhasil.
-- [ ] (Catatan) Domain publik ICALORA perlu dikonfirmasi — web diakses via Cloudflare Tunnel + nginx.
+- [ ] Restart `icalora-backend.service`, verifikasi tombol "Masuk dengan Google" & alur callback berhasil.
 
 ### 4. Backend / Data (berjalan di latar)
 - [x] **Embedding korpus** mencapai target **25%** (5.861.751 dari 23.415.245 dokumen = 25,03%). Worker dihentikan di target; rebuild indeks HNSW berjalan di VM (fase "loading tuples"). JANGAN sentuh konfigurasi Ollama.
@@ -74,7 +73,7 @@ Alur OAuth penuh sudah ada (`/auth/google/login`, `/auth/google/callback`, token
   - [ ] Jika pindah ke Vercel: browser harus panggil backend publik langsung (`NEXT_PUBLIC_API_BASE`), bukan proxy `/api/backend` (kena timeout serverless).
   - [ ] Konsekuensi beda-origin: set cookie sesi `SameSite=None; Secure` + buka CORS.
 - **Rekomendasi: Opsi A — tetap self-host semua (same-origin)**, ekspos via **Cloudflare Tunnel (named)**. Tidak wajib domain berbayar; Login Google langsung bisa tanpa ubah cookie/CORS.
-- Keputusan: _belum final — menunggu konfirmasi user._
+- Keputusan: **FINAL — Opsi A diterapkan.** ICALORA live di `https://icalora-lab.calyzr-ai.my.id` via tunnel `calyzr-ai.my.id` (ingress tambahan → `localhost:58030`). App calyzr lama tidak terganggu.
 
 ---
 
