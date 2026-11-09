@@ -92,10 +92,25 @@ def _cover_html(report: dict) -> str:
         title = _esc(str(s.get("title") or "Tanpa judul"))
         meta = _esc(str(s.get("source") or ""))
         yr = s.get("pub_year")
+        badge = (
+            ' <span style="background:#0ea5e9;color:#fff;border-radius:3px;'
+            'padding:0 5px;font-size:9px;font-weight:700">DARING</span>'
+            if s.get("online")
+            else ""
+        )
         src_rows += (
             f'<tr><td style="font-weight:700;width:60px">{sim:.1f}%</td>'
-            f'<td><b>{i}. {title}</b><div style="color:#64748b;font-size:11px">'
+            f'<td><b>{i}. {title}</b>{badge}<div style="color:#64748b;font-size:11px">'
             f'{meta}{(" · " + str(yr)) if yr else ""}</div></td></tr>'
+        )
+
+    online_note = ""
+    providers = report.get("online_providers") or []
+    if report.get("online_merged") and providers:
+        names = _esc(", ".join(str(p.get("name")) for p in providers))
+        online_note = (
+            '<div class="note" style="margin-top:6px">🌐 Indeks ini juga mencakup '
+            f"pencocokan real-time tanpa-unduh ke sumber daring: {names}.</div>"
         )
 
     return f"""<!doctype html><html><head><meta charset="utf-8"><style>
@@ -141,6 +156,7 @@ def _cover_html(report: dict) -> str:
     <table>{rows}</table>
     <h2>Sumber Teratas</h2>
     <table>{src_rows or '<tr><td class="note">Tidak ada sumber dengan kemiripan berarti.</td></tr>'}</table>
+    {online_note}
     <div class="note" style="margin-top:18px">Halaman berikut menampilkan dokumen asli
     Anda dengan format utuh; bagian yang cocok diberi sorotan sesuai warna kategori di atas.</div>
     </body></html>"""

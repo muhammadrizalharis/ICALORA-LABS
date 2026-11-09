@@ -3,7 +3,7 @@
 // sehingga laporan tampil identik di mana pun dibuka.
 
 export interface Source {
-  doc_id: number;
+  doc_id: number | null;
   source: string;
   external_id: string;
   doi: string | null;
@@ -13,6 +13,8 @@ export interface Source {
   lexical_similarity: number;
   similarity: number;
   snippet: string;
+  url?: string | null;
+  online?: boolean;
 }
 
 export interface MatchedPassage {
@@ -60,6 +62,8 @@ export interface Report {
   generated_at?: string;
   has_original_pdf?: boolean;
   source_filename?: string;
+  online_merged?: boolean;
+  online_providers?: { name: string; hits: number }[];
 }
 
 export const HILITE = [
@@ -294,11 +298,9 @@ export function buildReportHtml(args: {
     .map(
       (s) => `<tr><td class="pct">${s.similarity.toFixed(0)}%</td><td>${escHtml(
         s.title || "(tanpa judul)",
-      )}<div class="src">${escHtml(s.source)}${s.pub_year ? ` · ${s.pub_year}` : ""}${
+      )}${s.online ? ` <span style="background:#0ea5e9;color:#fff;border-radius:4px;padding:0 5px;font-size:10px;font-weight:700;">DARING</span>` : ""}<div class="src">${escHtml(s.source)}${s.pub_year ? ` · ${s.pub_year}` : ""}${
         s.doi ? ` · ${escHtml(s.doi)}` : ""
-      } · salinan ${s.lexical_similarity.toFixed(0)}% · semantik ${s.semantic_similarity.toFixed(
-        0,
-      )}%</div></td></tr>`,
+      }${s.online ? "" : ` · salinan ${s.lexical_similarity.toFixed(0)}% · semantik ${s.semantic_similarity.toFixed(0)}%`}</div></td></tr>`,
     )
     .join("");
 
@@ -354,7 +356,9 @@ export function buildReportHtml(args: {
   )}</b> dokumen akses-terbuka (CC0/CC-BY)</div>
 </div>
 <div class="hero">
-  <div class="ring ${ringCls}"><span class="big">${idx.toFixed(0)}%</span><span class="cap">SIMILARITY</span></div>
+  <div class="ring ${ringCls}"><span class="big">${
+    idx > 0 && idx < 1 ? "&lt;1" : idx < 10 ? idx.toFixed(1) : idx.toFixed(0)
+  }%</span><span class="cap">SIMILARITY</span></div>
   <div><div class="verdict">${v.label}</div><div class="vnote">${v.note}</div></div>
 </div>
 <div class="metrics">
@@ -365,6 +369,13 @@ export function buildReportHtml(args: {
   <div><b>${(report.corpus_size || 0).toLocaleString("id-ID")}</b> dokumen · deteksi salinan penuh · <b>${report.sources.length}</b> sumber teratas</div>
 </div>
 ${report.coverage_note ? `<p class="legend">${escHtml(report.coverage_note)}</p>` : ""}
+${
+  report.online_merged && report.online_providers && report.online_providers.length
+    ? `<p class="legend">🌐 Juga diperiksa real-time terhadap sumber daring tanpa-unduh: ${escHtml(
+        report.online_providers.map((p) => p.name).join(", "),
+      )}.</p>`
+    : ""
+}
 ${groupsHtml}
 ${
   overview

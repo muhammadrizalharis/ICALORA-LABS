@@ -1,6 +1,7 @@
 """Endpoint fitur ringan Fase 1."""
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
@@ -31,7 +32,7 @@ from app.services.llm.tasks import (
     rewrite,
 )
 from app.services.plagiarism import check_plagiarism
-from app.services.plagiarism.online import online_check
+from app.services.plagiarism.online import online_candidates, online_check
 from app.services.plagiarism.report_pdf import build_report_pdf
 from app.services.publikasi import recommend_journals
 from app.services.report import MAX_HTML_BYTES, render_pdf
@@ -199,11 +200,30 @@ def humanize_ep(body: TextIn, request: Request) -> dict:
         raise HTTPException(status_code=502, detail=f"LLM gagal: {exc}") from exc
 
 
+async def _run_plagiarism_merged(text: str, top_k: int) -> dict:
+    """Jalankan cek plagiarisme korpus lokal, lalu—bila diaktifkan—gabungkan
+    sumber daring (tanpa-unduh) ke dalam skor yang sama. Galat daring tidak
+    membatalkan laporan; cukup turun ke hasil korpus lokal saja."""
+    extra: list[dict] = []
+    providers: dict = {}
+    if settings.online_check_enabled:
+        try:
+            extra, providers = await online_candidates(text)
+        except Exception:  # noqa: BLE001, S110
+            extra, providers = [], {}
+    res = await run_in_threadpool(check_plagiarism, text, top_k, extra)
+    res["online_merged"] = bool(extra)
+    res["online_providers"] = [
+        {"name": k, "hits": v} for k, v in sorted(providers.items(), key=lambda kv: -kv[1])
+    ]
+    return res
+
+
 @router.post("/plagiarism")
-def plagiarism_ep(body: PlagiarismIn, request: Request) -> dict:
+async def plagiarism_ep(body: PlagiarismIn, request: Request) -> dict:
     _guard(body.text)
     try:
-        res = check_plagiarism(body.text, body.top_k)
+        res = await _run_plagiarism_merged(body.text, body.top_k)
         _log(request, "plagiarism-checker", "Cek Plagiarisme", body.text[:200], res)
         return res
     except Exception as exc:  # noqa: BLE001
@@ -248,7 +268,7 @@ async def plagiarism_file_ep(  # noqa: B008
         raise HTTPException(status_code=422, detail="Tidak ada teks yang dapat diekstrak.")
     _guard(text)
     try:
-        res = check_plagiarism(text, min(max(top_k, 1), 60))
+        res = await _run_plagiarism_merged(text, min(max(top_k, 1), 60))
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Cek plagiarisme gagal: {exc}") from exc
 
