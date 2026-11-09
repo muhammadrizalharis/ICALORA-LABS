@@ -52,9 +52,9 @@ Saat ini hanya `plagiarism-checker` yang punya view khusus; tool lain jatuh ke `
 ### 3. Login Google (kode SELESAI — tinggal kredensial & konfigurasi)
 Alur OAuth penuh sudah ada (`/auth/google/login`, `/auth/google/callback`, token exchange, userinfo, upsert user, set session). Yang kurang murni konfigurasi:
 
-- Domain publik ICALORA **sudah live**: `https://icalora-lab.calyzr-ai.my.id` (menumpang tunnel Cloudflare `calyzr-ai.my.id`, same-origin ke frontend :58030 yang proxy backend :58010).
+- Domain publik ICALORA **sudah live** di balik reverse-proxy/tunnel (same-origin ke frontend :58030 yang proxy backend :58010).
 - [ ] Buat **OAuth 2.0 Client ID** (tipe: Web application) di Google Cloud Console.
-- [ ] Set **Authorized redirect URI** = `https://icalora-lab.calyzr-ai.my.id/api/backend/auth/google/callback`.
+- [ ] Set **Authorized redirect URI** = `https://<DOMAIN_PUBLIK>/api/backend/auth/google/callback`.
 - [x] Siapkan variabel URL publik di `backend/.env` (`GOOGLE_REDIRECT_URI`, `FRONTEND_BASE_URL`).
 - [ ] Isi kredensial di `backend/.env`:
   - [ ] `GOOGLE_CLIENT_ID=...`
@@ -72,8 +72,8 @@ Alur OAuth penuh sudah ada (`/auth/google/login`, `/auth/google/callback`, token
 - **Frontend (Next.js) bisa di Vercel** (dapat domain gratis `*.vercel.app`), TAPI:
   - [ ] Jika pindah ke Vercel: browser harus panggil backend publik langsung (`NEXT_PUBLIC_API_BASE`), bukan proxy `/api/backend` (kena timeout serverless).
   - [ ] Konsekuensi beda-origin: set cookie sesi `SameSite=None; Secure` + buka CORS.
-- **Rekomendasi: Opsi A — tetap self-host semua (same-origin)**, ekspos via **Cloudflare Tunnel (named)**. Tidak wajib domain berbayar; Login Google langsung bisa tanpa ubah cookie/CORS.
-- Keputusan: **FINAL — Opsi A diterapkan.** ICALORA live di `https://icalora-lab.calyzr-ai.my.id` via tunnel `calyzr-ai.my.id` (ingress tambahan → `localhost:58030`). App calyzr lama tidak terganggu.
+- **Rekomendasi: Opsi A — tetap self-host semua (same-origin)**, ekspos via **reverse-proxy / named tunnel**. Tidak wajib domain berbayar; Login Google langsung bisa tanpa ubah cookie/CORS.
+- Keputusan: **FINAL — Opsi A diterapkan.** ICALORA live di balik tunnel/reverse-proxy (ingress tambahan → `localhost:58030`).
 
 ---
 
@@ -81,4 +81,3 @@ Alur OAuth penuh sudah ada (`/auth/google/login`, `/auth/google/callback`, token
 - Frontend: `cd frontend && npx next build && systemctl --user restart icalora-frontend.service`
 - Backend: `systemctl --user restart icalora-backend.service`
 - Verifikasi: `curl` ke `:58030/dashboard` dan `:58010/auth/me` harus `200`.
-- Commit sebagai `muhammadrizalharis` + trailer `Co-authored-by: Copilot`.

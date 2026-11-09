@@ -1,0 +1,49 @@
+ICALORA-LABS — Proprietary Software License
+Copyright (c) 2026 MRH INNOVEX. All Rights Reserved.
+
+================================================================================
+PROPRIETARY AND CONFIDENTIAL
+================================================================================
+
+This software and its associated source code, documentation, assets, datasets,
+models, and configuration (collectively, the "Software") are the exclusive
+property of MRH INNOVEX (the "Owner").
+
+The Software is made publicly viewable on this repository FOR REFERENCE AND
+TRANSPARENCY PURPOSES ONLY. Public visibility does NOT grant any license or
+right to use, copy, reproduce, modify, merge, publish, distribute, sublicense,
+sell, or create derivative works of the Software, in whole or in part.
+
+1. NO LICENSE GRANTED
+   No rights or licenses, express or implied, are granted under this document.
+   All rights not expressly granted in writing by the Owner are reserved.
+
+2. RESTRICTIONS
+   Without the prior, explicit, written permission of the Owner, you MAY NOT:
+   (a) use the Software or any portion of it for any purpose, whether personal,
+       academic, or commercial;
+   (b) copy, reproduce, host, mirror, or redistribute the Software;
+   (c) modify, adapt, translate, or create derivative works from the Software;
+   (d) reverse engineer, decompile, or disassemble any compiled portion;
+   (e) remove or alter any copyright, trademark, or proprietary notices.
+
+3. TRADEMARKS
+   "ICALORA-LABS", "MRH INNOVEX", and associated names, logos, and branding are
+   trademarks of the Owner and may not be used without written permission.
+
+4. THIRD-PARTY COMPONENTS
+   The Software may include third-party open-source components that remain
+   governed by their respective licenses. Those licenses apply only to those
+   specific components, not to the Software as a whole.
+
+5. NO WARRANTY
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT.
+
+6. LIMITATION OF LIABILITY
+   IN NO EVENT SHALL THE OWNER BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER
+   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING
+   FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR ITS USE.
+
+For licensing inquiries or permission requests, contact MRH INNOVEX.

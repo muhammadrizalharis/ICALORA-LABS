@@ -4,15 +4,15 @@ After=network.target icalora-backend.service
 
 [Service]
 Type=simple
-WorkingDirectory=/home/muhammadrizalharis/ICALORA-LABS/frontend
+WorkingDirectory=%h/ICALORA-LABS/frontend
 Environment=NODE_ENV=production
 Environment=NEXT_PUBLIC_API_BASE=http://127.0.0.1:58010
-Environment=PATH=/home/muhammadrizalharis/.nvm/versions/node/v22.23.4/bin:/usr/bin:/bin
-ExecStart=/home/muhammadrizalharis/.nvm/versions/node/v22.23.4/bin/node /home/muhammadrizalharis/ICALORA-LABS/frontend/node_modules/next/dist/bin/next start -p 58030 -H 127.0.0.1
+Environment=PATH=%h/.nvm/versions/node/v22.23.4/bin:/usr/bin:/bin
+ExecStart=%h/.nvm/versions/node/v22.23.4/bin/node %h/ICALORA-LABS/frontend/node_modules/next/dist/bin/next start -p 58030 -H 127.0.0.1
 Restart=always
 RestartSec=3
-StandardOutput=append:/home/muhammadrizalharis/ICALORA-LABS/backend/.logs/service_frontend.log
-StandardError=append:/home/muhammadrizalharis/ICALORA-LABS/backend/.logs/service_frontend.log
+StandardOutput=append:%h/ICALORA-LABS/backend/.logs/service_frontend.log
+StandardError=append:%h/ICALORA-LABS/backend/.logs/service_frontend.log
 
 [Install]
 WantedBy=default.target

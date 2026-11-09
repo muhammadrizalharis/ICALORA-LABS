@@ -4,6 +4,6 @@ Description=ICALORA-LABS backup DB ke Google Drive
 [Service]
 Type=oneshot
 Environment=KEEP=7
-ExecStart=/home/muhammadrizalharis/ICALORA-LABS/scripts/backup_to_drive.sh
-StandardOutput=append:/home/muhammadrizalharis/ICALORA-LABS/backend/.logs/backup.log
-StandardError=append:/home/muhammadrizalharis/ICALORA-LABS/backend/.logs/backup.log
+ExecStart=%h/ICALORA-LABS/scripts/backup_to_drive.sh
+StandardOutput=append:%h/ICALORA-LABS/backend/.logs/backup.log
+StandardError=append:%h/ICALORA-LABS/backend/.logs/backup.log

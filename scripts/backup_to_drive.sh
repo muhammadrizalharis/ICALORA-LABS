@@ -9,8 +9,8 @@
 #   KEEP=14 scripts/backup_to_drive.sh      # simpan 14 backup terbaru (default 7)
 #
 # Dipanggil manual atau via cron, mis. harian 03:00:
-#   0 3 * * * /home/muhammadrizalharis/ICALORA-LABS/scripts/backup_to_drive.sh >> \
-#       /home/muhammadrizalharis/ICALORA-LABS/backend/.logs/backup.log 2>&1
+#   0 3 * * * "$HOME"/ICALORA-LABS/scripts/backup_to_drive.sh >> \
+#       "$HOME"/ICALORA-LABS/backend/.logs/backup.log 2>&1
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
