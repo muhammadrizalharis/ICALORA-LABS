@@ -4,6 +4,7 @@ import { use, useEffect, useState } from "react";
 import Link from "next/link";
 import { API_BASE } from "@/lib/api";
 import HistoryResultView, { HistoryItemFull } from "@/components/HistoryResultView";
+import FileInfoPanel from "@/components/FileInfoPanel";
 
 export default function HistoryViewPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -40,7 +41,7 @@ export default function HistoryViewPage({ params }: { params: Promise<{ id: stri
   }, [id]);
 
   return (
-    <div className="mx-auto max-w-4xl p-8">
+    <div className="mx-auto max-w-6xl p-8">
       <Link href="/dashboard" className="text-xs text-neutral-400 hover:underline">
         ← Beranda
       </Link>
@@ -67,7 +68,14 @@ export default function HistoryViewPage({ params }: { params: Promise<{ id: stri
             </Link>
           </div>
         )}
-        {!loading && item && <HistoryResultView item={item} />}
+        {!loading && item && (
+          <div className="grid gap-6 lg:grid-cols-[1fr_20rem]">
+            <div className="min-w-0">
+              <HistoryResultView item={item} />
+            </div>
+            <FileInfoPanel item={item} />
+          </div>
+        )}
       </div>
     </div>
   );

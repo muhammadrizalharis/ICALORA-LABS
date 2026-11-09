@@ -45,9 +45,9 @@ Saat ini hanya `plagiarism-checker` yang punya view khusus; tool lain jatuh ke `
 - [ ] **resume-builder, reader-reactions, daftar-isi, perbaikan-dokumen, ai-rewriter** — rapikan render teks (bukan JSON mentah).
 
 ### 2. Halaman detail "Informasi File + Aksi" (dari screenshot Mulfu, kata-kata orisinal)
-- [ ] Layout **dua kolom** di `dashboard/history/view/[id]/page.tsx`.
-- [ ] Panel **Informasi File** universal: Report ID, SHA-256/hash, judul, tipe tool, tanggal, status/expired.
-- [ ] Panel **Aksi** universal: **Lihat (buka PDF)**, **Download**, **Parafrase ulang**, **Periksa ulang**, dan langkah lanjutan.
+- [x] Layout **dua kolom** di `dashboard/history/view/[id]/page.tsx`.
+- [x] Panel **Informasi File** universal: Report ID, SHA-256/hash, judul, tipe tool, tanggal, status/expired.
+- [x] Panel **Aksi** universal: **Lihat (buka PDF)**, **Download**, **Parafrase ulang**, **Periksa ulang**, dan langkah lanjutan.
 
 ### 3. Login Google (kode SELESAI — tinggal kredensial & konfigurasi)
 Alur OAuth penuh sudah ada (`/auth/google/login`, `/auth/google/callback`, token exchange, userinfo, upsert user, set session). Yang kurang murni konfigurasi:

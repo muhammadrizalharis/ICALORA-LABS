@@ -13,6 +13,7 @@ import hashlib
 import hmac
 import json
 import time
+from datetime import timedelta
 
 import zstandard
 from sqlalchemy import text
@@ -351,13 +352,42 @@ def get_history_item(user_id: int, item_id: int) -> dict | None:
         ).first()
     if not r:
         return None
+    created = r.created_at
+    expires = (created + timedelta(days=days)) if created else None
     return {
         "id": r.id,
         "tool": r.tool,
         "title": r.title,
         "input_preview": r.input_preview,
         "result": r.result,
-        "created_at": r.created_at.isoformat() if r.created_at else None,
+        "created_at": created.isoformat() if created else None,
+        "expires_at": expires.isoformat() if expires else None,
+        "retention_days": days,
+        "file": get_file_meta_by_history(user_id, item_id),
+    }
+
+
+def get_file_meta_by_history(user_id: int, history_id: int) -> dict | None:
+    """Metadata berkas asli (tanpa blob data) untuk panel Informasi File."""
+    ensure_file_schema()
+    days = max(1, int(settings.history_retention_days))
+    with engine.connect() as c:
+        r = c.execute(
+            text(
+                "SELECT filename, mime, byte_size, sha256 FROM tool_file "
+                "WHERE user_id = :uid AND history_id = :hid "
+                "AND created_at >= now() - make_interval(days => :days) "
+                "ORDER BY id DESC LIMIT 1"
+            ),
+            {"uid": user_id, "hid": history_id, "days": days},
+        ).first()
+    if not r:
+        return None
+    return {
+        "filename": r.filename,
+        "mime": r.mime,
+        "byte_size": r.byte_size,
+        "sha256": r.sha256,
     }
 
 
