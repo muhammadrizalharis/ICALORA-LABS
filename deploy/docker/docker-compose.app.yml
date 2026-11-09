@@ -1,0 +1,69 @@
+# ICALORA-LABS — Stack APLIKASI dalam Docker (backend + bot + frontend)
+#
+# Jalankan dari folder ini:
+#   docker compose -f docker-compose.app.yml up -d --build
+#
+# Catatan penting:
+# - Memakai network_mode: host agar semua referensi 127.0.0.1 di backend/.env
+#   (Postgres remote via IP-nya, Redis, SeaweedFS/S3, Ollama) tetap bekerja
+#   tanpa mengubah konfigurasi apa pun.
+# - Port 58010 (backend) & 58030 (frontend) bind langsung ke host. Karena itu,
+#   HENTIKAN dulu service systemd lama agar port tidak bentrok:
+#     systemctl --user stop icalora-backend icalora-bot icalora-frontend
+# - Rahasia dibaca dari backend/.env (TIDAK di-commit; lihat .gitignore).
+
+name: icalora-app
+
+services:
+  backend:
+    build:
+      context: ../../backend
+      dockerfile: Dockerfile
+    image: icalora-backend:latest
+    container_name: icalora-backend
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - ../../backend/.env
+    command: ["uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "58010"]
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:58010/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    mem_limit: 4g
+
+  bot:
+    image: icalora-backend:latest
+    container_name: icalora-bot
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - ../../backend/.env
+    command: ["python", "-m", "app.bot.telegram_bot"]
+    depends_on:
+      backend:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 1g
+
+  frontend:
+    build:
+      context: ../../frontend
+      dockerfile: Dockerfile
+    image: icalora-frontend:latest
+    container_name: icalora-frontend
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      NODE_ENV: production
+      BACKEND_ORIGIN: http://127.0.0.1:58010
+    depends_on:
+      backend:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 2g

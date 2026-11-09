@@ -1,0 +1,17 @@
+# Jangan salin ke image: rahasia, cache, venv lokal, log, tes.
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.logs/
+*.log
+tests/
+icalora_labs_backend.egg-info/
+*.sqlite
+*.db
