@@ -16,6 +16,8 @@ export interface Source {
   url?: string | null;
   online?: boolean;
   source_containment?: number;
+  match_percent?: number;
+  doi_identity?: boolean;
 }
 
 export interface MatchedPassage {
@@ -44,6 +46,7 @@ export interface PublicationMatch {
   source: string | null;
   containment: number;
   online: boolean;
+  by_doi?: boolean;
 }
 
 export interface Report {
@@ -307,11 +310,15 @@ export function buildReportHtml(args: {
 
   const sources = report.sources
     .map(
-      (s) => `<tr><td class="pct">${s.similarity.toFixed(0)}%</td><td>${escHtml(
+      (s) => `<tr><td class="pct">${s.similarity.toFixed(1)}%</td><td>${escHtml(
         s.title || "(tanpa judul)",
       )}${s.online ? ` <span style="background:#0ea5e9;color:#fff;border-radius:4px;padding:0 5px;font-size:10px;font-weight:700;">DARING</span>` : ""}<div class="src">${escHtml(s.source)}${s.pub_year ? ` · ${s.pub_year}` : ""}${
         s.doi ? ` · ${escHtml(s.doi)}` : ""
-      }${s.online ? (s.source_containment ? ` · abstrak ${s.source_containment.toFixed(0)}% termuat` : "") : ` · salinan ${s.lexical_similarity.toFixed(0)}% · semantik ${s.semantic_similarity.toFixed(0)}%`}</div></td></tr>`,
+      }${
+        s.source_containment && s.source_containment >= 40
+          ? ` · abstrak ${s.source_containment.toFixed(0)}% termuat`
+          : ` · topik ${s.semantic_similarity.toFixed(0)}%`
+      }</div></td></tr>`,
     )
     .join("");
 
@@ -375,8 +382,10 @@ export function buildReportHtml(args: {
 ${
   report.publication_match
     ? `<div class="pubmatch"><b>⚠️ Terdeteksi sebagai publikasi terindeks.</b> ${
-        report.publication_match.containment.toFixed(0)
-      }% teks sumber termuat di dokumen ini — kemungkinan karya sudah dipublikasikan (atau <i>self-plagiarism</i>/duplikasi). Sumber: ${
+        report.publication_match.by_doi
+          ? "Dokumen ini mencantumkan DOI yang sama dengan karya terbit di korpus — kemungkinan besar merupakan karya yang sudah dipublikasikan itu sendiri (atau <i>self-plagiarism</i>/duplikasi)."
+          : `${report.publication_match.containment.toFixed(0)}% teks sumber termuat di dokumen ini — kemungkinan karya sudah dipublikasikan (atau <i>self-plagiarism</i>/duplikasi).`
+      } Sumber: ${
         report.publication_match.url
           ? `<a href="${escHtml(report.publication_match.url)}" target="_blank" rel="noopener noreferrer">${escHtml(
               report.publication_match.title || report.publication_match.doi || report.publication_match.url,

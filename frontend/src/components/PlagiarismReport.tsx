@@ -226,8 +226,10 @@ export default function PlagiarismReport({ report, documentText, docTitle = "", 
       {report.publication_match && (
         <div className="rounded-lg border border-orange-300 border-l-4 border-l-orange-600 bg-orange-50 px-4 py-3 text-xs leading-relaxed text-orange-900 dark:border-orange-900 dark:border-l-orange-500 dark:bg-orange-950/40 dark:text-orange-200">
           <b>⚠️ Terdeteksi sebagai publikasi terindeks.</b>{" "}
-          {report.publication_match.containment.toFixed(0)}% teks sumber termuat di dokumen
-          ini — kemungkinan karya sudah dipublikasikan (atau{" "}
+          {report.publication_match.by_doi
+            ? "Dokumen ini mencantumkan DOI yang sama dengan karya terbit di korpus — kemungkinan besar merupakan karya yang sudah dipublikasikan itu sendiri"
+            : `${report.publication_match.containment.toFixed(0)}% teks sumber termuat di dokumen ini — kemungkinan karya sudah dipublikasikan`}
+          {" "}(atau{" "}
           <i>self-plagiarism</i>/duplikasi). Sumber:{" "}
           {report.publication_match.url ? (
             <a
@@ -392,14 +394,15 @@ export default function PlagiarismReport({ report, documentText, docTitle = "", 
                 </div>
                 <div className="shrink-0 text-right text-xs">
                   <div className={`font-bold ${toneForScore(s.similarity).split(" ")[1]}`}>
-                    {s.similarity.toFixed(0)}%
+                    {s.similarity.toFixed(1)}%
                   </div>
-                  <div className="text-neutral-400 dark:text-neutral-500">
-                    {s.online
-                      ? s.source_containment
-                        ? `abstrak ${s.source_containment.toFixed(0)}% termuat`
-                        : "sumber daring"
-                      : `sal ${s.lexical_similarity.toFixed(0)} · sem ${s.semantic_similarity.toFixed(0)}`}
+                  <div className="text-[10px] text-neutral-400 dark:text-neutral-500">
+                    kecocokan
+                  </div>
+                  <div className="mt-0.5 text-neutral-400 dark:text-neutral-500">
+                    {s.source_containment && s.source_containment >= 40
+                      ? `abstrak ${s.source_containment.toFixed(0)}% termuat`
+                      : `topik ${s.semantic_similarity.toFixed(0)}%`}
                   </div>
                 </div>
               </div>

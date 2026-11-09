@@ -76,6 +76,7 @@ _STRUCTURAL_AT = 0.45  # >= ini: kemiripan kuat terstruktur
 # kemungkinan adalah publikasi terbit itu sendiri (atau turunannya).
 _PUBMATCH_MIN = 0.75        # >= 75% teks sumber termuat di dokumen → cocok publikasi
 _PUBMATCH_MIN_WORDS = 40    # abaikan sumber terlalu pendek (judul/snippet)
+_CONTAIN_SHOW = 40.0        # tampilkan sumber ber-containment tinggi walau 0% tersorot
 
 # Bobot kontribusi tiap kategori pada Indeks Integritas (salinan penuh = 1.0,
 # makin "longgar" makin kecil; sumber terkredit tidak menambah risiko).
@@ -160,6 +161,7 @@ def _chunk_match(doc: str, candidates: list[dict], threshold: float = _MATCH_MIN
     low_doc = doc.lower()
     group_chars = {k: 0 for k in _MATCH_GROUP_ORDER}
     group_count = {k: 0 for k in _MATCH_GROUP_ORDER}
+    source_contrib: dict[str, float] = {}
 
     for sent in sentences:
         words = [w.lower() for w in _WORD_RE.findall(sent)]
@@ -187,6 +189,11 @@ def _chunk_match(doc: str, candidates: list[dict], threshold: float = _MATCH_MIN
             # Kontribusi ke indeks: proporsi kalimat yang benar-benar cocok,
             # dibobot kategori — bukan seluruh panjang kalimat.
             weighted_chars += len(sent) * best_ratio * _GROUP_WEIGHT[grp]
+            # Kontribusi per-sumber (porsi dokumen yang tersorot ke sumber ini) —
+            # dipakai agar "Sumber Teratas" selaras dengan "Ringkasan Kecocokan".
+            skey = (best_src.get("doi") or best_src.get("title") or "").lower().strip()
+            if skey:
+                source_contrib[skey] = source_contrib.get(skey, 0.0) + len(sent)
             matched.append(
                 {
                     "sentence": sent[:300],
@@ -214,12 +221,17 @@ def _chunk_match(doc: str, candidates: list[dict], threshold: float = _MATCH_MIN
         }
         for k in _MATCH_GROUP_ORDER
     ]
+    # Kontribusi per-sumber dalam persen dokumen (porsi tersorot).
+    source_percent = {
+        key: round(chars / total_chars * 100, 1) for key, chars in source_contrib.items()
+    }
     return {
         "similarity_index": integrity_index,
         "matched_sentences": len(matched),
         "total_sentences": len(sentences),
         "matched_passages": matched[:50],
         "match_groups": match_groups,
+        "source_percent": source_percent,
     }
 
 
@@ -413,66 +425,93 @@ def check_plagiarism(
     # Pencocokan tingkat-kalimat (korpus lokal + sumber daring) untuk indeks.
     chunk = _chunk_match(doc, sources + online_sources)
 
-    # ── Deteksi Identitas Publikasi (reverse-containment) ────────────────────
+    # ── Deteksi Identitas Publikasi (reverse-containment + DOI) ──────────────
     # Indeks kemiripan mengukur "berapa % DOKUMEN termuat di sumber". Untuk
     # sumber daring yang hanya memaparkan ABSTRAK, angka itu kecil walau
-    # dokumen adalah paper terbit itu sendiri. Maka hitung arah sebaliknya:
-    # "berapa % teks SUMBER termuat di dokumen". Abstrak paper sendiri akan
-    # hampir seluruhnya termuat (~100%) → tandai sebagai publikasi terindeks.
+    # dokumen adalah paper terbit itu sendiri. Dua sinyal identitas terpisah:
+    #   1) reverse-containment: % teks SUMBER yang termuat di dokumen (abstrak
+    #      paper sendiri ≈100% termuat), dan
+    #   2) DOI-identity: dokumen MENYATAKAN DOI yang sama dengan sumber terbit —
+    #      bukti kuat bahwa dokumen ADALAH karya terbit itu (atau duplikatnya).
     doc_words = [w.lower() for w in _WORD_RE.findall(doc)]
     doc_sh = _shingles(doc_words)
-    publication_match: dict | None = None
+    doc_dois = set(_extract_dois(doc))
+    doi_pub: dict | None = None
+    contain_pub: dict | None = None
     for s in sources + online_sources:
+        sdoi = (s.get("doi") or "").strip().lower()
         body = s.get("_fulltext") or ""
         swords = [w.lower() for w in _WORD_RE.findall(body)]
-        if len(swords) < _PUBMATCH_MIN_WORDS:
-            s["source_containment"] = 0.0
-            continue
-        ssh = _shingles(swords)
-        containment = len(ssh & doc_sh) / len(ssh) if ssh else 0.0
+        containment = 0.0
+        if len(swords) >= _PUBMATCH_MIN_WORDS:
+            ssh = _shingles(swords)
+            containment = len(ssh & doc_sh) / len(ssh) if ssh else 0.0
         s["source_containment"] = round(containment * 100, 1)
+        s["doi_identity"] = bool(sdoi and sdoi in doc_dois)
+        if s["doi_identity"] and doi_pub is None:
+            doi_pub = {
+                "title": s.get("title"),
+                "doi": s.get("doi"),
+                "url": s.get("url"),
+                "source": s.get("source"),
+                "containment": s["source_containment"],
+                "online": bool(s.get("online")),
+                "by_doi": True,
+            }
         if containment >= _PUBMATCH_MIN and (
-            publication_match is None or containment > publication_match["containment"] / 100
+            contain_pub is None or containment > contain_pub["containment"] / 100
         ):
-            publication_match = {
+            contain_pub = {
                 "title": s.get("title"),
                 "doi": s.get("doi"),
                 "url": s.get("url"),
                 "source": s.get("source"),
                 "containment": round(containment * 100, 1),
                 "online": bool(s.get("online")),
+                "by_doi": False,
             }
+    # DOI-identity adalah bukti terkuat → diprioritaskan.
+    publication_match = doi_pub or contain_pub
 
-    # Skor kemiripan tiap sumber daring diturunkan dari kecocokan kalimatnya
-    # (sumber daring tak punya embedding/MinHash tingkat-dokumen).
-    best_ratio_by_key: dict[str, float] = {}
-    for p in chunk["matched_passages"]:
-        key = (p.get("source_doi") or p.get("source_title") or "").lower().strip()
-        if key:
-            best_ratio_by_key[key] = max(best_ratio_by_key.get(key, 0.0), p.get("match_ratio", 0.0))
-    kept_online: list[dict] = []
-    for s in online_sources:
-        key = (s.get("doi") or s.get("title") or "").lower().strip()
-        ratio = best_ratio_by_key.get(key, 0.0)
-        if ratio <= 0:
-            continue  # sumber daring tanpa kecocokan nyata tidak ditampilkan
-        s["similarity"] = round(ratio, 1)
-        kept_online.append(s)
+    # Skor tampilan tiap sumber = KONTRIBUSI NYATA ke dokumen (porsi tersorot),
+    # BUKAN kemiripan topik (cosine). Ini membuat "Sumber Teratas" selaras
+    # dengan "Ringkasan Kecocokan" dan menghapus angka 76% yang menyesatkan.
+    contrib = chunk.get("source_percent", {})
 
-    # Sumber lokal (termasuk hasil match DOI yang tak punya MinHash) juga
-    # mendapat skor dari rasio kecocokan kalimat bila lebih tinggi — agar paper
-    # terbit yang sama tampil dengan persentase yang jujur, bukan 0%.
-    for s in sources:
-        key = (s.get("doi") or s.get("title") or "").lower().strip()
-        ratio = best_ratio_by_key.get(key, 0.0)
-        if ratio > s.get("similarity", 0.0):
-            s["similarity"] = round(ratio, 1)
+    def _skey(s: dict) -> str:
+        return (s.get("doi") or s.get("title") or "").lower().strip()
 
-    sources.extend(kept_online)
+    for s in sources + online_sources:
+        s["match_percent"] = contrib.get(_skey(s), 0.0)
+        s["similarity"] = s["match_percent"]
+
+    # Komponen parafrase/leksikal dihitung dari SELURUH kandidat (termasuk yang
+    # nanti disembunyikan) agar deteksi parafrase tak hilang saat memfilter.
+    all_local = [s for s in sources if not s.get("online")]
+    lexical_doc = max((s["lexical_similarity"] for s in all_local), default=0.0)
+    paraphrase = max((s["semantic_similarity"] for s in all_local), default=0.0)
+
+    # Gabungkan & bersihkan, lalu HANYA tampilkan sumber yang benar-benar punya
+    # kecocokan teks ( >0% ) atau teridentifikasi sebagai publikasi (DOI/abstrak
+    # termuat). Sumber yang sekadar setopik (0% kecocokan) tidak ditampilkan.
+    sources.extend(online_sources)
     for s in sources:
         s.pop("_fulltext", None)
-
-    sources.sort(key=lambda s: (s["lexical_similarity"], s["semantic_similarity"], s["similarity"]), reverse=True)
+    sources = [
+        s
+        for s in sources
+        if s.get("match_percent", 0.0) > 0
+        or s.get("doi_identity")
+        or s.get("source_containment", 0.0) >= _CONTAIN_SHOW
+    ]
+    sources.sort(
+        key=lambda s: (
+            s.get("match_percent", 0.0),
+            s.get("source_containment", 0.0),
+            s.get("semantic_similarity", 0.0),
+        ),
+        reverse=True,
+    )
     # Komponen integritas:
     #  - copy_index     : tumpang-tindih teks berbobot tingkat-kalimat (sensitif,
     #                     mencakup salinan penuh + parsial + indikasi parafrase;
@@ -481,9 +520,8 @@ def check_plagiarism(
     #                     korpus lokal saja — sumber daring lewat copy_index).
     #  - paraphrase     : kemiripan semantik tertinggi (parafrase kata diubah).
     copy_index = chunk["similarity_index"]
-    local_sources = [s for s in sources if not s.get("online")]
-    lexical_doc = max((s["lexical_similarity"] for s in local_sources), default=0.0)
-    paraphrase = max((s["semantic_similarity"] for s in local_sources), default=0.0)
+    # lexical_doc & paraphrase sudah dihitung di atas dari SELURUH kandidat
+    # (sebelum sumber 0% disembunyikan) agar deteksi parafrase tetap utuh.
     # Kontribusi parafrase dikalibrasi konservatif: hanya kemiripan semantik
     # sangat tinggi yang menambah indeks, agar dokumen yang sekadar SETOPIK
     # tidak ikut terangkat (menghindari tuduhan palsu). cos 80%→0, 100%→~18%.
