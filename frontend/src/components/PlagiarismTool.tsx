@@ -1,10 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { apiPost, apiUpload } from "@/lib/api";
 import TextInput from "@/components/TextInput";
 import { useJobLauncher } from "@/lib/useJobs";
 import { jobTitle } from "@/lib/jobs";
+import { submitPlagiarismJob } from "@/lib/plagiarismJob";
 
 export default function PlagiarismTool() {
   const [text, setText] = useState("");
@@ -18,10 +18,7 @@ export default function PlagiarismTool() {
     launch({
       tool: "plagiarism-checker",
       title: docTitle.trim() || (original ? original.name : jobTitle(text)),
-      run: () =>
-        original
-          ? apiUpload("/tools/plagiarism-file?top_k=30", original)
-          : apiPost("/tools/plagiarism", { text, top_k: 30 }),
+      run: () => submitPlagiarismJob({ text, file: original, topK: 30 }),
     });
   }
 
@@ -30,8 +27,9 @@ export default function PlagiarismTool() {
       <div className="flex items-center gap-3 rounded-xl border border-c bg-[color:var(--brand-soft)] px-4 py-3 text-sm text-neutral-700 dark:text-neutral-200">
         <span className="text-lg">⏱️</span>
         <span>
-          Proses pemeriksaan berlangsung singkat. Begitu kamu kirim, dokumen akan tampil di Beranda
-          lengkap dengan status prosesnya, lalu hasil dapat dibuka saat selesai.
+          Pemeriksaan berjalan di latar belakang server. Begitu kamu kirim, dokumen tampil di
+          Beranda dengan status prosesnya — kamu boleh menutup halaman ini; hasil dapat dibuka saat
+          proses selesai (termasuk pencocokan ke ratusan sumber daring).
         </span>
       </div>
 
