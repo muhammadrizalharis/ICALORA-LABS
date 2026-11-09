@@ -9,6 +9,13 @@ import PlagiarismReport from "@/components/PlagiarismReport";
 import RichToolResult, { hasRichToolView } from "@/components/ToolResultViews";
 import type { Report } from "@/lib/plagiarismReport";
 
+export interface HistoryFileMeta {
+  filename: string | null;
+  mime: string | null;
+  byte_size: number | null;
+  sha256: string | null;
+}
+
 export interface HistoryItemFull {
   id: number;
   tool: string;
@@ -16,6 +23,9 @@ export interface HistoryItemFull {
   input_preview: string | null;
   result: Record<string, unknown> | null;
   created_at: string | null;
+  expires_at?: string | null;
+  retention_days?: number | null;
+  file?: HistoryFileMeta | null;
 }
 
 function fmtDate(iso: string | null): string {
