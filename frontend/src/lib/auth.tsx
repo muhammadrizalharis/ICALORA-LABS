@@ -21,6 +21,7 @@ interface AuthState {
   historyRetentionDays: number;
   refresh: () => Promise<void>;
   adminLogin: (password: string) => Promise<boolean>;
+  changeAdminPassword: (currentPassword: string, newPassword: string) => Promise<string | null>;
   logout: () => Promise<void>;
 }
 
@@ -64,6 +65,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [refresh],
   );
 
+  const changeAdminPassword = useCallback(
+    async (currentPassword: string, newPassword: string): Promise<string | null> => {
+      const res = await fetch(`${API_BASE}/auth/admin-password`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+      });
+      if (res.ok) return null;
+      try {
+        const d = await res.json();
+        return typeof d?.detail === "string" ? d.detail : "Gagal mengubah kata sandi.";
+      } catch {
+        return "Gagal mengubah kata sandi.";
+      }
+    },
+    [],
+  );
+
   const logout = useCallback(async () => {
     await fetch(`${API_BASE}/auth/logout`, { method: "POST", credentials: "include" });
     setUser(null);
@@ -75,7 +95,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthCtx.Provider
-      value={{ loading, user, googleEnabled, adminEnabled, historyRetentionDays, refresh, adminLogin, logout }}
+      value={{ loading, user, googleEnabled, adminEnabled, historyRetentionDays, refresh, adminLogin, changeAdminPassword, logout }}
     >
       {children}
     </AuthCtx.Provider>
