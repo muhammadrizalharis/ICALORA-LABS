@@ -70,6 +70,13 @@ class Settings(BaseSettings):
     admin_name: str = Field(default="Super Admin")
     google_client_id: str = Field(default="")
     google_client_secret: str = Field(default="")
+
+    # Email (SMTP) untuk notifikasi kata sandi
+    smtp_host: str = Field(default="")
+    smtp_port: int = Field(default=587)
+    smtp_user: str = Field(default="")
+    smtp_password: str = Field(default="")
+    smtp_from: str = Field(default="")
     google_redirect_uri: str = Field(
         default="http://localhost:58030/api/backend/auth/google/callback"
     )
