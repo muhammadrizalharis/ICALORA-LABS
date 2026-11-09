@@ -12,7 +12,6 @@
 
 <br/>
 
-<!-- ─────────────────────────────  Badges  ───────────────────────────── -->
 <p>
   <img src="https://img.shields.io/badge/license-Proprietary-red?style=for-the-badge" alt="License" />
   <img src="https://img.shields.io/badge/status-Live-brightgreen?style=for-the-badge" alt="Status" />
@@ -37,9 +36,9 @@
 
 <div align="center">
 
-> **🌐 Web / Produk:** `ICALORA-LABS` &nbsp;·&nbsp; **🏢 Perusahaan:** `MRH INNOVEX`
->
-> *"ICALORA-LABS — Where scholarship meets truth."*
+**Web / Produk:** `ICALORA-LABS` &nbsp;·&nbsp; **Perusahaan:** `MRH INNOVEX`
+
+*"ICALORA-LABS — Where scholarship meets truth."*
 
 </div>
 
@@ -51,52 +50,47 @@ deteksi plagiarisme & AI yang **sah, transparan, dan terpercaya**, dibangun
 
 ---
 
-## 📑 Daftar Isi
+## Daftar Isi
 
-- [✨ Sorotan](#-sorotan)
-- [🧰 Fitur Unggulan](#-fitur-unggulan)
-- [🧱 Arsitektur Singkat](#-arsitektur-singkat)
-- [📁 Struktur Dokumen Rencana](#-struktur-dokumen-rencana)
-- [🎯 Ringkasan Keputusan](#-ringkasan-keputusan)
-- [⚡ Status](#-status)
-- [▶️ Menjalankan Secara Lokal](#️-menjalankan-secara-lokal-fase-0)
-- [🚦 Prinsip Utama](#-prinsip-utama)
-- [📜 Lisensi](#-lisensi)
+- [Sorotan](#sorotan)
+- [Fitur Unggulan](#fitur-unggulan)
+- [Arsitektur Singkat](#arsitektur-singkat)
+- [Ringkasan Keputusan](#ringkasan-keputusan)
+- [Prinsip Utama](#prinsip-utama)
+- [Lisensi](#lisensi)
 
 ---
 
-## ✨ Sorotan
+## Sorotan
 
-| | |
+| Aspek | Keterangan |
 |---|---|
-| ⚖️ **Legal-first** | Hanya sumber open-access legal (OpenAlex, PMC OA, DOAJ, CORE) — tanpa scraping konten berbayar. |
-| 🔒 **Self-contained** | Semua kode, korpus, dataset, model, dan aset dibangun khusus untuk ICALORA-LABS. |
-| 🧠 **AI yang jujur** | AI detector sentence-level dengan highlight & disclaimer akurasi — tanpa klaim berlebihan. |
-| 📄 **Laporan terverifikasi** | Setiap fitur menghasilkan laporan PDF yang bisa diunduh. |
-| 🛡️ **Privasi & keamanan** | Semua layanan mengikat `127.0.0.1`, self-hosted, anti-malware. |
+| **Legal-first** | Hanya sumber open-access legal (OpenAlex, PMC OA, DOAJ, CORE) — tanpa scraping konten berbayar. |
+| **Self-contained** | Semua kode, korpus, dataset, model, dan aset dibangun khusus untuk ICALORA-LABS. |
+| **AI yang jujur** | AI detector sentence-level dengan highlight & disclaimer akurasi — tanpa klaim berlebihan. |
+| **Laporan terverifikasi** | Setiap fitur menghasilkan laporan PDF yang bisa diunduh. |
+| **Privasi & keamanan** | Semua layanan mengikat `127.0.0.1`, self-hosted, anti-malware. |
 
 ---
 
-## 🧰 Fitur Unggulan
+## Fitur Unggulan
 
 | Fitur | Deskripsi |
 |---|---|
-| 🔍 **Plagiarism Checker** | Bandingkan dokumen ke korpus besar dengan label kemiripan yang jujur. |
-| 🤖 **AI Detector** | Deteksi teks AI level kalimat + highlight inline + skor terkalibrasi. |
-| ✍️ **Paraphraser** | Tulis ulang teks mempertahankan makna. |
-| 🪄 **Humanizer** | Haluskan gaya tulisan agar lebih natural. |
-| 📝 **Grammar / Writing Report** | Daftar isu tata bahasa + teks terkoreksi. |
-| 📚 **Citation Finder** | Temukan & format rujukan yang relevan. |
-| 🎓 **AI Grader** | Penilaian otomatis dengan rubrik. |
-| 🧬 **Authorship / Stylometry** | Skor kemiripan gaya + fitur stilometrik. |
-| 🕵️ **Hidden-Text Scanner** | Temukan karakter tersembunyi / teks putih / sisipan. |
-| 📰 **Rekomendasi Jurnal** | Tata letak rekomendasi jurnal + skor kesiapan. |
-
-> Peta lengkap 13 fitur: **[docs/01-features.md](./docs/01-features.md)**.
+| **Plagiarism Checker** | Bandingkan dokumen ke korpus besar dengan label kemiripan yang jujur. |
+| **AI Detector** | Deteksi teks AI level kalimat + highlight inline + skor terkalibrasi. |
+| **Paraphraser** | Tulis ulang teks mempertahankan makna. |
+| **Humanizer** | Haluskan gaya tulisan agar lebih natural. |
+| **Grammar / Writing Report** | Daftar isu tata bahasa + teks terkoreksi. |
+| **Citation Finder** | Temukan & format rujukan yang relevan. |
+| **AI Grader** | Penilaian otomatis dengan rubrik. |
+| **Authorship / Stylometry** | Skor kemiripan gaya + fitur stilometrik. |
+| **Hidden-Text Scanner** | Temukan karakter tersembunyi / teks putih / sisipan. |
+| **Rekomendasi Jurnal** | Tata letak rekomendasi jurnal + skor kesiapan. |
 
 ---
 
-## 🧱 Arsitektur Singkat
+## Arsitektur Singkat
 
 ```text
                 ┌────────────────────┐
@@ -119,109 +113,34 @@ deteksi plagiarisme & AI yang **sah, transparan, dan terpercaya**, dibangun
      └────────────┘
 ```
 
-Detail: **[docs/02-architecture.md](./docs/02-architecture.md)**.
-
 ---
 
-## 📁 Struktur Dokumen Rencana
-
-| 📄 File | Isi |
-|---|---|
-| [docs/01-features.md](./docs/01-features.md) | Peta 13 fitur + tingkat kesulitan |
-| [docs/02-architecture.md](./docs/02-architecture.md) | Arsitektur teknis sistem |
-| [docs/03-data-strategy.md](./docs/03-data-strategy.md) | Strategi membangun korpus & dataset sendiri |
-| [docs/04-roadmap.md](./docs/04-roadmap.md) | Tahapan pembangunan (5 fase) |
-| [docs/05-tech-stack.md](./docs/05-tech-stack.md) | Pilihan teknologi & struktur folder |
-| [docs/06-legal-compliance.md](./docs/06-legal-compliance.md) | Legalitas, lisensi, & kepatuhan |
-| [docs/07-branding.md](./docs/07-branding.md) | Nama, domain, & identitas brand |
-| [docs/08-database-security.md](./docs/08-database-security.md) | Database, keamanan, backend, frontend |
-| [docs/09-infrastructure-setup.md](./docs/09-infrastructure-setup.md) | Infrastruktur data & tooling keamanan |
-| [docs/10-storage-optimization.md](./docs/10-storage-optimization.md) | Strategi penyimpanan korpus hemat |
-| [docs/11-report-viewer-spec.md](./docs/11-report-viewer-spec.md) | Spesifikasi report viewer |
-| [docs/12-dataset-ingestion.md](./docs/12-dataset-ingestion.md) | Pipeline ingest & embedding korpus |
-
----
-
-## 🎯 Ringkasan Keputusan
+## Ringkasan Keputusan
 
 | Aspek | Keputusan |
 |---|---|
-| 🏷️ **Nama web / produk** | ICALORA-LABS |
-| 🏢 **Nama perusahaan** | MRH INNOVEX |
-| 🗄️ **Pendekatan data** | Mandiri (self-contained), korpus dari sumber open-access legal |
-| ⚖️ **Legalitas** | Hanya sumber berlisensi reuse (OpenAlex, PMC OA, DOAJ, CORE) — **tanpa scraping konten berbayar** |
-| 🎓 **Target** | Mahasiswa, dosen, peneliti, institusi |
+| **Nama web / produk** | ICALORA-LABS |
+| **Nama perusahaan** | MRH INNOVEX |
+| **Pendekatan data** | Mandiri (self-contained), korpus dari sumber open-access legal |
+| **Legalitas** | Hanya sumber berlisensi reuse (OpenAlex, PMC OA, DOAJ, CORE) — **tanpa scraping konten berbayar** |
+| **Target** | Mahasiswa, dosen, peneliti, institusi |
 
 ---
 
-## ⚡ Status
+## Prinsip Utama
 
-- [x] 🧭 Riset nama & branding
-- [x] 🗺️ Rencana fitur, arsitektur, data, roadmap, stack, legal
-- [x] 🧱 Infrastruktur data (Postgres+pgvector, Redis, SeaweedFS) + tooling keamanan
-- [x] 🚀 **Fase 0** — scaffold monorepo (backend FastAPI + frontend Next.js), terhubung ke infra
-- [x] 🧰 Fitur ringan (LLM) + laporan PDF terverifikasi
-- [x] 🤖 AI Detector sentence-level + highlight inline
-- [x] 🔍 Plagiarism checker bandingkan ke korpus
-- [~] 📥 Ingest/embedding korpus berjalan
-- [ ] 🧪 Finalisasi fitur berat + QA laporan
-
----
-
-## ▶️ Menjalankan Secara Lokal (Fase 0)
-
-> **Prasyarat:** 🐳 Docker · 🟢 Node 20+ · 🐍 Python 3.10+
-
-**1. Infrastruktur** (Postgres / Redis / SeaweedFS)
-
-```bash
-cd infra
-cp .env.example .env && cp seaweedfs/s3.json.example seaweedfs/s3.json
-# isi secret kuat Anda sendiri; samakan S3_SECRET_KEY dengan s3.json
-chmod 600 .env && chmod 644 seaweedfs/s3.json && chmod 700 seaweedfs
-docker compose -f docker-compose.infra.yml up -d
-```
-
-Detail & hardening: **[docs/09](./docs/09-infrastructure-setup.md)**.
-
-**2. Backend** (FastAPI, default port 58010)
-
-```bash
-cd backend
-python3 -m venv .venv && . .venv/bin/activate
-pip install -e ".[dev]"
-cp .env.example .env   # samakan nilai dengan infra/.env
-uvicorn app.main:app --host 127.0.0.1 --port 58010
-# cek koneksi infra: curl http://127.0.0.1:58010/health/infra
-```
-
-**3. Frontend** (Next.js, port 3000)
-
-```bash
-cd frontend
-cp .env.example .env.local
-npm install && npm run dev
-```
-
-> 🔐 Semua port ICALORA-LABS khusus (54432/54379/54333/54888 infra, 58010 API) dan
-> hanya mengikat `127.0.0.1`. **Tidak pernah** memakai port/proses proyek lain.
-
----
-
-## 🚦 Prinsip Utama
-
-1. ⚖️ **Legal-first** — hanya memakai data yang lisensinya mengizinkan reuse.
-2. 🔒 **Self-contained (MUTLAK)** — SEMUA sumber daya (kode, korpus, dataset, model,
+1. **Legal-first** — hanya memakai data yang lisensinya mengizinkan reuse.
+2. **Self-contained (MUTLAK)** — SEMUA sumber daya (kode, korpus, dataset, model,
    aset, konfigurasi, dependensi) dibangun khusus untuk ICALORA-LABS. **DILARANG**
    mengambil, menyalin, atau berbagi sumber daya dari proyek lain mana pun.
-3. 🙏 **Jujur ke pengguna** — AI detector selalu menampilkan disclaimer akurasi;
+3. **Jujur ke pengguna** — AI detector selalu menampilkan disclaimer akurasi;
    tidak ada klaim berlebihan.
-4. 🧩 **MVP dulu** — fitur ringan jalan cepat, fitur berat (plagiarism, detector)
+4. **MVP dulu** — fitur ringan jalan cepat, fitur berat (plagiarism, detector)
    dibangun bertahap.
 
 ---
 
-## 📜 Lisensi
+## Lisensi
 
 **Proprietary — © 2026 MRH INNOVEX. All Rights Reserved.**
 
