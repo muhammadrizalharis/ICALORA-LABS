@@ -227,6 +227,37 @@ export default function PlagiarismReport({ report, documentText, docTitle = "", 
         </div>
       </div>
 
+      {report.publication_match && (
+        <div className="rounded-lg border border-orange-300 border-l-4 border-l-orange-600 bg-orange-50 px-4 py-3 text-xs leading-relaxed text-orange-900 dark:border-orange-900 dark:border-l-orange-500 dark:bg-orange-950/40 dark:text-orange-200">
+          <b>⚠️ Terdeteksi sebagai publikasi terindeks.</b>{" "}
+          {report.publication_match.containment.toFixed(0)}% teks sumber
+          {report.publication_match.online ? " (abstrak daring)" : ""} termuat di dokumen
+          ini — kemungkinan karya sudah dipublikasikan (atau{" "}
+          <i>self-plagiarism</i>/duplikasi). Sumber:{" "}
+          {report.publication_match.url ? (
+            <a
+              href={report.publication_match.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline"
+            >
+              {report.publication_match.title ||
+                report.publication_match.doi ||
+                report.publication_match.url}
+            </a>
+          ) : (
+            report.publication_match.title ||
+            report.publication_match.doi ||
+            "(tanpa judul)"
+          )}
+          {report.publication_match.source ? ` · ${report.publication_match.source}` : ""}.{" "}
+          <span className="text-orange-800 dark:text-orange-300">
+            Catatan: sumber daring hanya memaparkan abstrak, sehingga Indeks Kemiripan
+            baris-per-baris tetap rendah; sinyal identitas ini dihitung terpisah.
+          </span>
+        </div>
+      )}
+
       {report.match_groups && report.match_groups.some((g) => g.count > 0) && (
         <div>
           <div className="mb-2 text-sm font-semibold text-neutral-800 dark:text-neutral-200">
@@ -373,7 +404,11 @@ export default function PlagiarismReport({ report, documentText, docTitle = "", 
                     {s.similarity.toFixed(0)}%
                   </div>
                   <div className="text-neutral-400 dark:text-neutral-500">
-                    {s.online ? "sumber daring" : `sal ${s.lexical_similarity.toFixed(0)} · sem ${s.semantic_similarity.toFixed(0)}`}
+                    {s.online
+                      ? s.source_containment
+                        ? `abstrak ${s.source_containment.toFixed(0)}% termuat`
+                        : "sumber daring"
+                      : `sal ${s.lexical_similarity.toFixed(0)} · sem ${s.semantic_similarity.toFixed(0)}`}
                   </div>
                 </div>
               </div>
