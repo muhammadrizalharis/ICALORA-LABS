@@ -49,17 +49,15 @@ Saat ini hanya `plagiarism-checker` yang punya view khusus; tool lain jatuh ke `
 - [x] Panel **Informasi File** universal: Report ID, SHA-256/hash, judul, tipe tool, tanggal, status/expired.
 - [x] Panel **Aksi** universal: **Lihat (buka PDF)**, **Download**, **Parafrase ulang**, **Periksa ulang**, dan langkah lanjutan.
 
-### 3. Login Google (kode SELESAI — tinggal kredensial & konfigurasi)
-Alur OAuth penuh sudah ada (`/auth/google/login`, `/auth/google/callback`, token exchange, userinfo, upsert user, set session). Yang kurang murni konfigurasi:
+### 3. Login Google — SELESAI & LIVE
+Alur OAuth penuh berfungsi end-to-end (`/auth/google/login` → `accounts.google.com` → `/auth/google/callback`, token exchange, userinfo, upsert user, set session). Terverifikasi di live.
 
-- Domain publik ICALORA **sudah live** di balik reverse-proxy/tunnel (same-origin ke frontend :58030 yang proxy backend :58010).
-- [ ] Buat **OAuth 2.0 Client ID** (tipe: Web application) di Google Cloud Console.
-- [ ] Set **Authorized redirect URI** = `https://<DOMAIN_PUBLIK>/api/backend/auth/google/callback`.
-- [x] Siapkan variabel URL publik di `backend/.env` (`GOOGLE_REDIRECT_URI`, `FRONTEND_BASE_URL`).
-- [ ] Isi kredensial di `backend/.env`:
-  - [ ] `GOOGLE_CLIENT_ID=...`
-  - [ ] `GOOGLE_CLIENT_SECRET=...`
-- [ ] Restart `icalora-backend.service`, verifikasi tombol "Masuk dengan Google" & alur callback berhasil.
+- [x] Domain publik ICALORA **live** di balik reverse-proxy/tunnel (same-origin).
+- [x] **OAuth 2.0 Client ID** (Web application) dibuat di Google Cloud Console.
+- [x] **Authorized redirect URI** diset ke `https://<DOMAIN_PUBLIK>/api/backend/auth/google/callback`.
+- [x] Variabel URL publik di `backend/.env` (`GOOGLE_REDIRECT_URI`, `FRONTEND_BASE_URL`).
+- [x] Kredensial di `backend/.env` (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`).
+- [x] Verifikasi: tombol "Masuk dengan Google" & alur callback berhasil (redirect 307 → Google OK).
 
 ### 4. Backend / Data (berjalan di latar)
 - [x] **Embedding korpus** mencapai target **25%** (5.861.751 dari 23.415.245 dokumen = 25,03%). Worker dihentikan di target; rebuild indeks HNSW berjalan di VM (fase "loading tuples"). JANGAN sentuh konfigurasi Ollama.
@@ -69,9 +67,9 @@ Alur OAuth penuh sudah ada (`/auth/google/login`, `/auth/google/callback`, token
 ## 🌐 Opsi Deploy / Hosting (keputusan arsitektur)
 
 - **Backend TIDAK bisa di Vercel**: butuh GPU, tugas lama (menit), Ollama + Postgres lokal → wajib tetap di server GPU dan diekspos via satu URL publik.
-- **Frontend (Next.js) bisa di Vercel** (dapat domain gratis `*.vercel.app`), TAPI:
-  - [ ] Jika pindah ke Vercel: browser harus panggil backend publik langsung (`NEXT_PUBLIC_API_BASE`), bukan proxy `/api/backend` (kena timeout serverless).
-  - [ ] Konsekuensi beda-origin: set cookie sesi `SameSite=None; Secure` + buka CORS.
+- **Frontend (Next.js) bisa di Vercel** (dapat domain gratis `*.vercel.app`), TAPI (tidak dipakai — lihat keputusan di bawah):
+  - [x] ~~Jika pindah ke Vercel: browser panggil backend publik langsung (`NEXT_PUBLIC_API_BASE`)~~ — N/A, Opsi A dipilih.
+  - [x] ~~Konsekuensi beda-origin: cookie `SameSite=None; Secure` + CORS~~ — N/A, Opsi A dipilih.
 - **Rekomendasi: Opsi A — tetap self-host semua (same-origin)**, ekspos via **reverse-proxy / named tunnel**. Tidak wajib domain berbayar; Login Google langsung bisa tanpa ubah cookie/CORS.
 - Keputusan: **FINAL — Opsi A diterapkan.** ICALORA live di balik tunnel/reverse-proxy (ingress tambahan → `localhost:58030`).
 
