@@ -61,6 +61,7 @@ services:
     environment:
       NODE_ENV: production
       BACKEND_ORIGIN: http://127.0.0.1:58010
+    command: ["npx", "next", "start", "-p", "58030", "-H", "127.0.0.1"]
     depends_on:
       backend:
         condition: service_healthy
