@@ -22,7 +22,7 @@ import httpx
 
 from app.core.config import get_settings
 
-from . import _WORD_RE, _chunk_match, _report_id, _sentences
+from . import _WORD_RE, _chunk_match, _extract_own_dois, _report_id, _sentences
 from datetime import datetime, timezone
 import hashlib
 
@@ -115,22 +115,57 @@ def _extract_dois(doc: str, limit: int = 5) -> list[str]:
     return out
 
 
+_TITLE_SKIP_KW = (
+    "doi", "http", "@", "abstract", "abstrak", "keywords", "kata kunci",
+    "received", "revised", "accepted", "published", "copyright", "©",
+    "research article", "review article", "original article", "vol.", "vol ",
+    "issn", "e-issn", "journal of", "proceedings", "preprint", "license",
+    "creative commons", "author(s)", "all rights reserved",
+)
+
+
 def _extract_title(doc: str) -> str:
-    """Tebak judul dokumen: baris awal paling 'judul-like' (banyak kata,
-    bukan metadata). Dipakai untuk menemukan paper terbit yang persis."""
+    """Tebak judul dokumen dari halaman depan.
+
+    Judul kerap terpenggal menjadi beberapa baris pada ekstraksi PDF, dan
+    didahului metadata jurnal (Received/Published/Vol./Research Article).
+    Fungsi ini melewati baris metadata lalu menggabungkan baris judul yang
+    berurutan menjadi satu — agar query pencarian paper terbit lebih tepat.
+    """
     head = doc.strip()[:3000]
+    buf: list[str] = []
+
+    def _is_titleish(line: str) -> bool:
+        words = _WORD_RE.findall(line)
+        if len(words) < 2 or len(words) > 40:
+            return False
+        low = line.lower()
+        if any(k in low for k in _TITLE_SKIP_KW):
+            return False
+        if sum(c.isdigit() for c in line) > len(line) * 0.3:
+            return False
+        # Baris penulis/afiliasi sering memuat banyak koma + angka superскрипт.
+        if line.count(",") >= 3 and any(c.isdigit() for c in line):
+            return False
+        return True
+
     for raw in head.splitlines():
         line = raw.strip()
-        words = _WORD_RE.findall(line)
-        if len(words) < 4 or len(words) > 40:
+        if not line:
+            if buf:
+                break  # baris kosong menutup blok judul yang sudah terkumpul
             continue
-        low = line.lower()
-        if any(k in low for k in ("doi", "http", "@", "abstract", "abstrak", "keywords")):
-            continue
-        if sum(c.isdigit() for c in line) > len(line) * 0.3:
-            continue
-        return line[:300]
-    return ""
+        if _is_titleish(line):
+            buf.append(line)
+            # Judul utuh biasanya ≤ ~25 kata; hentikan bila sudah cukup panjang.
+            if len(_WORD_RE.findall(" ".join(buf))) >= 25:
+                break
+        elif buf:
+            break  # baris non-judul setelah blok judul → selesai
+    title = " ".join(buf).strip()
+    # Rapikan hyphenation pemenggalan baris: "C- Means" → "C-Means".
+    title = re.sub(r"-\s+", "-", title)
+    return title[:300]
 
 
 def _openalex_abstract(inv: dict | None) -> str:
@@ -443,9 +478,13 @@ async def _q_title(client: httpx.AsyncClient, title: str) -> list[dict]:
 
 
 async def _resolve_publication(client: httpx.AsyncClient, doc: str) -> list[dict]:
-    """Kumpulkan kandidat 'identitas publikasi' via DOI tertera + judul."""
+    """Kumpulkan kandidat 'identitas publikasi' via DOI SENDIRI + judul.
+
+    Hanya DOI milik dokumen sendiri (front-matter) yang di-resolve — DOI
+    referensi yang dikutip diabaikan agar tidak salah-tandai sebagai publikasi.
+    """
     tasks: list = []
-    for doi in _extract_dois(doc):
+    for doi in _extract_own_dois(doc):
         tasks.append(_q_openalex_doi(client, doi))
         tasks.append(_q_crossref_doi(client, doi))
     tasks.append(_q_title(client, _extract_title(doc)))
