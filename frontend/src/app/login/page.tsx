@@ -17,7 +17,7 @@ export default function LoginPage() {
     <div className="mx-auto flex min-h-[70vh] max-w-md flex-col items-center justify-center p-8">
       <div className="w-full rounded-2xl border border-c surface p-8 text-center shadow-sm">
         <Image
-          src="/Logo Teknologi Futuristik ICALORA-LABS.png"
+          src="/icon.png"
           alt="ICALORA-LABS"
           width={64}
           height={64}

@@ -41,7 +41,7 @@ export default function DashboardSidebar() {
   return (
     <aside className="sticky top-0 flex h-screen w-64 shrink-0 flex-col self-start border-r border-c surface">
       <div className="flex items-center gap-2 px-4 py-4">
-        <Image src="/Logo Teknologi Futuristik ICALORA-LABS.png" alt="" width={28} height={28} />
+        <Image src="/icon.png" alt="" width={28} height={28} />
         <span className="font-bold tracking-tight">ICALORA-LABS</span>
       </div>
 
