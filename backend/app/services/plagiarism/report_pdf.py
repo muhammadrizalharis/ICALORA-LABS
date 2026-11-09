@@ -134,6 +134,16 @@ def _cover_html(report: dict) -> str:
                 "abstrak (teks penuh berbayar/berhak cipta), sehingga Indeks Kemiripan "
                 "baris-per-baris tetap rendah; identitas publikasi ini dihitung terpisah.</span></div>"
             )
+        elif pm.get("by_title"):
+            pub_banner = (
+                '<div class="pubmatch"><b>⚠️ Terdeteksi sebagai publikasi terindeks (identitas judul).</b> '
+                "Judul dokumen ini sama dengan karya terbit — kemungkinan besar merupakan "
+                "karya yang sudah dipublikasikan itu sendiri (atau duplikasi/self-plagiarism). Sumber: "
+                f"<b>{src_label}</b>{(' · ' + src_meta) if src_meta else ''}. "
+                "<span style=\"color:#7c2d12\">Catatan: korpus &amp; sumber daring umumnya hanya "
+                "memaparkan abstrak (teks penuh berbayar/berhak cipta), sehingga Indeks Kemiripan "
+                "baris-per-baris tetap rendah — hanya porsi abstrak yang terhitung cocok, bukan 100%.</span></div>"
+            )
         else:
             pub_banner = (
                 '<div class="pubmatch"><b>⚠️ Terdeteksi sebagai publikasi terindeks.</b> '

@@ -228,7 +228,9 @@ export default function PlagiarismReport({ report, documentText, docTitle = "", 
           <b>⚠️ Terdeteksi sebagai publikasi terindeks.</b>{" "}
           {report.publication_match.by_doi
             ? "Dokumen ini mencantumkan DOI yang sama dengan karya terbit di korpus — kemungkinan besar merupakan karya yang sudah dipublikasikan itu sendiri"
-            : `${report.publication_match.containment.toFixed(0)}% teks sumber termuat di dokumen ini — kemungkinan karya sudah dipublikasikan`}
+            : report.publication_match.by_title
+              ? "Judul dokumen ini sama dengan karya terbit — kemungkinan besar merupakan karya yang sudah dipublikasikan itu sendiri"
+              : `${report.publication_match.containment.toFixed(0)}% teks sumber termuat di dokumen ini — kemungkinan karya sudah dipublikasikan`}
           {" "}(atau{" "}
           <i>self-plagiarism</i>/duplikasi). Sumber:{" "}
           {report.publication_match.url ? (
@@ -247,7 +249,13 @@ export default function PlagiarismReport({ report, documentText, docTitle = "", 
             report.publication_match.doi ||
             "(tanpa judul)"
           )}
-          {report.publication_match.source ? ` · ${report.publication_match.source}` : ""}.
+          {report.publication_match.source ? ` · ${report.publication_match.source}` : ""}.{" "}
+          <span className="opacity-80">
+            Catatan: persentase kecocokan baris-per-baris tetap rendah karena
+            korpus &amp; sumber daring umumnya hanya memuat <b>abstrak</b>, bukan
+            naskah penuh — jadi hanya porsi abstrak yang terhitung cocok, bukan
+            100%.
+          </span>
         </div>
       )}
 

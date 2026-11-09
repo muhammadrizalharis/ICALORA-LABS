@@ -280,6 +280,59 @@ def _extract_dois(doc: str, limit: int = 8) -> list[str]:
     return out
 
 
+# Heading daftar pustaka (EN/ID). DOI setelah heading ini adalah DOI REFERENSI
+# yang dikutip — bukan identitas dokumen.
+_REF_HEADING_RE = re.compile(
+    r"(?im)^\s*(references|reference|bibliography|works\s+cited|literature\s+cited"
+    r"|daftar\s+pustaka|daftar\s+rujukan|referensi|kepustakaan)\s*:?\s*$"
+)
+# Perkiraan panjang "halaman depan" (judul+penulis+abstrak). DOI milik makalah
+# sendiri hampir selalu tercetak di sini.
+_FRONT_MATTER_CHARS = 5000
+
+
+def _extract_own_dois(doc: str) -> list[str]:
+    """DOI milik dokumen SENDIRI (identitas publikasi), bukan DOI referensi.
+
+    Hanya mengambil DOI dari front-matter: sebelum heading daftar pustaka DAN
+    dalam ~halaman pertama. Ini mencegah salah-tandai ketika dokumen mengutip
+    paper lain (yang DOI-nya ada di korpus) sebagai "publikasi terindeks".
+    """
+    m = _REF_HEADING_RE.search(doc)
+    cut = m.start() if m else len(doc)
+    front = doc[: min(cut, _FRONT_MATTER_CHARS)]
+    return _extract_dois(front, limit=3)
+
+
+def _front_matter(doc: str) -> str:
+    """Potongan 'halaman depan' (judul+penulis+abstrak), sebelum daftar pustaka."""
+    m = _REF_HEADING_RE.search(doc)
+    cut = m.start() if m else len(doc)
+    return doc[: min(cut, _FRONT_MATTER_CHARS)]
+
+
+def _title_in_front_matter(source_title: str, front_shingles: set[str]) -> float:
+    """Porsi (0..1) shingle-3 JUDUL sumber yang muncul di front-matter dokumen.
+
+    Judul dokumen SENDIRI tercetak di halaman depan; judul paper yang hanya
+    DIRUJUK muncul di daftar pustaka (di luar front-matter). Jadi kecocokan
+    judul di front-matter = bukti kuat dokumen ADALAH publikasi itu, bukan
+    sekadar mengutipnya. Tahan terhadap pemenggalan baris/hyphenation karena
+    dibandingkan pada level shingle kata, bukan substring mentah.
+    """
+    tw = [w.lower() for w in _WORD_RE.findall(source_title or "")]
+    if len(tw) < 6:
+        return 0.0
+    tsh = _shingles(tw, 3)
+    if not tsh or not front_shingles:
+        return 0.0
+    return len(tsh & front_shingles) / len(tsh)
+
+
+# Ambang kecocokan judul di front-matter untuk menyatakan identitas publikasi.
+_TITLE_IDENTITY_MIN = 0.70
+
+
 def _vec_literal(vec: list[float]) -> str:
     return "[" + ",".join(f"{x:.6f}" for x in vec) + "]"
 
@@ -435,8 +488,11 @@ def check_plagiarism(
     #      bukti kuat bahwa dokumen ADALAH karya terbit itu (atau duplikatnya).
     doc_words = [w.lower() for w in _WORD_RE.findall(doc)]
     doc_sh = _shingles(doc_words)
-    doc_dois = set(_extract_dois(doc))
+    doc_dois = set(_extract_own_dois(doc))
+    front_words = [w.lower() for w in _WORD_RE.findall(_front_matter(doc))]
+    front_sh = _shingles(front_words, 3)
     doi_pub: dict | None = None
+    title_pub: dict | None = None
     contain_pub: dict | None = None
     for s in sources + online_sources:
         sdoi = (s.get("doi") or "").strip().lower()
@@ -448,6 +504,9 @@ def check_plagiarism(
             containment = len(ssh & doc_sh) / len(ssh) if ssh else 0.0
         s["source_containment"] = round(containment * 100, 1)
         s["doi_identity"] = bool(sdoi and sdoi in doc_dois)
+        # Kecocokan judul sumber di front-matter dokumen = identitas publikasi.
+        title_overlap = _title_in_front_matter(s.get("title") or "", front_sh)
+        s["title_identity"] = bool(title_overlap >= _TITLE_IDENTITY_MIN)
         if s["doi_identity"] and doi_pub is None:
             doi_pub = {
                 "title": s.get("title"),
@@ -457,9 +516,29 @@ def check_plagiarism(
                 "containment": s["source_containment"],
                 "online": bool(s.get("online")),
                 "by_doi": True,
+                "by_title": False,
             }
-        if containment >= _PUBMATCH_MIN and (
-            contain_pub is None or containment > contain_pub["containment"] / 100
+        if s["title_identity"] and (
+            title_pub is None or title_overlap > title_pub["_overlap"]
+        ):
+            title_pub = {
+                "title": s.get("title"),
+                "doi": s.get("doi"),
+                "url": s.get("url"),
+                "source": s.get("source"),
+                "containment": s["source_containment"],
+                "online": bool(s.get("online")),
+                "by_doi": False,
+                "by_title": True,
+                "_overlap": title_overlap,
+            }
+        # Reverse-containment tinggi HANYA dihitung sebagai identitas bila judul
+        # sumber juga ada di front-matter — mencegah paper yang sekadar dirujuk
+        # (abstraknya banyak dikutip) salah ditandai sebagai publikasi.
+        if (
+            containment >= _PUBMATCH_MIN
+            and s["title_identity"]
+            and (contain_pub is None or containment > contain_pub["containment"] / 100)
         ):
             contain_pub = {
                 "title": s.get("title"),
@@ -469,9 +548,12 @@ def check_plagiarism(
                 "containment": round(containment * 100, 1),
                 "online": bool(s.get("online")),
                 "by_doi": False,
+                "by_title": True,
             }
-    # DOI-identity adalah bukti terkuat → diprioritaskan.
-    publication_match = doi_pub or contain_pub
+    if title_pub is not None:
+        title_pub.pop("_overlap", None)
+    # Prioritas bukti identitas: DOI sendiri > judul di front-matter > containment.
+    publication_match = doi_pub or title_pub or contain_pub
 
     # Skor tampilan tiap sumber = KONTRIBUSI NYATA ke dokumen (porsi tersorot),
     # BUKAN kemiripan topik (cosine). Ini membuat "Sumber Teratas" selaras
@@ -502,11 +584,13 @@ def check_plagiarism(
         for s in sources
         if s.get("match_percent", 0.0) > 0
         or s.get("doi_identity")
+        or s.get("title_identity")
         or s.get("source_containment", 0.0) >= _CONTAIN_SHOW
     ]
     sources.sort(
         key=lambda s: (
             s.get("match_percent", 0.0),
+            1.0 if (s.get("doi_identity") or s.get("title_identity")) else 0.0,
             s.get("source_containment", 0.0),
             s.get("semantic_similarity", 0.0),
         ),
