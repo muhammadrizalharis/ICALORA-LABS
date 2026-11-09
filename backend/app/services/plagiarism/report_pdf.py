@@ -123,15 +123,27 @@ def _cover_html(report: dict) -> str:
         src_label = _esc(str(pm.get("title") or pm.get("doi") or "(tanpa judul)"))
         src_meta = _esc(str(pm.get("source") or ""))
         online_tag = " (abstrak daring)" if pm.get("online") else ""
-        pub_banner = (
-            '<div class="pubmatch"><b>⚠️ Terdeteksi sebagai publikasi terindeks.</b> '
-            f"{contain:.0f}% teks sumber{online_tag} termuat di dokumen ini — kemungkinan "
-            "karya sudah dipublikasikan (atau self-plagiarism/duplikasi). Sumber: "
-            f"<b>{src_label}</b>{(' · ' + src_meta) if src_meta else ''}. "
-            "<span style=\"color:#7c2d12\">Catatan: sumber daring hanya memaparkan abstrak, "
-            "sehingga Indeks Kemiripan baris-per-baris tetap rendah; sinyal identitas ini "
-            "dihitung terpisah.</span></div>"
-        )
+        if pm.get("by_doi"):
+            pub_banner = (
+                '<div class="pubmatch"><b>⚠️ Terdeteksi sebagai publikasi terindeks (identitas DOI).</b> '
+                "Dokumen ini mencantumkan DOI yang sama dengan karya terbit di korpus — "
+                "kemungkinan besar merupakan karya yang sudah dipublikasikan itu sendiri "
+                "(atau duplikasi/self-plagiarism). Sumber: "
+                f"<b>{src_label}</b>{(' · ' + src_meta) if src_meta else ''}. "
+                "<span style=\"color:#7c2d12\">Catatan: korpus daring umumnya hanya memaparkan "
+                "abstrak (teks penuh berbayar/berhak cipta), sehingga Indeks Kemiripan "
+                "baris-per-baris tetap rendah; identitas publikasi ini dihitung terpisah.</span></div>"
+            )
+        else:
+            pub_banner = (
+                '<div class="pubmatch"><b>⚠️ Terdeteksi sebagai publikasi terindeks.</b> '
+                f"{contain:.0f}% teks sumber{online_tag} termuat di dokumen ini — kemungkinan "
+                "karya sudah dipublikasikan (atau self-plagiarism/duplikasi). Sumber: "
+                f"<b>{src_label}</b>{(' · ' + src_meta) if src_meta else ''}. "
+                "<span style=\"color:#7c2d12\">Catatan: sumber daring hanya memaparkan abstrak, "
+                "sehingga Indeks Kemiripan baris-per-baris tetap rendah; sinyal identitas ini "
+                "dihitung terpisah.</span></div>"
+            )
 
     return f"""<!doctype html><html><head><meta charset="utf-8"><style>
     @page {{ size: A4; margin: 24mm 18mm; }}
