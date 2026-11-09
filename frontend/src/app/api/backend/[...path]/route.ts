@@ -44,6 +44,9 @@ async function proxy(req: NextRequest, path: string[]): Promise<Response> {
       body,
       signal: controller.signal,
       cache: "no-store",
+      // Teruskan redirect (mis. alur OAuth Google) apa adanya ke browser,
+      // jangan diikuti di sisi server agar Location + Set-Cookie sampai ke klien.
+      redirect: "manual",
     });
     const respHeaders = new Headers();
     upstream.headers.forEach((value, key) => {
