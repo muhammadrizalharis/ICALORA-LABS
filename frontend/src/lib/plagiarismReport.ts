@@ -15,6 +15,7 @@ export interface Source {
   snippet: string;
   url?: string | null;
   online?: boolean;
+  source_containment?: number;
 }
 
 export interface MatchedPassage {
@@ -36,11 +37,21 @@ export interface MatchGroup {
   percent: number;
 }
 
+export interface PublicationMatch {
+  title: string | null;
+  doi: string | null;
+  url: string | null;
+  source: string | null;
+  containment: number;
+  online: boolean;
+}
+
 export interface Report {
   overall_similarity: number;
   integrity_index?: number;
   copy_similarity?: number;
   paraphrase_component?: number;
+  publication_match?: PublicationMatch | null;
   document_lexical_similarity: number;
   paraphrase_similarity: number;
   similarity_index: number;
@@ -300,7 +311,7 @@ export function buildReportHtml(args: {
         s.title || "(tanpa judul)",
       )}${s.online ? ` <span style="background:#0ea5e9;color:#fff;border-radius:4px;padding:0 5px;font-size:10px;font-weight:700;">DARING</span>` : ""}<div class="src">${escHtml(s.source)}${s.pub_year ? ` · ${s.pub_year}` : ""}${
         s.doi ? ` · ${escHtml(s.doi)}` : ""
-      }${s.online ? "" : ` · salinan ${s.lexical_similarity.toFixed(0)}% · semantik ${s.semantic_similarity.toFixed(0)}%`}</div></td></tr>`,
+      }${s.online ? (s.source_containment ? ` · abstrak ${s.source_containment.toFixed(0)}% termuat` : "") : ` · salinan ${s.lexical_similarity.toFixed(0)}% · semantik ${s.semantic_similarity.toFixed(0)}%`}</div></td></tr>`,
     )
     .join("");
 
@@ -332,6 +343,8 @@ export function buildReportHtml(args: {
   .verdict{font-size:17px;font-weight:700;} .vnote{color:#475569;font-size:12px;margin-top:4px;max-width:520px;}
   .metrics{display:flex;gap:18px;flex-wrap:wrap;margin:8px 0 4px;font-size:12px;color:#334155;}
   .metrics b{color:#0e1726;}
+  .pubmatch{background:#fff7ed;border:1px solid #fdba74;border-left:4px solid #ea580c;border-radius:8px;padding:10px 14px;margin:6px 0 10px;font-size:12px;color:#9a3412;line-height:1.5;}
+  .pubmatch a{color:#9a3412;}
   h2{font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:#0e1726;border-bottom:1px solid #e2e8f0;padding-bottom:6px;margin-top:26px;}
   table{width:100%;border-collapse:collapse;font-size:12px;} td{padding:7px 8px;border-bottom:1px solid #eef2f7;vertical-align:top;}
   td.pct{width:52px;font-weight:700;text-align:center;color:#0e1726;} td.num{width:30px;}
@@ -361,6 +374,23 @@ export function buildReportHtml(args: {
   }%</span><span class="cap">SIMILARITY</span></div>
   <div><div class="verdict">${v.label}</div><div class="vnote">${v.note}</div></div>
 </div>
+${
+  report.publication_match
+    ? `<div class="pubmatch"><b>⚠️ Terdeteksi sebagai publikasi terindeks.</b> ${
+        report.publication_match.containment.toFixed(0)
+      }% teks sumber${
+        report.publication_match.online ? " (abstrak daring)" : ""
+      } termuat di dokumen ini — kemungkinan karya sudah dipublikasikan (atau <i>self-plagiarism</i>/duplikasi). Sumber: ${
+        report.publication_match.url
+          ? `<a href="${escHtml(report.publication_match.url)}" target="_blank" rel="noopener noreferrer">${escHtml(
+              report.publication_match.title || report.publication_match.doi || report.publication_match.url,
+            )}</a>`
+          : escHtml(report.publication_match.title || report.publication_match.doi || "(tanpa judul)")
+      }${
+        report.publication_match.source ? ` · ${escHtml(report.publication_match.source)}` : ""
+      }. <span style="color:#7c2d12">Catatan: sumber daring hanya memaparkan abstrak, sehingga Indeks Kemiripan baris-per-baris tetap rendah; sinyal identitas ini dihitung terpisah.</span></div>`
+    : ""
+}
 <div class="metrics">
   <div><b>${report.word_count}</b> kata</div>
   <div><b>${report.char_count}</b> karakter</div>

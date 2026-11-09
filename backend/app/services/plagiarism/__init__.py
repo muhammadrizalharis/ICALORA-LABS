@@ -71,6 +71,12 @@ _MATCH_MIN = 0.30      # minimum containment shingle agar dihitung sebagai temua
 _VERBATIM_AT = 0.80    # >= ini: dianggap salinan nyaris persis
 _STRUCTURAL_AT = 0.45  # >= ini: kemiripan kuat terstruktur
 
+# Deteksi identitas publikasi (reverse-containment): bila teks SUMBER
+# (mis. abstrak dari OpenAlex) nyaris seluruhnya termuat di dokumen, dokumen
+# kemungkinan adalah publikasi terbit itu sendiri (atau turunannya).
+_PUBMATCH_MIN = 0.75        # >= 75% teks sumber termuat di dokumen → cocok publikasi
+_PUBMATCH_MIN_WORDS = 40    # abaikan sumber terlalu pendek (judul/snippet)
+
 # Bobot kontribusi tiap kategori pada Indeks Integritas (salinan penuh = 1.0,
 # makin "longgar" makin kecil; sumber terkredit tidak menambah risiko).
 _GROUP_WEIGHT = {
@@ -356,6 +362,37 @@ def check_plagiarism(
 
     # Pencocokan tingkat-kalimat (korpus lokal + sumber daring) untuk indeks.
     chunk = _chunk_match(doc, sources + online_sources)
+
+    # ── Deteksi Identitas Publikasi (reverse-containment) ────────────────────
+    # Indeks kemiripan mengukur "berapa % DOKUMEN termuat di sumber". Untuk
+    # sumber daring yang hanya memaparkan ABSTRAK, angka itu kecil walau
+    # dokumen adalah paper terbit itu sendiri. Maka hitung arah sebaliknya:
+    # "berapa % teks SUMBER termuat di dokumen". Abstrak paper sendiri akan
+    # hampir seluruhnya termuat (~100%) → tandai sebagai publikasi terindeks.
+    doc_words = [w.lower() for w in _WORD_RE.findall(doc)]
+    doc_sh = _shingles(doc_words)
+    publication_match: dict | None = None
+    for s in sources + online_sources:
+        body = s.get("_fulltext") or ""
+        swords = [w.lower() for w in _WORD_RE.findall(body)]
+        if len(swords) < _PUBMATCH_MIN_WORDS:
+            s["source_containment"] = 0.0
+            continue
+        ssh = _shingles(swords)
+        containment = len(ssh & doc_sh) / len(ssh) if ssh else 0.0
+        s["source_containment"] = round(containment * 100, 1)
+        if containment >= _PUBMATCH_MIN and (
+            publication_match is None or containment > publication_match["containment"] / 100
+        ):
+            publication_match = {
+                "title": s.get("title"),
+                "doi": s.get("doi"),
+                "url": s.get("url"),
+                "source": s.get("source"),
+                "containment": round(containment * 100, 1),
+                "online": bool(s.get("online")),
+            }
+
     # Skor kemiripan tiap sumber daring diturunkan dari kecocokan kalimatnya
     # (sumber daring tak punya embedding/MinHash tingkat-dokumen).
     best_ratio_by_key: dict[str, float] = {}
@@ -408,6 +445,7 @@ def check_plagiarism(
         "document_lexical_similarity": lexical_doc,
         "paraphrase_similarity": paraphrase,
         "paraphrase_component": paraphrase_component,
+        "publication_match": publication_match,
         "similarity_index": chunk["similarity_index"],
         "matched_sentences": chunk["matched_sentences"],
         "total_sentences": chunk["total_sentences"],

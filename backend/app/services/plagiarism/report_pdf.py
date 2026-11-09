@@ -98,10 +98,14 @@ def _cover_html(report: dict) -> str:
             if s.get("online")
             else ""
         )
+        contain = float(s.get("source_containment", 0) or 0)
+        contain_txt = (
+            f" · abstrak {contain:.0f}% termuat" if s.get("online") and contain else ""
+        )
         src_rows += (
             f'<tr><td style="font-weight:700;width:60px">{sim:.1f}%</td>'
             f'<td><b>{i}. {title}</b>{badge}<div style="color:#64748b;font-size:11px">'
-            f'{meta}{(" · " + str(yr)) if yr else ""}</div></td></tr>'
+            f'{meta}{(" · " + str(yr)) if yr else ""}{contain_txt}</div></td></tr>'
         )
 
     online_note = ""
@@ -111,6 +115,23 @@ def _cover_html(report: dict) -> str:
         online_note = (
             '<div class="note" style="margin-top:6px">🌐 Indeks ini juga mencakup '
             f"pencocokan real-time tanpa-unduh ke sumber daring: {names}.</div>"
+        )
+
+    pub_banner = ""
+    pm = report.get("publication_match")
+    if pm:
+        contain = float(pm.get("containment", 0) or 0)
+        src_label = _esc(str(pm.get("title") or pm.get("doi") or "(tanpa judul)"))
+        src_meta = _esc(str(pm.get("source") or ""))
+        online_tag = " (abstrak daring)" if pm.get("online") else ""
+        pub_banner = (
+            '<div class="pubmatch"><b>⚠️ Terdeteksi sebagai publikasi terindeks.</b> '
+            f"{contain:.0f}% teks sumber{online_tag} termuat di dokumen ini — kemungkinan "
+            "karya sudah dipublikasikan (atau self-plagiarism/duplikasi). Sumber: "
+            f"<b>{src_label}</b>{(' · ' + src_meta) if src_meta else ''}. "
+            "<span style=\"color:#7c2d12\">Catatan: sumber daring hanya memaparkan abstrak, "
+            "sehingga Indeks Kemiripan baris-per-baris tetap rendah; sinyal identitas ini "
+            "dihitung terpisah.</span></div>"
         )
 
     return f"""<!doctype html><html><head><meta charset="utf-8"><style>
@@ -132,12 +153,16 @@ def _cover_html(report: dict) -> str:
     .stat {{ display:inline-block; margin-right:18px; }}
     .stat b {{ font-size:15px; }}
     .note {{ color:#64748b; font-size:11px; margin-top:6px; }}
+    .pubmatch {{ background:#fff7ed; border:1px solid #fdba74; border-left:4px solid #ea580c;
+                 border-radius:8px; padding:9px 13px; margin:12px 0; font-size:11px;
+                 color:#9a3412; line-height:1.5; }}
     </style></head><body>
     <div class="head">
       <div><div class="brand">Ringkasan Integritas</div>
       <div class="sub">ICALORA-LABS · MRH INNOVEX — pemeriksaan mandiri (self-hosted)</div></div>
       <div class="rid">ID: <b>{_esc(rid)}</b><br>Hash: {_esc(sha)}<br>Korpus: {corpus:,} dok.</div>
     </div>
+    {pub_banner}
     <div class="hero">
       <div class="ring"><div class="n">{idx_display}</div><div class="l">INTEGRITAS</div></div>
       <div>
