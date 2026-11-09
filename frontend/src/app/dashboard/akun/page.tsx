@@ -1,7 +1,89 @@
 "use client";
 
+import { useState } from "react";
 import Image from "next/image";
 import { useAuth } from "@/lib/auth";
+
+function AdminPasswordCard() {
+  const { changeAdminPassword } = useAuth();
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setMsg(null);
+    if (next.length < 8) {
+      setMsg({ ok: false, text: "Kata sandi baru minimal 8 karakter." });
+      return;
+    }
+    if (next !== confirm) {
+      setMsg({ ok: false, text: "Konfirmasi kata sandi tidak cocok." });
+      return;
+    }
+    setBusy(true);
+    try {
+      const err = await changeAdminPassword(current, next);
+      if (err) {
+        setMsg({ ok: false, text: err });
+      } else {
+        setMsg({ ok: true, text: "Kata sandi berhasil diubah." });
+        setCurrent("");
+        setNext("");
+        setConfirm("");
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-6 rounded-2xl border border-c surface-2 p-6">
+      <h2 className="mb-1 font-semibold text-neutral-900 dark:text-neutral-50">Ubah Kata Sandi Admin</h2>
+      <p className="mb-4 text-sm text-neutral-400">
+        Kata sandi baru akan menggantikan yang tersimpan di server.
+      </p>
+      <form onSubmit={submit} className="space-y-3">
+        <input
+          type="password"
+          value={current}
+          onChange={(e) => setCurrent(e.target.value)}
+          placeholder="Kata sandi saat ini"
+          autoComplete="current-password"
+          className="w-full rounded-lg border border-c surface px-4 py-2.5 text-sm outline-none focus:border-[color:var(--brand)]"
+        />
+        <input
+          type="password"
+          value={next}
+          onChange={(e) => setNext(e.target.value)}
+          placeholder="Kata sandi baru (min. 8 karakter)"
+          autoComplete="new-password"
+          className="w-full rounded-lg border border-c surface px-4 py-2.5 text-sm outline-none focus:border-[color:var(--brand)]"
+        />
+        <input
+          type="password"
+          value={confirm}
+          onChange={(e) => setConfirm(e.target.value)}
+          placeholder="Ulangi kata sandi baru"
+          autoComplete="new-password"
+          className="w-full rounded-lg border border-c surface px-4 py-2.5 text-sm outline-none focus:border-[color:var(--brand)]"
+        />
+        {msg && (
+          <div className={`text-xs ${msg.ok ? "text-emerald-500" : "text-red-500"}`}>{msg.text}</div>
+        )}
+        <button
+          type="submit"
+          disabled={busy || !current || !next || !confirm}
+          className="rounded-lg bg-[color:var(--brand)] px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50"
+        >
+          {busy ? "Menyimpan…" : "Simpan kata sandi baru"}
+        </button>
+      </form>
+    </div>
+  );
+}
 
 export default function AkunPage() {
   const { user, logout } = useAuth();
@@ -49,6 +131,8 @@ export default function AkunPage() {
           Keluar dari akun
         </button>
       </div>
+
+      {user?.is_admin && <AdminPasswordCard />}
     </div>
   );
 }

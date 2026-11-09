@@ -21,6 +21,11 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 class AdminLoginIn(BaseModel):
     password: str
 
+
+class AdminPasswordIn(BaseModel):
+    current_password: str
+    new_password: str
+
 GOOGLE_AUTH = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN = "https://oauth2.googleapis.com/token"  # noqa: S105
 GOOGLE_USERINFO = "https://openidconnect.googleapis.com/v1/userinfo"
@@ -61,7 +66,7 @@ def me(request: Request) -> dict:
         "authenticated": user is not None,
         "user": user,
         "google_enabled": bool(settings.google_client_id and settings.google_client_secret),
-        "admin_enabled": bool(settings.admin_password),
+        "admin_enabled": svc.admin_configured(),
         "history_retention_days": settings.history_retention_days,
     }
 
@@ -69,16 +74,28 @@ def me(request: Request) -> dict:
 @router.post("/admin-login")
 def admin_login(body: AdminLoginIn, response: Response) -> dict:
     """Login super admin melalui kata sandi privat (tanpa Google)."""
-    import hmac as _hmac
-
-    configured = settings.admin_password
-    if not configured:
+    if not svc.admin_configured():
         raise HTTPException(status_code=503, detail="Super admin belum dikonfigurasi.")
-    if not body.password or not _hmac.compare_digest(body.password, configured):
+    if not svc.verify_admin_password(body.password):
         raise HTTPException(status_code=401, detail="Kata sandi admin salah.")
     user = svc.upsert_admin_user()
     _set_session(response, user["id"])
     return {"ok": True, "user": user}
+
+
+@router.post("/admin-password")
+def admin_password(body: AdminPasswordIn, request: Request) -> dict:
+    """Ubah kata sandi super admin (butuh sesi admin + kata sandi lama)."""
+    user = current_user(request)
+    if not user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Hanya super admin.")
+    if not svc.verify_admin_password(body.current_password):
+        raise HTTPException(status_code=401, detail="Kata sandi lama salah.")
+    new_pw = (body.new_password or "").strip()
+    if len(new_pw) < 8:
+        raise HTTPException(status_code=422, detail="Kata sandi baru minimal 8 karakter.")
+    svc.set_admin_password(new_pw)
+    return {"ok": True}
 
 
 @router.post("/logout")

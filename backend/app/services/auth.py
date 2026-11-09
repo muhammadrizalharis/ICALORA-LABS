@@ -102,7 +102,7 @@ _user_schema_ready = False
 
 
 def ensure_user_schema() -> None:
-    """Pastikan kolom is_admin ada (idempoten)."""
+    """Pastikan kolom is_admin & admin_password_hash ada (idempoten)."""
     global _user_schema_ready
     if _user_schema_ready:
         return
@@ -110,7 +110,70 @@ def ensure_user_schema() -> None:
         c.execute(
             text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE")
         )
+        c.execute(
+            text("ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_password_hash TEXT")
+        )
     _user_schema_ready = True
+
+
+def _hash_password(password: str) -> str:
+    """Hash kata sandi dengan PBKDF2-HMAC-SHA256 (stdlib, bergaram)."""
+    salt = __import__("os").urandom(16)
+    iterations = 200_000
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
+    return f"pbkdf2_sha256${iterations}${salt.hex()}${dk.hex()}"
+
+
+def _verify_password_hash(password: str, stored: str) -> bool:
+    try:
+        algo, iter_s, salt_hex, hash_hex = stored.split("$", 3)
+        if algo != "pbkdf2_sha256":
+            return False
+        dk = hashlib.pbkdf2_hmac(
+            "sha256", password.encode("utf-8"), bytes.fromhex(salt_hex), int(iter_s)
+        )
+        return hmac.compare_digest(dk.hex(), hash_hex)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _admin_password_hash() -> str | None:
+    """Ambil hash kata sandi admin tersimpan (bila sudah pernah diganti)."""
+    ensure_user_schema()
+    with engine.connect() as c:
+        r = c.execute(
+            text("SELECT admin_password_hash FROM users WHERE email = :email"),
+            {"email": settings.admin_email},
+        ).first()
+    return r[0] if r and r[0] else None
+
+
+def admin_configured() -> bool:
+    """Super admin aktif bila kata sandi di-env ATAU sudah diset di DB."""
+    return bool(settings.admin_password) or _admin_password_hash() is not None
+
+
+def verify_admin_password(password: str) -> bool:
+    """Verifikasi kata sandi admin: utamakan hash DB, fallback ke env."""
+    if not password:
+        return False
+    stored = _admin_password_hash()
+    if stored is not None:
+        return _verify_password_hash(password, stored)
+    if settings.admin_password:
+        return hmac.compare_digest(password, settings.admin_password)
+    return False
+
+
+def set_admin_password(new_password: str) -> None:
+    """Simpan kata sandi admin baru (hash) di DB, menimpa nilai env."""
+    upsert_admin_user()
+    h = _hash_password(new_password)
+    with engine.begin() as c:
+        c.execute(
+            text("UPDATE users SET admin_password_hash = :h WHERE email = :email"),
+            {"h": h, "email": settings.admin_email},
+        )
 
 
 def get_user(user_id: int) -> dict | None:
