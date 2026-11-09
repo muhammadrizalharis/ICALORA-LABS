@@ -30,4 +30,5 @@ USER webuser
 EXPOSE 58030
 
 # BACKEND_ORIGIN dipakai Route Handler proxy (default 127.0.0.1:58010 via host net).
-CMD ["npx", "next", "start", "-p", "58030", "-H", "0.0.0.0"]
+# Bind ke 127.0.0.1 saja (host network) — hanya diakses lewat Cloudflare tunnel lokal.
+CMD ["npx", "next", "start", "-p", "58030", "-H", "127.0.0.1"]
