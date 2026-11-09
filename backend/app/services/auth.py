@@ -14,12 +14,48 @@ import hmac
 import json
 import time
 
+import zstandard
 from sqlalchemy import text
 
 from app.core.clients import engine
 from app.core.config import get_settings
 
 settings = get_settings()
+
+_ZSTD_C = zstandard.ZstdCompressor(level=19)
+_ZSTD_D = zstandard.ZstdDecompressor()
+
+
+def _optimize_pdf(data: bytes) -> bytes:
+    """Rapikan PDF (buang objek tak terpakai + deflate stream) tanpa mengubah
+    tampilan. Mengembalikan versi terkecil; aman gagal ke data asli."""
+    try:
+        import pymupdf
+
+        doc = pymupdf.open(stream=data, filetype="pdf")
+        opt = doc.tobytes(garbage=4, deflate=True, clean=True)
+        doc.close()
+        return opt if 0 < len(opt) < len(data) else data
+    except Exception:  # noqa: BLE001
+        return data
+
+
+def _pack_file_bytes(data: bytes, mime: str | None, filename: str | None) -> tuple[bytes, str]:
+    """Kompres berkas untuk disimpan: optimasi PDF (bila PDF) lalu zstd."""
+    body = data
+    is_pdf = (mime or "").lower() == "application/pdf" or (filename or "").lower().endswith(".pdf")
+    if is_pdf:
+        body = _optimize_pdf(data)
+    return _ZSTD_C.compress(body), "zstd"
+
+
+def _unpack_file_bytes(data: bytes, compression: str | None) -> bytes:
+    if compression == "zstd" and data:
+        try:
+            return _ZSTD_D.decompress(data)
+        except Exception:  # noqa: BLE001
+            return data
+    return data
 
 
 def _sign(payload: dict) -> str:
@@ -175,6 +211,12 @@ def ensure_file_schema() -> None:
         c.execute(
             text("CREATE INDEX IF NOT EXISTS idx_tool_file_user ON tool_file(user_id)")
         )
+        c.execute(
+            text("ALTER TABLE tool_file ADD COLUMN IF NOT EXISTS compression text")
+        )
+        c.execute(
+            text("ALTER TABLE tool_file ADD COLUMN IF NOT EXISTS stored_size bigint")
+        )
     _FILE_SCHEMA_READY = True
 
 
@@ -213,15 +255,17 @@ def save_tool_file(
     data: bytes,
     sha256: str | None = None,
 ) -> int | None:
-    """Simpan berkas asli di VM (bytea). Kembalikan id baris."""
+    """Simpan berkas asli di VM (terkompresi). Kembalikan id baris."""
     ensure_file_schema()
+    stored, comp = _pack_file_bytes(data, mime, filename)
     with engine.begin() as c:
         row = c.execute(
             text(
                 """
                 INSERT INTO tool_file
-                    (user_id, history_id, filename, mime, byte_size, sha256, data)
-                VALUES (:uid, :hid, :fn, :mime, :sz, :sha, :data)
+                    (user_id, history_id, filename, mime, byte_size, stored_size,
+                     sha256, data, compression)
+                VALUES (:uid, :hid, :fn, :mime, :sz, :ssz, :sha, :data, :comp)
                 RETURNING id
                 """
             ),
@@ -231,8 +275,10 @@ def save_tool_file(
                 "fn": (filename or "")[:300] or None,
                 "mime": (mime or "")[:120] or None,
                 "sz": len(data),
+                "ssz": len(stored),
                 "sha": sha256,
-                "data": data,
+                "data": stored,
+                "comp": comp,
             },
         ).first()
     return int(row.id) if row else None
@@ -245,7 +291,7 @@ def get_tool_file_by_history(user_id: int, history_id: int) -> dict | None:
     with engine.connect() as c:
         r = c.execute(
             text(
-                "SELECT filename, mime, byte_size, data FROM tool_file "
+                "SELECT filename, mime, byte_size, data, compression FROM tool_file "
                 "WHERE user_id = :uid AND history_id = :hid "
                 "AND created_at >= now() - make_interval(days => :days) "
                 "ORDER BY id DESC LIMIT 1"
@@ -254,11 +300,12 @@ def get_tool_file_by_history(user_id: int, history_id: int) -> dict | None:
         ).first()
     if not r:
         return None
+    raw = bytes(r.data) if r.data is not None else b""
     return {
         "filename": r.filename,
         "mime": r.mime,
         "byte_size": r.byte_size,
-        "data": bytes(r.data) if r.data is not None else b"",
+        "data": _unpack_file_bytes(raw, r.compression),
     }
 
 
