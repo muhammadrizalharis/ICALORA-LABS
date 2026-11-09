@@ -39,9 +39,9 @@ Saat ini hanya `plagiarism-checker` yang punya view khusus; tool lain jatuh ke `
 - [x] **citation-finder** — pemilih gaya sitasi (APA/MLA/Chicago/…) + tombol salin per sumber.
 - [x] **authorship** — skor kemiripan gaya + rincian fitur stilometrik + mode pembanding.
 - [x] **hidden-text** — daftar temuan (karakter tersembunyi, teks putih, typo).
-- [ ] **publikasi-jurnal** — tata letak rekomendasi jurnal + skor kesiapan.
-- [ ] **grammar-checker (writing report)** — daftar isu tata bahasa + teks terkoreksi.
-- [ ] **transkrip-audio** — tampilkan segmen berwaktu (timestamp) + metadata bahasa/durasi/model.
+- [x] **publikasi-jurnal** — tata letak rekomendasi jurnal + skor kesiapan.
+- [x] **grammar-checker (writing report)** — daftar isu tata bahasa + teks terkoreksi.
+- [x] **transkrip-audio** — tampilkan segmen berwaktu (timestamp) + metadata bahasa/durasi/model.
 - [ ] **resume-builder, reader-reactions, daftar-isi, perbaikan-dokumen, ai-rewriter** — rapikan render teks (bukan JSON mentah).
 
 ### 2. Halaman detail "Informasi File + Aksi" (dari screenshot Mulfu, kata-kata orisinal)
