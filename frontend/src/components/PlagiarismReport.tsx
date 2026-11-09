@@ -19,12 +19,13 @@ import {
 } from "@/lib/plagiarismReport";
 
 function ScoreRing({ value, label, tone }: { value: number; label: string; tone: string }) {
+  const display = value > 0 && value < 1 ? "<1" : value < 10 ? value.toFixed(1) : value.toFixed(0);
   return (
     <div className="flex flex-col items-center">
       <div
         className={`flex h-24 w-24 items-center justify-center rounded-full border-4 text-2xl font-bold ${tone}`}
       >
-        {value.toFixed(0)}%
+        {display}%
       </div>
       <div className="mt-2 text-center text-xs font-medium text-neutral-500 dark:text-neutral-400">
         {label}

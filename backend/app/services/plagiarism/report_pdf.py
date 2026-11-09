@@ -57,6 +57,7 @@ def _ring_tone(v: float) -> str:
 def _cover_html(report: dict) -> str:
     """Halaman sampul 'Ringkasan Integritas' — tata letak & istilah orisinal."""
     idx = float(report.get("integrity_index", report.get("overall_similarity", 0)) or 0)
+    idx_display = ("&lt;1%" if 0 < idx < 1 else f"{idx:.1f}%" if idx < 10 else f"{idx:.0f}%")
     copy_sim = float(report.get("copy_similarity", 0) or 0)
     para = float(report.get("paraphrase_similarity", 0) or 0)
     wc = int(report.get("word_count", 0) or 0)
@@ -123,7 +124,7 @@ def _cover_html(report: dict) -> str:
       <div class="rid">ID: <b>{_esc(rid)}</b><br>Hash: {_esc(sha)}<br>Korpus: {corpus:,} dok.</div>
     </div>
     <div class="hero">
-      <div class="ring"><div class="n">{idx:.0f}%</div><div class="l">INTEGRITAS</div></div>
+      <div class="ring"><div class="n">{idx_display}</div><div class="l">INTEGRITAS</div></div>
       <div>
         <div style="font-size:16px;font-weight:700">Indeks Integritas {idx:.1f}%</div>
         <div class="note">Gabungan tumpang-tindih teks ({copy_sim:.1f}%) dan indikasi
