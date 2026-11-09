@@ -1,5 +1,7 @@
 """Endpoint fitur ringan Fase 1."""
 
+import asyncio
+
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response
@@ -18,6 +20,7 @@ from app.services.authorship import analyze_authorship
 from app.services.citation import find_citations
 from app.services.file_extract import MAX_UPLOAD_BYTES, extract_text
 from app.services.hidden_text import check_hidden_text
+from app.services.jobs import complete_job, create_job, fail_job, get_job
 from app.services.llm.tasks import (
     build_resume,
     chat,
@@ -290,6 +293,111 @@ async def plagiarism_file_ep(  # noqa: B008
     except Exception:  # noqa: BLE001, S110
         pass
     return res
+
+
+# ── Pekerjaan latar-belakang (async) untuk cek plagiarisme ───────────────────
+# Menghindari koneksi HTTP panjang (rawan timeout proxy): submit → job_id →
+# polling status. Pemrosesan berjalan di event loop backend.
+_BG_TASKS: set = set()
+
+
+def _spawn(coro) -> None:
+    task = asyncio.create_task(coro)
+    _BG_TASKS.add(task)
+    task.add_done_callback(_BG_TASKS.discard)
+
+
+async def _job_run_text(job_id: str, user_id: int | None, text: str, top_k: int, title: str) -> None:
+    try:
+        res = await _run_plagiarism_merged(text, top_k)
+        hist_id = None
+        if user_id is not None:
+            hist_id = await run_in_threadpool(
+                record_history, user_id, "plagiarism-checker", title, text[:200], res
+            )
+        complete_job(job_id, hist_id)
+    except Exception as exc:  # noqa: BLE001
+        fail_job(job_id, str(exc))
+
+
+async def _job_run_file(
+    job_id: str, user_id: int | None, text: str, data: bytes, filename: str | None,
+    is_pdf: bool, top_k: int,
+) -> None:
+    try:
+        res = await _run_plagiarism_merged(text, top_k)
+        res["has_original_pdf"] = is_pdf
+        res["source_filename"] = filename
+        hist_id = None
+        if user_id is not None:
+            hist_id = await run_in_threadpool(
+                record_history, user_id, "plagiarism-checker",
+                filename or "Cek Plagiarisme", text[:200], res,
+            )
+            if hist_id and is_pdf:
+                await run_in_threadpool(
+                    save_tool_file, user_id, hist_id, filename, "application/pdf",
+                    data, res.get("content_sha256"),
+                )
+        complete_job(job_id, hist_id)
+    except Exception as exc:  # noqa: BLE001
+        fail_job(job_id, str(exc))
+
+
+@router.post("/plagiarism-async")
+async def plagiarism_async_ep(body: PlagiarismIn, request: Request) -> dict:
+    """Mulai cek plagiarisme di latar belakang; kembalikan `job_id` segera."""
+    _guard(body.text)
+    user = optional_user_from_request(request)
+    uid = user["id"] if user else None
+    title = body.text[:60].strip() or "Cek Plagiarisme"
+    job_id = create_job(uid, "plagiarism-checker", title)
+    _spawn(_job_run_text(job_id, uid, body.text, body.top_k, title))
+    return {"job_id": job_id, "status": "processing"}
+
+
+@router.post("/plagiarism-file-async")
+async def plagiarism_file_async_ep(  # noqa: B008
+    request: Request,
+    file: UploadFile = File(...),  # noqa: B008
+    top_k: int = 30,
+) -> dict:
+    """Versi async dari cek berkas; kembalikan `job_id` segera."""
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Berkas kosong.")
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413, detail=f"Berkas melebihi {MAX_UPLOAD_BYTES // (1024 * 1024)} MB."
+        )
+    try:
+        text = extract_text(file.filename or "", data).strip()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not text:
+        raise HTTPException(status_code=422, detail="Tidak ada teks yang dapat diekstrak.")
+    _guard(text)
+    user = optional_user_from_request(request)
+    uid = user["id"] if user else None
+    is_pdf = (file.filename or "").lower().endswith(".pdf")
+    job_id = create_job(uid, "plagiarism-checker", file.filename or "Cek Plagiarisme")
+    _spawn(
+        _job_run_file(
+            job_id, uid, text, data, file.filename, is_pdf, min(max(top_k, 1), 60)
+        )
+    )
+    return {"job_id": job_id, "status": "processing"}
+
+
+@router.get("/job/{job_id}")
+def job_status_ep(job_id: str, request: Request) -> dict:
+    """Status pekerjaan latar-belakang: processing | done | error."""
+    user = optional_user_from_request(request)
+    uid = user["id"] if user else None
+    job = get_job(job_id, uid)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job tidak ditemukan.")
+    return job
 
 
 @router.get("/plagiarism-report/{history_id}")

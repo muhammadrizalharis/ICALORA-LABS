@@ -44,10 +44,25 @@ _MAILTO = "noreply@icalora-labs.local"  # OpenAlex/Crossref "polite pool"
 
 
 async def _get_json(client: httpx.AsyncClient, url: str, params: dict, headers: dict | None = None):
-    """GET dengan satu kali percobaan ulang untuk menahan kegagalan sesaat."""
+    """GET dengan satu kali percobaan ulang untuk menahan kegagalan sesaat.
+
+    Penanganan batas-laju: pada HTTP 429, jangan buang waktu mencoba ulang
+    secara membabi-buta (akan 429 lagi). Hormati header `Retry-After` hanya
+    bila nilainya kecil (<=2 dtk); selebihnya menyerah anggun → hasil kosong.
+    """
     for attempt in range(2):
         try:
             r = await client.get(url, params=params, headers=headers)
+            if r.status_code == 429:
+                ra = r.headers.get("Retry-After")
+                try:
+                    delay = float(ra) if ra is not None else 0.0
+                except ValueError:
+                    delay = 0.0
+                if attempt == 0 and 0 < delay <= 2.0:
+                    await asyncio.sleep(delay)
+                    continue
+                return None  # batas-laju gigih → menyerah tanpa buang waktu
             r.raise_for_status()
             return r
         except Exception:  # noqa: BLE001
