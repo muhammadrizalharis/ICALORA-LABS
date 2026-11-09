@@ -578,7 +578,280 @@ function HiddenTextView({ result }: { result: Record<string, unknown> }) {
   );
 }
 
-/* ───────────────────────────── dispatcher ──────────────────────────────── */
+/* ──────────────────────────── Grammar Checker ──────────────────────────── */
+
+const GRAMMAR_METRIC_LABELS: Record<string, string> = {
+  characters: "Karakter",
+  words: "Kata",
+  sentences: "Kalimat",
+  reading_time_min: "Waktu baca (mnt)",
+  speaking_time_min: "Waktu bicara (mnt)",
+};
+
+function GrammarCheckerView({ result }: { result: Record<string, unknown> }) {
+  const score = num(result.score);
+  const better = num(result.better_than_percent);
+  const metrics = (result.metrics as Record<string, number>) ?? {};
+  const issues = Array.isArray(result.issues)
+    ? (result.issues as Record<string, unknown>[])
+    : [];
+  const summary = (result.issue_summary as Record<string, number>) ?? {};
+  const tone = score === null ? "var(--brand)" : toneFor(100 - score);
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center gap-6 rounded-xl border border-c surface-2 p-5">
+        {score !== null && <Gauge value={score} label="Skor Penulisan" tone={tone} />}
+        <div className="min-w-0 flex-1 space-y-3">
+          {better !== null && <Pill tone={tone}>Lebih baik dari {better}% dokumen</Pill>}
+          <div className="flex flex-wrap gap-3 text-xs">
+            {num(summary.critical) !== null && (
+              <span className="rounded-lg border border-c surface px-3 py-1.5">
+                <span className="font-bold text-red-500">{summary.critical}</span> kritis
+              </span>
+            )}
+            {num(summary.advanced) !== null && (
+              <span className="rounded-lg border border-c surface px-3 py-1.5">
+                <span className="font-bold text-amber-500">{summary.advanced}</span> lanjutan
+              </span>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {Object.entries(GRAMMAR_METRIC_LABELS)
+              .filter(([k]) => num(metrics[k]) !== null)
+              .map(([k, label]) => (
+                <div key={k} className="rounded-lg border border-c surface px-3 py-1.5 text-xs">
+                  <span className="font-semibold text-neutral-900 dark:text-neutral-100">
+                    {metrics[k]}
+                  </span>{" "}
+                  <span className="text-neutral-400">{label}</span>
+                </div>
+              ))}
+          </div>
+        </div>
+      </div>
+
+      {issues.length > 0 && (
+        <Section title={`Isu Tata Bahasa (${issues.length})`}>
+          <ul className="space-y-3">
+            {issues.map((it, i) => {
+              const sev = (it.severity as string) ?? "advanced";
+              const col = sev === "critical" ? "#ef4444" : "#f59e0b";
+              return (
+                <li
+                  key={i}
+                  className="rounded-lg border-l-2 px-3 py-2"
+                  style={{ borderColor: col, background: `color-mix(in srgb, ${col} 5%, transparent)` }}
+                >
+                  <div className="mb-1 flex items-center gap-2">
+                    <Pill tone={col}>{(it.category as string) ?? "Ketepatan"}</Pill>
+                    <span className="text-[11px] uppercase text-neutral-400">{sev}</span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 text-sm">
+                    <span className="font-mono text-red-500 line-through">
+                      {(it.original as string) ?? ""}
+                    </span>
+                    {(it.suggestion as string) && (
+                      <>
+                        <span className="text-neutral-400">→</span>
+                        <span className="font-mono text-emerald-600 dark:text-emerald-400">
+                          {it.suggestion as string}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                  {(it.explanation as string) && (
+                    <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+                      {it.explanation as string}
+                    </p>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </Section>
+      )}
+
+      {typeof result.corrected === "string" && (
+        <Section title="Teks Terkoreksi" right={<CopyButton text={result.corrected as string} />}>
+          <p className="max-h-64 overflow-auto whitespace-pre-wrap text-sm leading-relaxed text-neutral-800 dark:text-neutral-200">
+            {result.corrected as string}
+          </p>
+        </Section>
+      )}
+    </div>
+  );
+}
+
+/* ──────────────────────────── Publikasi Jurnal ─────────────────────────── */
+
+function PublikasiJurnalView({ result }: { result: Record<string, unknown> }) {
+  const readiness = (result.readiness as Record<string, unknown>) ?? {};
+  const score = num(readiness.readiness_score);
+  const matches = Array.isArray(result.matches)
+    ? (result.matches as Record<string, unknown>[])
+    : [];
+  const fields = Array.isArray(result.fields)
+    ? (result.fields as Record<string, unknown>[])
+    : [];
+  const sources = Array.isArray(result.sources)
+    ? (result.sources as Record<string, unknown>[])
+    : [];
+
+  return (
+    <div className="space-y-5">
+      {(score !== null || typeof readiness.advice === "string") && (
+        <div className="flex flex-wrap items-center gap-6 rounded-xl border border-c surface-2 p-5">
+          {score !== null && <Gauge value={score} label="Kesiapan Publikasi" tone={toneFor(100 - score)} />}
+          {typeof readiness.advice === "string" && (
+            <p className="min-w-0 flex-1 text-sm leading-relaxed text-neutral-700 dark:text-neutral-300">
+              {readiness.advice}
+            </p>
+          )}
+        </div>
+      )}
+
+      {(fields.length > 0 || sources.length > 0) && (
+        <div className="grid gap-3 sm:grid-cols-2">
+          {fields.length > 0 && (
+            <Section title="Bidang Terkait">
+              <div className="flex flex-wrap gap-2">
+                {fields.map((f, i) => (
+                  <span key={i} className="rounded-full border border-c surface px-3 py-1 text-xs">
+                    {(f.field as string) ?? ""}{" "}
+                    <span className="text-neutral-400">{(f.count as number) ?? ""}</span>
+                  </span>
+                ))}
+              </div>
+            </Section>
+          )}
+          {sources.length > 0 && (
+            <Section title="Sumber Indeks">
+              <ul className="space-y-1.5 text-xs">
+                {sources.map((s, i) => (
+                  <li key={i} className="flex items-center justify-between">
+                    <span className="text-neutral-600 dark:text-neutral-300">
+                      {(s.label as string) ?? (s.source as string) ?? ""}
+                    </span>
+                    <span className="font-semibold text-neutral-800 dark:text-neutral-100">
+                      {(s.count as number) ?? ""}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </Section>
+          )}
+        </div>
+      )}
+
+      {matches.length > 0 && (
+        <Section title={`Rekomendasi Jurnal / Rujukan (${matches.length})`}>
+          <ul className="space-y-3">
+            {matches.map((m, i) => {
+              const rel = num(m.relevance);
+              const doi = m.doi as string | undefined;
+              return (
+                <li key={i} className="rounded-lg border border-c surface p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                        {(m.title as string) ?? "[Judul tidak tersedia]"}
+                      </div>
+                      <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-neutral-400">
+                        {m.source != null && <span className="uppercase">{m.source as string}</span>}
+                        {m.pub_year != null && <span>{m.pub_year as number}</span>}
+                        {doi && (
+                          <a
+                            href={`https://doi.org/${doi}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[color:var(--brand)] hover:underline"
+                          >
+                            DOI
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                    {rel !== null && <Pill>{fmtPct(rel)}%</Pill>}
+                  </div>
+                  {(m.snippet as string) && (
+                    <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">
+                      {m.snippet as string}
+                    </p>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </Section>
+      )}
+    </div>
+  );
+}
+
+/* ──────────────────────────── Transkrip Audio ──────────────────────────── */
+
+function fmtTime(sec: number): string {
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+function TranscriptView({ result }: { result: Record<string, unknown> }) {
+  const segments = Array.isArray(result.segments)
+    ? (result.segments as Record<string, unknown>[])
+    : [];
+  const meta: [string, unknown][] = [
+    ["Bahasa", result.language],
+    ["Keyakinan bahasa", num(result.language_probability) !== null ? `${Math.round((result.language_probability as number) * 100)}%` : null],
+    ["Durasi", num(result.duration) !== null ? fmtTime(result.duration as number) : null],
+    ["Model", result.model],
+  ];
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap gap-3 rounded-xl border border-c surface-2 p-5">
+        {meta
+          .filter(([, v]) => v != null && v !== "")
+          .map(([label, v]) => (
+            <div key={label} className="rounded-lg border border-c surface px-4 py-2">
+              <div className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                {String(v)}
+              </div>
+              <div className="text-[11px] text-neutral-400">{label}</div>
+            </div>
+          ))}
+      </div>
+
+      {segments.length > 0 && (
+        <Section title={`Segmen Berwaktu (${segments.length})`}>
+          <ul className="max-h-80 space-y-1.5 overflow-auto">
+            {segments.map((seg, i) => (
+              <li key={i} className="flex gap-3 text-sm">
+                <span className="shrink-0 font-mono text-[11px] text-[color:var(--brand)]">
+                  {num(seg.start) !== null ? fmtTime(seg.start as number) : "—"}
+                </span>
+                <span className="text-neutral-700 dark:text-neutral-300">
+                  {(seg.text as string) ?? ""}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </Section>
+      )}
+
+      {typeof result.text === "string" && (
+        <Section title="Transkrip Lengkap" right={<CopyButton text={result.text as string} />}>
+          <p className="max-h-64 overflow-auto whitespace-pre-wrap text-sm leading-relaxed text-neutral-800 dark:text-neutral-200">
+            {result.text as string}
+          </p>
+        </Section>
+      )}
+    </div>
+  );
+}
+
+/* ──────────────────────────── dispatcher ───────────────────────────────── */
 
 const VIEWS: Record<string, (p: { result: Record<string, unknown> }) => React.ReactElement> = {
   "ai-detector": AiDetectorView,
@@ -586,6 +859,9 @@ const VIEWS: Record<string, (p: { result: Record<string, unknown> }) => React.Re
   "citation-finder": CitationFinderView,
   authorship: AuthorshipView,
   "hidden-text": HiddenTextView,
+  "grammar-checker": GrammarCheckerView,
+  "publikasi-jurnal": PublikasiJurnalView,
+  "transkrip-audio": TranscriptView,
 };
 
 export function hasRichToolView(tool: string): boolean {
