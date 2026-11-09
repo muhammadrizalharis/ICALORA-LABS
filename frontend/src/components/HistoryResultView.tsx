@@ -6,6 +6,7 @@ import { getFeature } from "@/lib/features";
 import ReportBar from "@/components/ReportBar";
 import { escapeHtml } from "@/lib/report";
 import PlagiarismReport from "@/components/PlagiarismReport";
+import RichToolResult, { hasRichToolView } from "@/components/ToolResultViews";
 import type { Report } from "@/lib/plagiarismReport";
 
 export interface HistoryItemFull {
@@ -109,6 +110,7 @@ export default function HistoryResultView({ item }: { item: HistoryItemFull }) {
 
   const isPlagiarism =
     item.tool === "plagiarism-checker" && Array.isArray(result.matched_passages);
+  const isRich = !isPlagiarism && hasRichToolView(item.tool);
 
   const scoreEntry = SCORE_KEYS.find(
     (s) => s.key in result && typeof result[s.key] === "number",
@@ -166,6 +168,18 @@ export default function HistoryResultView({ item }: { item: HistoryItemFull }) {
           docTitle={item.title ?? undefined}
           historyId={item.id}
         />
+      ) : isRich ? (
+        <div className="space-y-5">
+          <RichToolResult tool={item.tool} result={result} />
+          <details className="rounded-xl border border-c surface-2 p-4">
+            <summary className="cursor-pointer text-xs font-medium text-neutral-500 dark:text-neutral-400">
+              Data mentah (JSON)
+            </summary>
+            <pre className="mt-2 max-h-80 overflow-auto rounded-lg surface p-3 text-[11px] leading-relaxed text-neutral-600 dark:text-neutral-400">
+              {JSON.stringify(result, null, 2)}
+            </pre>
+          </details>
+        </div>
       ) : (
         <GenericResult
           result={result}

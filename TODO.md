@@ -34,11 +34,11 @@
 ### 1. Tampilan hasil kaya per-tool (prioritas tinggi)
 Saat ini hanya `plagiarism-checker` yang punya view khusus; tool lain jatuh ke `GenericResult` yang generik. Buat view bespoke di dalam unified viewer untuk:
 
-- [ ] **ai-detector** — gauge probabilitas AI + highlight per-kalimat.
-- [ ] **ai-grader** — bar per-kriteria + ring nilai huruf + daftar saran.
-- [ ] **citation-finder** — pemilih gaya sitasi (APA/MLA/Chicago/…) + tombol salin per sumber.
-- [ ] **authorship** — skor kemiripan gaya + rincian fitur stilometrik + mode pembanding.
-- [ ] **hidden-text** — daftar temuan (karakter tersembunyi, teks putih, typo).
+- [x] **ai-detector** — gauge probabilitas AI + highlight per-kalimat.
+- [x] **ai-grader** — bar per-kriteria + ring nilai huruf + daftar saran.
+- [x] **citation-finder** — pemilih gaya sitasi (APA/MLA/Chicago/…) + tombol salin per sumber.
+- [x] **authorship** — skor kemiripan gaya + rincian fitur stilometrik + mode pembanding.
+- [x] **hidden-text** — daftar temuan (karakter tersembunyi, teks putih, typo).
 - [ ] **publikasi-jurnal** — tata letak rekomendasi jurnal + skor kesiapan.
 - [ ] **grammar-checker (writing report)** — daftar isu tata bahasa + teks terkoreksi.
 - [ ] **transkrip-audio** — tampilkan segmen berwaktu (timestamp) + metadata bahasa/durasi/model.
