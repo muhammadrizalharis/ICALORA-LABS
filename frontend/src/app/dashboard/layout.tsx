@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import DashboardSidebar from "@/components/DashboardSidebar";
+import ThemeToggle from "@/components/ThemeToggle";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { loading, user } = useAuth();
@@ -25,7 +26,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   return (
     <div className="flex min-h-screen">
       <DashboardSidebar />
-      <div className="flex-1 overflow-x-hidden">{children}</div>
+      <div className="relative flex-1 overflow-x-hidden">
+        <div className="pointer-events-none absolute right-4 top-4 z-20">
+          <div className="pointer-events-auto">
+            <ThemeToggle />
+          </div>
+        </div>
+        {children}
+      </div>
     </div>
   );
 }

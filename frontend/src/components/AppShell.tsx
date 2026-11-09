@@ -5,7 +5,7 @@ import TopNav from "@/components/TopNav";
 import Footer from "@/components/Footer";
 
 // Sembunyikan navbar/footer publik di area aplikasi (dashboard & login).
-const BARE_PREFIXES = ["/dashboard", "/login"];
+const BARE_PREFIXES = ["/dashboard", "/login", "/admin-000"];
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() || "/";

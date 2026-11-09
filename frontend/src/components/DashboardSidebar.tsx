@@ -5,7 +5,6 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { FEATURES } from "@/lib/features";
 import { useAuth } from "@/lib/auth";
-import ThemeToggle from "@/components/ThemeToggle";
 
 const activeFeatures = FEATURES.filter((f) => f.status === "active");
 
@@ -68,11 +67,8 @@ export default function DashboardSidebar() {
       </nav>
 
       <div className="border-t border-c p-3">
-        <div className="mb-2 flex items-center justify-between">
-          <span className="truncate text-xs text-neutral-500 dark:text-neutral-400">
-            {user?.name ?? user?.email ?? "Tamu"}
-          </span>
-          <ThemeToggle />
+        <div className="mb-2 truncate text-xs text-neutral-500 dark:text-neutral-400">
+          {user?.name ?? user?.email ?? "Tamu"}
         </div>
         <button
           onClick={logout}

@@ -9,11 +9,17 @@ import httpx
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 
+from pydantic import BaseModel
+
 from app.core.config import get_settings
 from app.services import auth as svc
 
 settings = get_settings()
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+class AdminLoginIn(BaseModel):
+    password: str
 
 GOOGLE_AUTH = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN = "https://oauth2.googleapis.com/token"  # noqa: S105
@@ -55,16 +61,22 @@ def me(request: Request) -> dict:
         "authenticated": user is not None,
         "user": user,
         "google_enabled": bool(settings.google_client_id and settings.google_client_secret),
-        "demo_enabled": settings.allow_demo_login,
+        "admin_enabled": bool(settings.admin_password),
         "history_retention_days": settings.history_retention_days,
     }
 
 
-@router.post("/demo-login")
-def demo_login(response: Response) -> dict:
-    if not settings.allow_demo_login:
-        raise HTTPException(status_code=403, detail="Demo login dinonaktifkan.")
-    user = svc.create_demo_user()
+@router.post("/admin-login")
+def admin_login(body: AdminLoginIn, response: Response) -> dict:
+    """Login super admin melalui kata sandi privat (tanpa Google)."""
+    import hmac as _hmac
+
+    configured = settings.admin_password
+    if not configured:
+        raise HTTPException(status_code=503, detail="Super admin belum dikonfigurasi.")
+    if not body.password or not _hmac.compare_digest(body.password, configured):
+        raise HTTPException(status_code=401, detail="Kata sandi admin salah.")
+    user = svc.upsert_admin_user()
     _set_session(response, user["id"])
     return {"ok": True, "user": user}
 

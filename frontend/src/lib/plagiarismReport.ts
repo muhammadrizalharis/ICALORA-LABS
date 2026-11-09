@@ -364,9 +364,7 @@ export function buildReportHtml(args: {
   }ICALORA-LABS · MRH INNOVEX — Deteksi plagiarisme yang sah &amp; terpercaya (self-hosted)</div></div>
   <div class="sid">ID Laporan: <b>${escHtml(report.report_id || "-")}</b><br>Dibuat ${escHtml(
     report.generated_at ? new Date(report.generated_at).toLocaleString("id-ID") : now,
-  )}<br>Dibandingkan dengan <b>${(report.corpus_size || 0).toLocaleString(
-    "id-ID",
-  )}</b> dokumen akses-terbuka (CC0/CC-BY)</div>
+  )}<br>Korpus akses-terbuka (CC0/CC-BY)</div>
 </div>
 <div class="hero">
   <div class="ring ${ringCls}"><span class="big">${
@@ -378,9 +376,7 @@ ${
   report.publication_match
     ? `<div class="pubmatch"><b>⚠️ Terdeteksi sebagai publikasi terindeks.</b> ${
         report.publication_match.containment.toFixed(0)
-      }% teks sumber${
-        report.publication_match.online ? " (abstrak daring)" : ""
-      } termuat di dokumen ini — kemungkinan karya sudah dipublikasikan (atau <i>self-plagiarism</i>/duplikasi). Sumber: ${
+      }% teks sumber termuat di dokumen ini — kemungkinan karya sudah dipublikasikan (atau <i>self-plagiarism</i>/duplikasi). Sumber: ${
         report.publication_match.url
           ? `<a href="${escHtml(report.publication_match.url)}" target="_blank" rel="noopener noreferrer">${escHtml(
               report.publication_match.title || report.publication_match.doi || report.publication_match.url,
@@ -388,24 +384,17 @@ ${
           : escHtml(report.publication_match.title || report.publication_match.doi || "(tanpa judul)")
       }${
         report.publication_match.source ? ` · ${escHtml(report.publication_match.source)}` : ""
-      }. <span style="color:#7c2d12">Catatan: sumber daring hanya memaparkan abstrak, sehingga Indeks Kemiripan baris-per-baris tetap rendah; sinyal identitas ini dihitung terpisah.</span></div>`
+      }.</div>`
     : ""
 }
 <div class="metrics">
   <div><b>${report.word_count}</b> kata</div>
   <div><b>${report.char_count}</b> karakter</div>
   <div><b>${report.matched_sentences}/${report.total_sentences}</b> kalimat cocok persis</div>
-  <div><b>${report.paraphrase_similarity.toFixed(0)}%</b> risiko parafrase (semantik, ~${(report.semantic_coverage_pct ?? 0).toFixed(0)}% korpus)</div>
-  <div><b>${(report.corpus_size || 0).toLocaleString("id-ID")}</b> dokumen · deteksi salinan penuh · <b>${report.sources.length}</b> sumber teratas</div>
+  <div><b>${report.paraphrase_similarity.toFixed(0)}%</b> risiko parafrase (semantik)</div>
+  <div>deteksi salinan penuh · <b>${report.sources.length}</b> sumber teratas</div>
 </div>
 ${report.coverage_note ? `<p class="legend">${escHtml(report.coverage_note)}</p>` : ""}
-${
-  report.online_merged && report.online_providers && report.online_providers.length
-    ? `<p class="legend">🌐 Juga diperiksa real-time terhadap sumber daring tanpa-unduh: ${escHtml(
-        report.online_providers.map((p) => p.name).join(", "),
-      )}.</p>`
-    : ""
-}
 ${groupsHtml}
 ${
   overview
@@ -416,9 +405,7 @@ ${
 <div class="doc">${hiText || escHtml(text)}</div>
 <p class="legend">Setiap teks tersorot diberi <b>penanda nomor bulat</b> sesuai sumbernya pada Ringkasan Kecocokan di atas. Klik penanda untuk melompat ke sumber terkait.</p>
 <h2>Sumber Teratas</h2><table>${sources}</table>
-<footer>Dibandingkan dengan <b>${(report.corpus_size || 0).toLocaleString(
-    "id-ID",
-  )}</b> dokumen korpus akses-terbuka ICALORA-LABS. ID Laporan <b>${escHtml(
+<footer>Dibandingkan dengan korpus akses-terbuka ICALORA-LABS. ID Laporan <b>${escHtml(
     report.report_id || "-",
   )}</b> · Hash integritas SHA-256: ${escHtml(
     (report.content_sha256 || "").slice(0, 32),

@@ -5,6 +5,12 @@ import { useEffect, useState } from "react";
 type Theme = "light" | "dark" | "system";
 
 const STORAGE_KEY = "theme";
+const CYCLE: Theme[] = ["light", "dark", "system"];
+const META: Record<Theme, { icon: string; label: string }> = {
+  light: { icon: "☀️", label: "Terang" },
+  dark: { icon: "🌙", label: "Gelap" },
+  system: { icon: "🖥️", label: "Sistem" },
+};
 
 function systemDark(): boolean {
   return window.matchMedia("(prefers-color-scheme: dark)").matches;
@@ -14,12 +20,6 @@ function applyTheme(theme: Theme) {
   const dark = theme === "dark" || (theme === "system" && systemDark());
   document.documentElement.classList.toggle("dark", dark);
 }
-
-const OPTIONS: { value: Theme; label: string; icon: string }[] = [
-  { value: "light", label: "Terang", icon: "☀️" },
-  { value: "dark", label: "Gelap", icon: "🌙" },
-  { value: "system", label: "Sistem", icon: "🖥️" },
-];
 
 export default function ThemeToggle() {
   const [theme, setTheme] = useState<Theme>("system");
@@ -40,7 +40,8 @@ export default function ThemeToggle() {
     return () => mq.removeEventListener("change", handler);
   }, [theme]);
 
-  function choose(next: Theme) {
+  function cycle() {
+    const next = CYCLE[(CYCLE.indexOf(theme) + 1) % CYCLE.length];
     setTheme(next);
     localStorage.setItem(STORAGE_KEY, next);
     applyTheme(next);
@@ -48,31 +49,19 @@ export default function ThemeToggle() {
 
   // Hindari mismatch hydration: render placeholder sampai mounted.
   if (!mounted) {
-    return <div className="h-9 rounded-lg bg-neutral-200/60 dark:bg-neutral-800/60" />;
+    return <div className="h-9 w-9 rounded-full bg-neutral-200/60 dark:bg-neutral-800/60" />;
   }
 
+  const meta = META[theme];
   return (
-    <div className="flex gap-1 rounded-lg bg-neutral-200/70 p-1 dark:bg-neutral-800/70">
-      {OPTIONS.map((opt) => {
-        const active = theme === opt.value;
-        return (
-          <button
-            key={opt.value}
-            type="button"
-            onClick={() => choose(opt.value)}
-            title={opt.label}
-            aria-pressed={active}
-            className={`flex-1 rounded-md px-2 py-1 text-xs font-medium transition ${
-              active
-                ? "bg-white text-neutral-900 shadow-sm dark:bg-neutral-950 dark:text-white"
-                : "text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200"
-            }`}
-          >
-            <span aria-hidden>{opt.icon}</span>
-            <span className="ml-1">{opt.label}</span>
-          </button>
-        );
-      })}
-    </div>
+    <button
+      type="button"
+      onClick={cycle}
+      title={`Tema: ${meta.label} (klik untuk ganti)`}
+      aria-label={`Tema: ${meta.label}`}
+      className="flex h-9 w-9 items-center justify-center rounded-full border border-c surface-2 text-base transition hover:bg-neutral-100 dark:hover:bg-neutral-800"
+    >
+      <span aria-hidden>{meta.icon}</span>
+    </button>
   );
 }

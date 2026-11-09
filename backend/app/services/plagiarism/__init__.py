@@ -236,6 +236,37 @@ _NEAREST = text(
     """
 )
 
+# Pencarian teks-penuh langsung berdasarkan DOI (memakai index lower(doi)).
+# Menjangkau SELURUH korpus — termasuk dokumen yang belum di-embed — sehingga
+# paper terbit yang DOI-nya tertera di dokumen dapat dicocokkan teks-penuh
+# (bukan sekadar abstrak), menghasilkan skor yang jujur (mendekati 100% untuk
+# karya sendiri yang sudah terbit & terindeks).
+_BY_DOI = text(
+    """
+    SELECT d.id, d.source, d.external_id, d.doi, d.title, d.pub_year,
+           d.text_zstd, f.minhash
+    FROM corpus_documents d
+    LEFT JOIN corpus_fingerprints f ON f.doc_id = d.id
+    WHERE lower(d.doi) = ANY(:dois)
+    LIMIT :k
+    """
+)
+
+_DOI_RE = re.compile(r"10\.\d{4,9}/[-._;()/:A-Za-z0-9]+", re.UNICODE)
+
+
+def _extract_dois(doc: str, limit: int = 8) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for m in _DOI_RE.finditer(doc):
+        d = m.group(0).rstrip(".,);]").lower()
+        if d not in seen:
+            seen.add(d)
+            out.append(d)
+        if len(out) >= limit:
+            break
+    return out
+
 
 def _vec_literal(vec: list[float]) -> str:
     return "[" + ",".join(f"{x:.6f}" for x in vec) + "]"
@@ -301,6 +332,14 @@ def check_plagiarism(
     ef = _EF_SEARCH if len(qvecs) <= 1 else _EF_SEARCH_MULTI
     per_k = max(top_k, 15)
     best: dict[int, dict] = {}
+    # DOI yang tertera di dokumen (mis. header paper terbit) + DOI dari kandidat
+    # daring → pencocokan teks-penuh langsung ke korpus lokal (seluruh korpus,
+    # termasuk yang belum di-embed).
+    doi_wanted = set(_extract_dois(doc))
+    for c in extra_candidates or []:
+        d = (c.get("doi") or "").strip().lower()
+        if d:
+            doi_wanted.add(d)
     with engine.connect() as conn:
         _set_ef_search(conn, ef)
         for qv in qvecs:
@@ -310,7 +349,18 @@ def check_plagiarism(
                 cur = best.get(r.id)
                 if cur is None or cs > cur["cos"]:
                     best[r.id] = {"row": r, "cos": cs}
+        doi_rows = []
+        if doi_wanted:
+            doi_rows = conn.execute(
+                _BY_DOI, {"dois": list(doi_wanted), "k": 50}
+            ).all()
     ranked = sorted(best.values(), key=lambda x: x["cos"], reverse=True)[:top_k]
+    # Dokumen hasil pencocokan DOI dimasukkan sebagai kandidat teks-penuh.
+    # Skor semantiknya tidak dipalsukan (cos=0); copy_index tingkat-kalimat,
+    # MinHash, dan reverse-containment yang menilai kemiripan sebenarnya.
+    for r in doi_rows:
+        if r.id not in best:
+            ranked.append({"row": r, "cos": 0.0})
 
     sources: list[dict] = []
     for item in ranked:
@@ -409,6 +459,15 @@ def check_plagiarism(
         s["similarity"] = round(ratio, 1)
         kept_online.append(s)
 
+    # Sumber lokal (termasuk hasil match DOI yang tak punya MinHash) juga
+    # mendapat skor dari rasio kecocokan kalimat bila lebih tinggi — agar paper
+    # terbit yang sama tampil dengan persentase yang jujur, bukan 0%.
+    for s in sources:
+        key = (s.get("doi") or s.get("title") or "").lower().strip()
+        ratio = best_ratio_by_key.get(key, 0.0)
+        if ratio > s.get("similarity", 0.0):
+            s["similarity"] = round(ratio, 1)
+
     sources.extend(kept_online)
     for s in sources:
         s.pop("_fulltext", None)
@@ -463,9 +522,9 @@ def check_plagiarism(
         "semantic_coverage_docs": embedded_docs,
         "semantic_coverage_pct": semantic_coverage,
         "coverage_note": (
-            f"Deteksi salinan (leksikal) mencakup {total_docs:,} dokumen (penuh). "
-            f"Deteksi parafrase (semantik) mencakup {embedded_docs:,} dokumen "
-            f"(~{semantic_coverage}% korpus); skor parafrase adalah batas bawah."
+            "Deteksi salinan (leksikal) mencakup seluruh korpus akses-terbuka "
+            "(penuh). Deteksi parafrase (semantik) mencakup bagian korpus yang "
+            "telah di-embed; skor parafrase adalah batas bawah."
         ),
         "generated_at": generated_at.isoformat(timespec="seconds"),
     }

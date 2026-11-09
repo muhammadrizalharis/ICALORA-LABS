@@ -64,7 +64,10 @@ class Settings(BaseSettings):
     session_ttl_days: int = Field(default=30)
     history_retention_days: int = Field(default=3)
     frontend_base_url: str = Field(default="http://localhost:58030")
-    allow_demo_login: bool = Field(default=True)
+    allow_demo_login: bool = Field(default=False)
+    admin_password: str = Field(default="")
+    admin_email: str = Field(default="admin@icalora-labs.local")
+    admin_name: str = Field(default="Super Admin")
     google_client_id: str = Field(default="")
     google_client_secret: str = Field(default="")
     google_redirect_uri: str = Field(

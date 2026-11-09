@@ -23,9 +23,9 @@ export default function AkunPage() {
           <div>
             <div className="font-semibold">{user?.name ?? "Pengguna"}</div>
             <div className="text-sm text-neutral-400">{user?.email}</div>
-            {user?.is_demo && (
+            {user?.is_admin && (
               <span className="mt-1 inline-block rounded-full border border-c px-2 py-0.5 text-[10px] text-neutral-400">
-                Akun Demo
+                Super Admin
               </span>
             )}
           </div>
