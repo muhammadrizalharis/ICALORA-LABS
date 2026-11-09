@@ -19,6 +19,8 @@
 - [x] **Taksonomi kecocokan orisinal** (bukan tiruan Turnitin/Mulfu): Salinan Langsung / Kemiripan Kuat / Indikasi Parafrase / Sumber Terkredit — berbasis keparahan & sifat kecocokan.
 - [x] **Indeks integritas gabungan** lebih kritis untuk akademik: menggabungkan salinan langsung + kemiripan leksikal + komponen parafrase semantik, ambang pencocokan diperketat (0.55→0.30).
 - [x] Penyimpanan berkas di **VM Postgres** (bukan disk HPC) + ikut **auto-purge 3 hari** dan cascade saat riwayat dihapus.
+- [x] **Cek Sumber Daring (tanpa unduh)**: lapis pelengkap opsional yang mengquery API akademik gratis real-time (OpenAlex, Crossref, arXiv, Wikipedia; CORE pluggable) — 0 GB disk, pencocokan lokal via `_chunk_match`. Arsitektur provider pluggable (`plagiarism/online.py`, endpoint `/tools/plagiarism-online`, tombol di `PlagiarismReport.tsx`).
+  - Catatan: **CORE** diblokir di tingkat jaringan dari server HPC (Cloudflare menolak TLS) → `CORE_ENABLED=false`; key disimpan untuk masa depan. Pemakaian produk CORE perlu konfirmasi lisensi (ToS §3).
 - [x] Backend menyimpan `document_text` (cap 60k) + `document_truncated` untuk highlight sisi klien.
 - [x] Semua tool "rich" dikonversi ke alur redirect-ke-Beranda (Grader, Resume, Citation, AI-Detector, Authorship, Hidden-text, Publikasi, Writing-report, Transkrip, Rewrite, TOC, Improve, Reactions).
 - [x] Unified history viewer (`HistoryResultView.tsx`) + `GenericResult` sebagai fallback.

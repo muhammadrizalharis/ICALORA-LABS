@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { downloadPdfReport } from "@/lib/download";
-import { API_BASE } from "@/lib/api";
+import { API_BASE, apiPost } from "@/lib/api";
 import {
   HILITE,
   MIN_WORDS,
@@ -33,6 +33,25 @@ function ScoreRing({ value, label, tone }: { value: number; label: string; tone:
   );
 }
 
+interface OnlineSource {
+  title: string | null;
+  doi: string | null;
+  url: string | null;
+  source: string | null;
+  matches: number;
+}
+interface OnlineResult {
+  integrity_index: number;
+  matched_sentences: number;
+  total_sentences: number;
+  queried_sentences: number;
+  candidates_checked: number;
+  providers: { name: string; hits: number }[];
+  sources: OnlineSource[];
+  matched_passages: MatchedPassage[];
+  coverage_note?: string;
+}
+
 interface Props {
   report: Report;
   /** Teks dokumen asli untuk sorotan. Default: report.document_text. */
@@ -49,6 +68,25 @@ export default function PlagiarismReport({ report, documentText, docTitle = "", 
   const [exQuotes, setExQuotes] = useState(false);
   const [exBib, setExBib] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  // Cek sumber daring (tanpa unduh) — lapis pelengkap opsional.
+  const [onlineBusy, setOnlineBusy] = useState(false);
+  const [onlineErr, setOnlineErr] = useState<string | null>(null);
+  const [online, setOnline] = useState<OnlineResult | null>(null);
+
+  async function runOnline() {
+    if (onlineBusy || !text.trim()) return;
+    setOnlineBusy(true);
+    setOnlineErr(null);
+    try {
+      const res = await apiPost<OnlineResult>("/tools/plagiarism-online", { text });
+      setOnline(res);
+    } catch (e) {
+      setOnlineErr(e instanceof Error ? e.message : "Cek daring gagal.");
+    } finally {
+      setOnlineBusy(false);
+    }
+  }
 
   const text = documentText ?? report.document_text ?? "";
 
@@ -379,6 +417,96 @@ export default function PlagiarismReport({ report, documentText, docTitle = "", 
             </li>
           ))}
         </ul>
+      </div>
+
+      <div className="rounded-lg border border-c bg-neutral-50 p-3 dark:bg-white/5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-neutral-800 dark:text-neutral-200">
+              🌐 Cek Sumber Daring (akademik, tanpa unduh)
+            </div>
+            <p className="mt-0.5 text-[11px] text-neutral-500 dark:text-neutral-400">
+              Memeriksa kalimat paling khas secara langsung ke OpenAlex, Crossref, arXiv, dan
+              Wikipedia. Pelengkap korpus lokal — bisa memakan beberapa puluh detik.
+            </p>
+          </div>
+          <button
+            onClick={runOnline}
+            disabled={onlineBusy || !text.trim()}
+            className="shrink-0 rounded-lg bg-[color:var(--brand)] px-4 py-2 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
+          >
+            {onlineBusy ? "Memeriksa…" : online ? "Periksa Ulang" : "Mulai Cek Daring"}
+          </button>
+        </div>
+
+        {onlineErr && (
+          <div className="mt-2 rounded-lg border border-rose-200 bg-rose-50 p-2 text-xs text-rose-700 dark:border-rose-900 dark:bg-rose-950 dark:text-rose-300">
+            {onlineErr}
+          </div>
+        )}
+
+        {online && (
+          <div className="mt-3 space-y-3">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-neutral-600 dark:text-neutral-300">
+              <span>
+                Kecocokan daring:{" "}
+                <b className={toneForScore(online.integrity_index).split(" ")[1]}>
+                  {online.integrity_index.toFixed(1)}%
+                </b>
+              </span>
+              <span>
+                {online.matched_sentences}/{online.total_sentences} kalimat cocok
+              </span>
+              <span>{online.queried_sentences} kalimat diperiksa</span>
+              <span>{online.candidates_checked} kandidat ditarik</span>
+              {online.providers.map((p) => (
+                <span key={p.name} className="rounded-full border border-c px-2 py-0.5">
+                  {p.name}: {p.hits}
+                </span>
+              ))}
+            </div>
+
+            {online.sources.length > 0 ? (
+              <ul className="space-y-1.5">
+                {online.sources.map((s, i) => (
+                  <li
+                    key={i}
+                    className="flex items-center gap-2 rounded-lg border border-c bg-white px-3 py-2 text-xs dark:bg-neutral-900"
+                  >
+                    <span className="shrink-0 rounded bg-[color:var(--brand-soft)] px-1.5 py-0.5 text-[10px] font-semibold text-neutral-600 dark:text-neutral-300">
+                      {s.source}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-neutral-700 dark:text-neutral-200">
+                      {s.url ? (
+                        <a
+                          href={s.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="underline"
+                        >
+                          {s.title || s.doi || s.url}
+                        </a>
+                      ) : (
+                        s.title || s.doi || "(tanpa judul)"
+                      )}
+                    </span>
+                    <span className="shrink-0 font-semibold text-neutral-500 dark:text-neutral-400">
+                      {s.matches} bagian
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                Tidak ditemukan kecocokan daring pada sampel kalimat yang diperiksa.
+              </p>
+            )}
+
+            {online.coverage_note && (
+              <p className="text-[11px] text-neutral-400">{online.coverage_note}</p>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

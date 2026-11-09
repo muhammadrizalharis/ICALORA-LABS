@@ -4,6 +4,7 @@ from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
+from app.core.config import get_settings
 from app.services.ai_detector import detect_ai
 from app.services.auth import (
     get_history_item,
@@ -30,6 +31,7 @@ from app.services.llm.tasks import (
     rewrite,
 )
 from app.services.plagiarism import check_plagiarism
+from app.services.plagiarism.online import online_check
 from app.services.plagiarism.report_pdf import build_report_pdf
 from app.services.publikasi import recommend_journals
 from app.services.report import MAX_HTML_BYTES, render_pdf
@@ -47,6 +49,7 @@ router = APIRouter(prefix="/tools", tags=["tools"])
 # ekstrem — setara buku/tesis sangat panjang (~340rb kata). Analisis semantik
 # memakai embedding per-jendela, jadi seluruh isi dokumen tetap diperiksa.
 MAX_CHARS = 2_000_000
+settings = get_settings()
 
 
 class TextIn(BaseModel):
@@ -205,6 +208,21 @@ def plagiarism_ep(body: PlagiarismIn, request: Request) -> dict:
         return res
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Cek plagiarisme gagal: {exc}") from exc
+
+
+@router.post("/plagiarism-online")
+async def plagiarism_online_ep(body: PlagiarismIn, request: Request) -> dict:
+    """Pemeriksaan daring tanpa-unduh terhadap sumber akademik gratis
+    (OpenAlex/Crossref/arXiv/Wikipedia + CORE bila diizinkan). Pelengkap
+    korpus lokal; tidak menyimpan data sumber."""
+    if not settings.online_check_enabled:
+        raise HTTPException(status_code=503, detail="Cek daring dinonaktifkan.")
+    _guard(body.text)
+    try:
+        res = await online_check(body.text)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Cek daring gagal: {exc}") from exc
+    return res
 
 
 @router.post("/plagiarism-file")

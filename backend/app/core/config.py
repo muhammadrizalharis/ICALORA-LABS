@@ -71,6 +71,13 @@ class Settings(BaseSettings):
         default="http://localhost:58030/api/backend/auth/google/callback"
     )
 
+    # Cek sumber daring (tanpa unduh) — query API akademik gratis secara
+    # real-time. OpenAlex/Crossref/arXiv/Wikipedia bebas; CORE perlu key +
+    # aktif hanya bila lisensi mengizinkan (lihat ToS CORE).
+    online_check_enabled: bool = Field(default=True)
+    core_api_key: str = Field(default="")
+    core_enabled: bool = Field(default=True)
+
     @property
     def database_url(self) -> str:
         return (
