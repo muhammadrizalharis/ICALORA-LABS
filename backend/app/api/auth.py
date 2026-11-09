@@ -7,12 +7,14 @@ import urllib.parse
 
 import httpx
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import RedirectResponse
 
 from pydantic import BaseModel
 
 from app.core.config import get_settings
 from app.services import auth as svc
+from app.services import email as email_svc
 
 settings = get_settings()
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -25,6 +27,11 @@ class AdminLoginIn(BaseModel):
 class AdminPasswordIn(BaseModel):
     current_password: str
     new_password: str
+
+
+class PasswordLoginIn(BaseModel):
+    email: str
+    password: str
 
 GOOGLE_AUTH = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN = "https://oauth2.googleapis.com/token"  # noqa: S105
@@ -67,7 +74,47 @@ def me(request: Request) -> dict:
         "user": user,
         "google_enabled": bool(settings.google_client_id and settings.google_client_secret),
         "admin_enabled": svc.admin_configured(),
+        "password_login_enabled": True,
+        "email_enabled": email_svc.smtp_configured(),
         "history_retention_days": settings.history_retention_days,
+    }
+
+
+@router.post("/login")
+def password_login(body: PasswordLoginIn, response: Response) -> dict:
+    """Login dengan email + kata sandi (alternatif Google)."""
+    user = svc.verify_user_login(body.email.strip(), body.password)
+    if not user:
+        raise HTTPException(status_code=401, detail="Email atau kata sandi salah.")
+    _set_session(response, user["id"])
+    return {"ok": True, "user": user}
+
+
+@router.post("/reset-password")
+async def reset_password(request: Request) -> dict:
+    """Buat kata sandi baru untuk pengguna aktif: tampil sekali + kirim email."""
+    user = current_user(request)
+    new_pw = svc.generate_password(12)
+    svc.set_user_password(user["id"], new_pw)
+    emailed = False
+    email_error: str | None = None
+    to = user.get("email")
+    if to and email_svc.smtp_configured():
+        try:
+            await run_in_threadpool(email_svc.send_new_password, to, user.get("name"), new_pw)
+            emailed = True
+        except Exception as exc:  # noqa: BLE001
+            email_error = str(exc)
+    elif not email_svc.smtp_configured():
+        email_error = "Email server belum dikonfigurasi."
+    elif not to:
+        email_error = "Akun tidak memiliki alamat email."
+    return {
+        "ok": True,
+        "password": new_pw,
+        "email": to,
+        "emailed": emailed,
+        "email_error": email_error,
     }
 
 

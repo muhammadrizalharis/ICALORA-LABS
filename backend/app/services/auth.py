@@ -102,7 +102,7 @@ _user_schema_ready = False
 
 
 def ensure_user_schema() -> None:
-    """Pastikan kolom is_admin & admin_password_hash ada (idempoten)."""
+    """Pastikan kolom is_admin, admin_password_hash & password_hash ada (idempoten)."""
     global _user_schema_ready
     if _user_schema_ready:
         return
@@ -113,7 +113,52 @@ def ensure_user_schema() -> None:
         c.execute(
             text("ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_password_hash TEXT")
         )
+        c.execute(
+            text("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT")
+        )
     _user_schema_ready = True
+
+
+def generate_password(length: int = 12) -> str:
+    """Buat kata sandi acak mudah-dibaca (tanpa karakter ambigu)."""
+    import secrets
+
+    alphabet = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    return "".join(secrets.choice(alphabet) for _ in range(length))
+
+
+def set_user_password(user_id: int, password: str) -> None:
+    """Simpan hash kata sandi login untuk pengguna mana pun."""
+    ensure_user_schema()
+    h = _hash_password(password)
+    with engine.begin() as c:
+        c.execute(
+            text("UPDATE users SET password_hash = :h WHERE id = :id"),
+            {"h": h, "id": user_id},
+        )
+
+
+def verify_user_login(email: str, password: str) -> dict | None:
+    """Verifikasi login email+kata sandi; kembalikan user bila cocok."""
+    if not email or not password:
+        return None
+    ensure_user_schema()
+    with engine.connect() as c:
+        r = c.execute(
+            text(
+                "SELECT id, email, name, picture, token_balance, is_demo, is_admin, "
+                "password_hash FROM users WHERE lower(email) = lower(:email) "
+                "ORDER BY id LIMIT 1"
+            ),
+            {"email": email},
+        ).first()
+    if r is None or not r.password_hash:
+        return None
+    if not _verify_password_hash(password, r.password_hash):
+        return None
+    with engine.begin() as c:
+        c.execute(text("UPDATE users SET last_login_at = now() WHERE id = :id"), {"id": r.id})
+    return _row_to_user(r)
 
 
 def _hash_password(password: str) -> str:

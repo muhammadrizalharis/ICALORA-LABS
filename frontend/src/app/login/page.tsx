@@ -1,17 +1,34 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { useAuth, googleLoginUrl } from "@/lib/auth";
 
 export default function LoginPage() {
-  const { user, loading, googleEnabled } = useAuth();
+  const { user, loading, googleEnabled, passwordLogin } = useAuth();
   const router = useRouter();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (!loading && user) router.replace("/dashboard");
   }, [loading, user, router]);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    setBusy(true);
+    try {
+      const err = await passwordLogin(email.trim(), password);
+      if (err) setError(err);
+      else router.replace("/dashboard");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <div className="mx-auto flex min-h-[70vh] max-w-md flex-col items-center justify-center p-8">
@@ -62,6 +79,43 @@ export default function LoginPage() {
             </div>
           )}
         </div>
+
+        <div className="my-5 flex items-center gap-3 text-[11px] uppercase tracking-wide text-neutral-400">
+          <div className="h-px flex-1 bg-[color:var(--border)]" />
+          atau dengan email
+          <div className="h-px flex-1 bg-[color:var(--border)]" />
+        </div>
+
+        <form onSubmit={submit} className="space-y-3 text-left">
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="Email"
+            autoComplete="email"
+            className="w-full rounded-lg border border-c surface-2 px-4 py-3 text-sm outline-none focus:border-[color:var(--brand)]"
+          />
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Kata sandi"
+            autoComplete="current-password"
+            className="w-full rounded-lg border border-c surface-2 px-4 py-3 text-sm outline-none focus:border-[color:var(--brand)]"
+          />
+          {error && <div className="text-xs text-red-500">{error}</div>}
+          <button
+            type="submit"
+            disabled={busy || !email || !password}
+            className="w-full rounded-lg bg-[color:var(--brand)] px-4 py-3 text-sm font-medium text-white disabled:opacity-50"
+          >
+            {busy ? "Memeriksa…" : "Masuk dengan email"}
+          </button>
+        </form>
+        <p className="mt-3 text-[11px] text-neutral-400">
+          Belum punya kata sandi? Masuk dengan Google, lalu buat kata sandi di halaman Akun.
+        </p>
+
         <p className="mt-4 text-xs text-neutral-400">
           Semua layanan gratis · token tak terbatas selama masa awal.
         </p>
