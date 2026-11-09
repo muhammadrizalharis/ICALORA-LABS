@@ -235,6 +235,6 @@ pemilik. Lihat berkas **[LICENSE](./LICENSE)** untuk ketentuan lengkap.
 
 <img src="https://capsule-render.vercel.app/api?type=waving&color=0:06B6D4,100:4F46E5&height=120&section=footer" alt="footer" />
 
-<sub>Dibuat dengan ❤️ oleh <b>MRH INNOVEX</b> · ICALORA-LABS</sub>
+<sub>© 2026 <b>MRH INNOVEX</b> · ICALORA-LABS — All Rights Reserved</sub>
 
 </div>
