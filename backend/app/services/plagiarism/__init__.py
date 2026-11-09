@@ -266,8 +266,17 @@ def _report_id(doc: str, generated_at: datetime) -> str:
     return f"ICL-{generated_at:%Y%m%d}-{h[:10].upper()}"
 
 
-def check_plagiarism(doc: str, top_k: int = 30) -> dict:
-    """Bandingkan `doc` dengan korpus; kembalikan laporan kemiripan."""
+def check_plagiarism(
+    doc: str, top_k: int = 30, extra_candidates: list[dict] | None = None
+) -> dict:
+    """Bandingkan `doc` dengan korpus; kembalikan laporan kemiripan.
+
+    `extra_candidates` adalah kandidat sumber tambahan (mis. hasil Cek Sumber
+    Daring tanpa-unduh) yang digabungkan ke pencocokan teks tingkat-kalimat
+    sehingga Indeks Integritas mencakup korpus lokal + sumber daring sekaligus.
+    Tiap kandidat minimal memuat `_fulltext` dan `title` (opsional `doi`,
+    `url`, `source`, `pub_year`).
+    """
     doc = doc.strip()
     wc, cc = text_metrics(doc)
     if cc == 0:
@@ -321,20 +330,64 @@ def check_plagiarism(doc: str, top_k: int = 30) -> dict:
             }
         )
 
-    # Pencocokan tingkat-kalimat untuk indeks kemiripan tingkat kalimat.
-    chunk = _chunk_match(doc, sources)
+    # Kandidat sumber daring (tanpa-unduh) digabungkan ke pencocokan teks.
+    online_sources: list[dict] = []
+    for c in extra_candidates or []:
+        body = c.get("_fulltext") or ""
+        if not body or not c.get("title"):
+            continue
+        online_sources.append(
+            {
+                "doc_id": None,
+                "source": c.get("source") or "daring",
+                "external_id": None,
+                "doi": c.get("doi"),
+                "url": c.get("url"),
+                "title": c.get("title"),
+                "pub_year": c.get("pub_year"),
+                "semantic_similarity": 0.0,
+                "lexical_similarity": 0.0,
+                "similarity": 0.0,
+                "snippet": body[:320].strip(),
+                "_fulltext": body,
+                "online": True,
+            }
+        )
+
+    # Pencocokan tingkat-kalimat (korpus lokal + sumber daring) untuk indeks.
+    chunk = _chunk_match(doc, sources + online_sources)
+    # Skor kemiripan tiap sumber daring diturunkan dari kecocokan kalimatnya
+    # (sumber daring tak punya embedding/MinHash tingkat-dokumen).
+    best_ratio_by_key: dict[str, float] = {}
+    for p in chunk["matched_passages"]:
+        key = (p.get("source_doi") or p.get("source_title") or "").lower().strip()
+        if key:
+            best_ratio_by_key[key] = max(best_ratio_by_key.get(key, 0.0), p.get("match_ratio", 0.0))
+    kept_online: list[dict] = []
+    for s in online_sources:
+        key = (s.get("doi") or s.get("title") or "").lower().strip()
+        ratio = best_ratio_by_key.get(key, 0.0)
+        if ratio <= 0:
+            continue  # sumber daring tanpa kecocokan nyata tidak ditampilkan
+        s["similarity"] = round(ratio, 1)
+        kept_online.append(s)
+
+    sources.extend(kept_online)
     for s in sources:
         s.pop("_fulltext", None)
 
-    sources.sort(key=lambda s: (s["lexical_similarity"], s["semantic_similarity"]), reverse=True)
+    sources.sort(key=lambda s: (s["lexical_similarity"], s["semantic_similarity"], s["similarity"]), reverse=True)
     # Komponen integritas:
     #  - copy_index     : tumpang-tindih teks berbobot tingkat-kalimat (sensitif,
-    #                     mencakup salinan penuh + parsial + indikasi parafrase).
-    #  - lexical_doc    : kemiripan leksikal tingkat-dokumen (MinHash Jaccard).
+    #                     mencakup salinan penuh + parsial + indikasi parafrase;
+    #                     kini juga mencakup sumber daring).
+    #  - lexical_doc    : kemiripan leksikal tingkat-dokumen (MinHash Jaccard,
+    #                     korpus lokal saja — sumber daring lewat copy_index).
     #  - paraphrase     : kemiripan semantik tertinggi (parafrase kata diubah).
     copy_index = chunk["similarity_index"]
-    lexical_doc = max((s["lexical_similarity"] for s in sources), default=0.0)
-    paraphrase = max((s["semantic_similarity"] for s in sources), default=0.0)
+    local_sources = [s for s in sources if not s.get("online")]
+    lexical_doc = max((s["lexical_similarity"] for s in local_sources), default=0.0)
+    paraphrase = max((s["semantic_similarity"] for s in local_sources), default=0.0)
     # Kontribusi parafrase dikalibrasi konservatif: hanya kemiripan semantik
     # sangat tinggi yang menambah indeks, agar dokumen yang sekadar SETOPIK
     # tidak ikut terangkat (menghindari tuduhan palsu). cos 80%→0, 100%→~18%.

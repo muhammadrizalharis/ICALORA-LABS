@@ -273,6 +273,21 @@ async def _gather_candidates(doc: str) -> tuple[list[dict], list[str], dict]:
     return list(seen.values()), sentences, provider_hits
 
 
+async def online_candidates(doc: str) -> tuple[list[dict], dict]:
+    """Kumpulkan kandidat sumber daring (tanpa-unduh) untuk digabungkan ke
+    pemeriksaan plagiarisme utama. Kembalikan (kandidat, hits-per-penyedia).
+    Aman dipanggil opsional: galat jaringan menghasilkan daftar kosong.
+    """
+    doc = (doc or "").strip()
+    if not doc or not _active_providers():
+        return [], {}
+    try:
+        candidates, _sentences, provider_hits = await _gather_candidates(doc)
+    except Exception:  # noqa: BLE001
+        return [], {}
+    return candidates, provider_hits
+
+
 async def online_check(doc: str) -> dict:
     """Jalankan pemeriksaan daring tanpa-unduh dan kembalikan laporan ringkas."""
     doc = doc.strip()
