@@ -10,16 +10,17 @@ export interface User {
   picture: string | null;
   token_balance: number;
   is_demo: boolean;
+  is_admin: boolean;
 }
 
 interface AuthState {
   loading: boolean;
   user: User | null;
   googleEnabled: boolean;
-  demoEnabled: boolean;
+  adminEnabled: boolean;
   historyRetentionDays: number;
   refresh: () => Promise<void>;
-  demoLogin: () => Promise<void>;
+  adminLogin: (password: string) => Promise<boolean>;
   logout: () => Promise<void>;
 }
 
@@ -29,7 +30,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<User | null>(null);
   const [googleEnabled, setGoogleEnabled] = useState(false);
-  const [demoEnabled, setDemoEnabled] = useState(false);
+  const [adminEnabled, setAdminEnabled] = useState(false);
   const [historyRetentionDays, setHistoryRetentionDays] = useState(3);
 
   const refresh = useCallback(async () => {
@@ -38,7 +39,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const d = await res.json();
       setUser(d.user);
       setGoogleEnabled(d.google_enabled);
-      setDemoEnabled(d.demo_enabled);
+      setAdminEnabled(d.admin_enabled);
       if (typeof d.history_retention_days === "number")
         setHistoryRetentionDays(d.history_retention_days);
     } catch {
@@ -48,13 +49,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const demoLogin = useCallback(async () => {
-    await fetch(`${API_BASE}/auth/demo-login`, {
-      method: "POST",
-      credentials: "include",
-    });
-    await refresh();
-  }, [refresh]);
+  const adminLogin = useCallback(
+    async (password: string): Promise<boolean> => {
+      const res = await fetch(`${API_BASE}/auth/admin-login`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ password }),
+      });
+      if (!res.ok) return false;
+      await refresh();
+      return true;
+    },
+    [refresh],
+  );
 
   const logout = useCallback(async () => {
     await fetch(`${API_BASE}/auth/logout`, { method: "POST", credentials: "include" });
@@ -67,7 +75,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthCtx.Provider
-      value={{ loading, user, googleEnabled, demoEnabled, historyRetentionDays, refresh, demoLogin, logout }}
+      value={{ loading, user, googleEnabled, adminEnabled, historyRetentionDays, refresh, adminLogin, logout }}
     >
       {children}
     </AuthCtx.Provider>

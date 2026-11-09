@@ -6,7 +6,7 @@ import Image from "next/image";
 import { useAuth, googleLoginUrl } from "@/lib/auth";
 
 export default function LoginPage() {
-  const { user, loading, googleEnabled, demoEnabled, demoLogin } = useAuth();
+  const { user, loading, googleEnabled } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
@@ -60,18 +60,6 @@ export default function LoginPage() {
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
               Login Google belum dikonfigurasi (menunggu kredensial admin).
             </div>
-          )}
-
-          {demoEnabled && (
-            <button
-              onClick={async () => {
-                await demoLogin();
-                router.replace("/dashboard");
-              }}
-              className="w-full rounded-lg bg-[color:var(--brand)] px-4 py-3 text-sm font-medium text-white"
-            >
-              Masuk sebagai Demo (semua fitur gratis)
-            </button>
           )}
         </div>
         <p className="mt-4 text-xs text-neutral-400">

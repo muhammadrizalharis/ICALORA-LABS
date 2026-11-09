@@ -94,14 +94,31 @@ def _row_to_user(r) -> dict:
         "picture": r.picture,
         "token_balance": r.token_balance,
         "is_demo": r.is_demo,
+        "is_admin": bool(getattr(r, "is_admin", False)),
     }
 
 
+_user_schema_ready = False
+
+
+def ensure_user_schema() -> None:
+    """Pastikan kolom is_admin ada (idempoten)."""
+    global _user_schema_ready
+    if _user_schema_ready:
+        return
+    with engine.begin() as c:
+        c.execute(
+            text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE")
+        )
+    _user_schema_ready = True
+
+
 def get_user(user_id: int) -> dict | None:
+    ensure_user_schema()
     with engine.connect() as c:
         r = c.execute(
             text(
-                "SELECT id, email, name, picture, token_balance, is_demo "
+                "SELECT id, email, name, picture, token_balance, is_demo, is_admin "
                 "FROM users WHERE id = :id"
             ),
             {"id": user_id},
@@ -117,6 +134,7 @@ def optional_user_from_request(request) -> dict | None:
 
 
 def upsert_google_user(sub: str, email: str, name: str, picture: str) -> dict:
+    ensure_user_schema()
     with engine.begin() as c:
         r = c.execute(
             text(
@@ -126,12 +144,37 @@ def upsert_google_user(sub: str, email: str, name: str, picture: str) -> dict:
                 ON CONFLICT (google_sub) DO UPDATE
                    SET email = EXCLUDED.email, name = EXCLUDED.name,
                        picture = EXCLUDED.picture, last_login_at = now()
-                RETURNING id, email, name, picture, token_balance, is_demo
+                RETURNING id, email, name, picture, token_balance, is_demo, is_admin
                 """
             ),
             {"sub": sub, "email": email, "name": name, "picture": picture},
         ).first()
     return _row_to_user(r)
+
+
+def upsert_admin_user() -> dict:
+    """Buat/ambil akun super admin tunggal (berdasarkan email admin)."""
+    ensure_user_schema()
+    with engine.begin() as c:
+        r = c.execute(
+            text(
+                "UPDATE users SET is_admin = TRUE, name = :name, last_login_at = now() "
+                "WHERE email = :email "
+                "RETURNING id, email, name, picture, token_balance, is_demo, is_admin"
+            ),
+            {"email": settings.admin_email, "name": settings.admin_name},
+        ).first()
+        if r is None:
+            r = c.execute(
+                text(
+                    "INSERT INTO users (email, name, is_admin, last_login_at) "
+                    "VALUES (:email, :name, TRUE, now()) "
+                    "RETURNING id, email, name, picture, token_balance, is_demo, is_admin"
+                ),
+                {"email": settings.admin_email, "name": settings.admin_name},
+            ).first()
+    return _row_to_user(r)
+
 
 
 def create_demo_user() -> dict:

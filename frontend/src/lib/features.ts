@@ -24,7 +24,7 @@ export const FEATURES: Feature[] = [
   { slug: "resume-builder", name: "Resume Builder", group: "ringan", phase: 1, status: "active", icon: "📄", desc: "Susun CV profesional dalam menit." },
   { slug: "ai-detector", name: "AI Detector", group: "berat", phase: 4, status: "active", icon: "🤖", desc: "Deteksi konten buatan AI tingkat kalimat." },
   { slug: "authorship", name: "Authorship", group: "berat", phase: 4, status: "active", icon: "🕵️", desc: "Analisis gaya & verifikasi kepenulisan." },
-  { slug: "plagiarism-checker", name: "Plagiarism Checker", group: "berat", phase: 3, status: "active", icon: "🛡️", desc: "Cek kemiripan dengan 1 juta+ dokumen." },
+  { slug: "plagiarism-checker", name: "Plagiarism Checker", group: "berat", phase: 3, status: "active", icon: "🛡️", desc: "Cek kemiripan dengan korpus akses-terbuka." },
   { slug: "chat-pdf", name: "Chat PDF", group: "api", phase: 2, status: "active", icon: "📚", desc: "Tanya-jawab langsung dari isi dokumen." },
   { slug: "hidden-text", name: "Cek Hidden Text & Typo", group: "ringan", phase: 1, status: "active", icon: "🔍", desc: "Deteksi karakter tersembunyi & salah ketik." },
   { slug: "daftar-isi", name: "Daftar Isi Otomatis", group: "ringan", phase: 1, status: "active", icon: "📑", desc: "Susun daftar isi berjenjang otomatis." },

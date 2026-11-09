@@ -1,11 +1,7 @@
 "use client";
 
-import Link from "next/link";
-import { FEATURES, GROUP_LABEL } from "@/lib/features";
 import { useAuth } from "@/lib/auth";
 import RecentDocuments from "@/components/RecentDocuments";
-
-const activeFeatures = FEATURES.filter((f) => f.status === "active");
 
 export default function DashboardHome() {
   const { user } = useAuth();
@@ -28,7 +24,7 @@ export default function DashboardHome() {
         <div className="rounded-2xl border border-c surface-2 p-5">
           <div className="text-xs text-neutral-500 dark:text-neutral-400">Status Akun</div>
           <div className="mt-1 text-2xl font-bold text-[color:var(--brand)]">
-            {user?.is_demo ? "Demo" : "Aktif"}
+            {user?.is_admin ? "Super Admin" : "Aktif"}
           </div>
           <div className="text-xs text-neutral-400">{user?.email}</div>
         </div>
@@ -41,39 +37,6 @@ export default function DashboardHome() {
 
       <div className="mt-8">
         <RecentDocuments />
-      </div>
-
-      <h2 className="mb-3 mt-8 text-lg font-semibold">Layanan</h2>
-      <p className="mb-4 text-sm text-neutral-500 dark:text-neutral-400">
-        Pilih layanan untuk memulai pengecekan baru.
-      </p>
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {activeFeatures.map((f) => (
-          <div key={f.slug} className="rounded-2xl border border-c surface-2 p-5">
-            <div className="flex items-start justify-between">
-              <div className="text-2xl">{f.icon}</div>
-              <span className="rounded-full border border-c px-2 py-0.5 text-[10px] text-neutral-400">
-                {GROUP_LABEL[f.group]}
-              </span>
-            </div>
-            <h3 className="mt-3 font-semibold text-neutral-900 dark:text-neutral-100">{f.name}</h3>
-            <p className="mt-1 line-clamp-2 text-xs text-neutral-500 dark:text-neutral-400">{f.desc}</p>
-            <div className="mt-4 flex gap-2">
-              <Link
-                href={`/dashboard/tools/${f.slug}`}
-                className="flex-1 rounded-lg bg-[color:var(--brand)] px-3 py-2 text-center text-sm font-medium text-white"
-              >
-                Mulai
-              </Link>
-              <Link
-                href={`/dashboard/history/${f.slug}`}
-                className="rounded-lg border border-c px-3 py-2 text-center text-sm text-neutral-600 dark:text-neutral-400"
-              >
-                Riwayat
-              </Link>
-            </div>
-          </div>
-        ))}
       </div>
     </div>
   );

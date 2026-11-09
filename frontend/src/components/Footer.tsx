@@ -20,7 +20,7 @@ export default function Footer() {
           </div>
           <p className="mt-4 max-w-xs text-sm leading-relaxed text-neutral-600 dark:text-neutral-400">
             Platform deteksi plagiarisme & AI yang sah dan terpercaya, self-hosted. Membandingkan
-            tulisan dengan 1&nbsp;juta+ dokumen akses-terbuka — cepat, aman, dan transparan.
+            tulisan dengan korpus akses-terbuka — cepat, aman, dan transparan.
           </p>
           <p className="mt-4 text-xs text-neutral-500 dark:text-neutral-500">by MRH INNOVEX</p>
         </div>

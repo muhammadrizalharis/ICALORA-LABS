@@ -66,7 +66,6 @@ def _cover_html(report: dict) -> str:
     total = int(report.get("total_sentences", 0) or 0)
     rid = report.get("report_id", "") or ""
     sha = (report.get("content_sha256", "") or "")[:16]
-    corpus = int(report.get("corpus_size", 0) or 0)
     tone = _ring_tone(idx)
 
     groups = {g.get("type"): g for g in report.get("match_groups", [])}
@@ -160,7 +159,7 @@ def _cover_html(report: dict) -> str:
     <div class="head">
       <div><div class="brand">Ringkasan Integritas</div>
       <div class="sub">ICALORA-LABS · MRH INNOVEX — pemeriksaan mandiri (self-hosted)</div></div>
-      <div class="rid">ID: <b>{_esc(rid)}</b><br>Hash: {_esc(sha)}<br>Korpus: {corpus:,} dok.</div>
+      <div class="rid">ID: <b>{_esc(rid)}</b><br>Hash: {_esc(sha)}<br>Korpus akses-terbuka</div>
     </div>
     {pub_banner}
     <div class="hero">

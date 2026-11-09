@@ -33,11 +33,13 @@ settings = get_settings()
 
 _TAG_RE = re.compile(r"<[^>]+>")
 _WS_RE = re.compile(r"\s+")
+_DOI_RE = re.compile(r"10\.\d{4,9}/[-._;()/:A-Za-z0-9]+", re.UNICODE)
+_WORD_RE = re.compile(r"[A-Za-z\u00C0-\u024F]{2,}", re.UNICODE)
 _UA = {"User-Agent": "ICALORA-LABS/1.0 (academic integrity; mailto:noreply@icalora-labs.local)"}
-_TIMEOUT = httpx.Timeout(20.0, connect=8.0)
-_MAX_SENTENCES = 12
-_PER_PROVIDER = 2  # kandidat teratas per kalimat per provider
-_CONCURRENCY = 8   # batasi koneksi serempak agar provider tidak menolak
+_TIMEOUT = httpx.Timeout(25.0, connect=8.0)
+_MAX_SENTENCES = 24
+_PER_PROVIDER = 4  # kandidat teratas per kalimat per provider
+_CONCURRENCY = 12  # batasi koneksi serempak agar provider tidak menolak
 _MAILTO = "noreply@icalora-labs.local"  # OpenAlex/Crossref "polite pool"
 
 
@@ -82,6 +84,38 @@ def _risky_sentences(doc: str, limit: int = _MAX_SENTENCES) -> list[str]:
         if len(picked) >= limit:
             break
     return picked
+
+
+def _extract_dois(doc: str, limit: int = 5) -> list[str]:
+    """Ambil DOI yang tertera di dokumen (mis. header paper terbit)."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for m in _DOI_RE.finditer(doc):
+        d = m.group(0).rstrip(".,);]").lower()
+        if d not in seen:
+            seen.add(d)
+            out.append(d)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _extract_title(doc: str) -> str:
+    """Tebak judul dokumen: baris awal paling 'judul-like' (banyak kata,
+    bukan metadata). Dipakai untuk menemukan paper terbit yang persis."""
+    head = doc.strip()[:3000]
+    for raw in head.splitlines():
+        line = raw.strip()
+        words = _WORD_RE.findall(line)
+        if len(words) < 4 or len(words) > 40:
+            continue
+        low = line.lower()
+        if any(k in low for k in ("doi", "http", "@", "abstract", "abstrak", "keywords")):
+            continue
+        if sum(c.isdigit() for c in line) > len(line) * 0.3:
+            continue
+        return line[:300]
+    return ""
 
 
 def _openalex_abstract(inv: dict | None) -> str:
@@ -243,6 +277,74 @@ def _active_providers() -> list:
     return providers
 
 
+async def _q_openalex_doi(client: httpx.AsyncClient, doi: str) -> dict | None:
+    r = await _get_json(client, f"https://api.openalex.org/works/doi:{doi}", {"mailto": _MAILTO})
+    if r is None:
+        return None
+    w = r.json()
+    abstract = _clean(_openalex_abstract(w.get("abstract_inverted_index")))
+    if not abstract:
+        return None
+    return {
+        "title": _clean(w.get("title") or ""),
+        "doi": doi,
+        "source": "OpenAlex",
+        "url": w.get("id") or f"https://doi.org/{doi}",
+        "_fulltext": abstract,
+    }
+
+
+async def _q_crossref_doi(client: httpx.AsyncClient, doi: str) -> dict | None:
+    r = await _get_json(client, f"https://api.crossref.org/works/{doi}", {"mailto": _MAILTO})
+    if r is None:
+        return None
+    it = r.json().get("message", {})
+    title = _clean(" ".join(it.get("title") or []))
+    abstract = _clean(it.get("abstract") or "")
+    if not (abstract or title):
+        return None
+    return {
+        "title": title,
+        "doi": doi,
+        "source": "Crossref",
+        "url": it.get("URL") or f"https://doi.org/{doi}",
+        "_fulltext": abstract or title,
+    }
+
+
+async def _q_title(client: httpx.AsyncClient, title: str) -> list[dict]:
+    """Temukan paper terbit yang judulnya paling cocok (OpenAlex + Crossref).
+    Mengembalikan kandidat dengan abstrak — dipakai untuk mendeteksi bahwa
+    dokumen adalah publikasi terindeks (reverse-containment)."""
+    if not title:
+        return []
+    out: list[dict] = []
+    oa, cr = await asyncio.gather(
+        _q_openalex(client, title), _q_crossref(client, title), return_exceptions=True
+    )
+    for res in (oa, cr):
+        if isinstance(res, list):
+            out.extend(res)
+    return out
+
+
+async def _resolve_publication(client: httpx.AsyncClient, doc: str) -> list[dict]:
+    """Kumpulkan kandidat 'identitas publikasi' via DOI tertera + judul."""
+    tasks: list = []
+    for doi in _extract_dois(doc):
+        tasks.append(_q_openalex_doi(client, doi))
+        tasks.append(_q_crossref_doi(client, doi))
+    tasks.append(_q_title(client, _extract_title(doc)))
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    out: list[dict] = []
+    for res in results:
+        if isinstance(res, dict):
+            out.append(res)
+        elif isinstance(res, list):
+            out.extend(res)
+    return out
+
+
 async def _gather_candidates(doc: str) -> tuple[list[dict], list[str], dict]:
     sentences = _risky_sentences(doc)
     providers = _active_providers()
@@ -256,8 +358,11 @@ async def _gather_candidates(doc: str) -> tuple[list[dict], list[str], dict]:
                 return await provider(client, sentence)
 
         tasks = [_run(p, s) for s in sentences for p in providers]
+        # Resolusi identitas publikasi (DOI + judul) berjalan paralel.
+        pub_task = asyncio.create_task(_resolve_publication(doc=doc, client=client))
         results = await asyncio.gather(*tasks, return_exceptions=True)
-    for res in results:
+        pub_results = await pub_task
+    for res in list(results) + [pub_results]:
         if isinstance(res, Exception) or not res:
             continue
         for cand in res:

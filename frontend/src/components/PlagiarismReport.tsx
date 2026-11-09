@@ -179,11 +179,7 @@ export default function PlagiarismReport({ report, documentText, docTitle = "", 
             </span>
           </span>
           <span>
-            📚 Dibandingkan dengan{" "}
-            <span className="font-semibold text-neutral-700 dark:text-neutral-200">
-              {(report.corpus_size || 0).toLocaleString("id-ID")}
-            </span>{" "}
-            dokumen akses-terbuka
+            📚 Dibandingkan dengan korpus akses-terbuka
           </span>
           {report.content_sha256 && (
             <span>
@@ -230,8 +226,7 @@ export default function PlagiarismReport({ report, documentText, docTitle = "", 
       {report.publication_match && (
         <div className="rounded-lg border border-orange-300 border-l-4 border-l-orange-600 bg-orange-50 px-4 py-3 text-xs leading-relaxed text-orange-900 dark:border-orange-900 dark:border-l-orange-500 dark:bg-orange-950/40 dark:text-orange-200">
           <b>⚠️ Terdeteksi sebagai publikasi terindeks.</b>{" "}
-          {report.publication_match.containment.toFixed(0)}% teks sumber
-          {report.publication_match.online ? " (abstrak daring)" : ""} termuat di dokumen
+          {report.publication_match.containment.toFixed(0)}% teks sumber termuat di dokumen
           ini — kemungkinan karya sudah dipublikasikan (atau{" "}
           <i>self-plagiarism</i>/duplikasi). Sumber:{" "}
           {report.publication_match.url ? (
@@ -250,11 +245,7 @@ export default function PlagiarismReport({ report, documentText, docTitle = "", 
             report.publication_match.doi ||
             "(tanpa judul)"
           )}
-          {report.publication_match.source ? ` · ${report.publication_match.source}` : ""}.{" "}
-          <span className="text-orange-800 dark:text-orange-300">
-            Catatan: sumber daring hanya memaparkan abstrak, sehingga Indeks Kemiripan
-            baris-per-baris tetap rendah; sinyal identitas ini dihitung terpisah.
-          </span>
+          {report.publication_match.source ? ` · ${report.publication_match.source}` : ""}.
         </div>
       )}
 
@@ -420,37 +411,6 @@ export default function PlagiarismReport({ report, documentText, docTitle = "", 
             </li>
           ))}
         </ul>
-      </div>
-
-      <div className="rounded-lg border border-c bg-neutral-50 p-3 dark:bg-white/5">
-        {report.online_merged ? (
-          <div>
-            <div className="text-sm font-semibold text-neutral-800 dark:text-neutral-200">
-              🌐 Sumber daring sudah disertakan otomatis
-            </div>
-            <p className="mt-0.5 text-[11px] text-neutral-500 dark:text-neutral-400">
-              Indeks di atas sudah menggabungkan korpus lokal{" "}
-              <b>dan</b> pencocokan real-time tanpa-unduh ke{" "}
-              {(report.online_providers ?? []).map((p) => p.name).join(", ") ||
-                "sumber akademik daring"}
-              . Sumber daring yang cocok ditandai lencana{" "}
-              <span className="rounded bg-sky-500 px-1 py-0.5 text-[10px] font-semibold text-white">
-                DARING
-              </span>{" "}
-              pada daftar sumber.
-            </p>
-          </div>
-        ) : (
-          <div>
-            <div className="text-sm font-semibold text-neutral-800 dark:text-neutral-200">
-              🌐 Cek sumber daring tidak tersedia
-            </div>
-            <p className="mt-0.5 text-[11px] text-neutral-500 dark:text-neutral-400">
-              Laporan ini hanya memakai korpus lokal. Lapis daring sedang nonaktif
-              atau tidak ada penyedia yang dapat dijangkau saat pemeriksaan.
-            </p>
-          </div>
-        )}
       </div>
     </div>
   );
