@@ -63,7 +63,7 @@ Alur OAuth penuh sudah ada (`/auth/google/login`, `/auth/google/callback`, token
 - [ ] (Catatan) Domain publik ICALORA perlu dikonfirmasi — web diakses via Cloudflare Tunnel + nginx.
 
 ### 4. Backend / Data (berjalan di latar)
-- [ ] **Embedding korpus** lanjut ke target **25%+** (saat ini ~19,3% dari 23,4 juta dokumen). Worker berjalan; JANGAN sentuh konfigurasi Ollama.
+- [x] **Embedding korpus** mencapai target **25%** (5.861.751 dari 23.415.245 dokumen = 25,03%). Worker dihentikan di target; rebuild indeks HNSW berjalan di VM (fase "loading tuples"). JANGAN sentuh konfigurasi Ollama.
 
 ---
 
