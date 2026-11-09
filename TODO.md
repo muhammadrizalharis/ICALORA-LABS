@@ -42,7 +42,7 @@ Saat ini hanya `plagiarism-checker` yang punya view khusus; tool lain jatuh ke `
 - [x] **publikasi-jurnal** — tata letak rekomendasi jurnal + skor kesiapan.
 - [x] **grammar-checker (writing report)** — daftar isu tata bahasa + teks terkoreksi.
 - [x] **transkrip-audio** — tampilkan segmen berwaktu (timestamp) + metadata bahasa/durasi/model.
-- [ ] **resume-builder, reader-reactions, daftar-isi, perbaikan-dokumen, ai-rewriter** — rapikan render teks (bukan JSON mentah).
+- [x] **resume-builder, reader-reactions, daftar-isi, perbaikan-dokumen, ai-rewriter** — rapikan render teks (bukan JSON mentah).
 
 ### 2. Halaman detail "Informasi File + Aksi" (dari screenshot Mulfu, kata-kata orisinal)
 - [x] Layout **dua kolom** di `dashboard/history/view/[id]/page.tsx`.

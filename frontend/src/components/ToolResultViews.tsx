@@ -851,6 +851,233 @@ function TranscriptView({ result }: { result: Record<string, unknown> }) {
   );
 }
 
+/* ─────────────────────── lightweight markdown render ────────────────────── */
+
+function renderInline(text: string): React.ReactNode {
+  // Bold **x**, italic *x*, inline `code`.
+  const parts = text.split(/(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)/g);
+  return parts.map((p, i) => {
+    if (p.startsWith("**") && p.endsWith("**"))
+      return <strong key={i}>{p.slice(2, -2)}</strong>;
+    if (p.startsWith("*") && p.endsWith("*")) return <em key={i}>{p.slice(1, -1)}</em>;
+    if (p.startsWith("`") && p.endsWith("`"))
+      return (
+        <code key={i} className="rounded bg-[var(--brand-soft)] px-1 font-mono text-[0.9em]">
+          {p.slice(1, -1)}
+        </code>
+      );
+    return <span key={i}>{p}</span>;
+  });
+}
+
+function Markdown({ text }: { text: string }) {
+  const lines = text.replace(/\r/g, "").split("\n");
+  const blocks: React.ReactNode[] = [];
+  let list: string[] = [];
+  const flush = () => {
+    if (list.length) {
+      blocks.push(
+        <ul key={`ul-${blocks.length}`} className="ml-5 list-disc space-y-1">
+          {list.map((li, i) => (
+            <li key={i}>{renderInline(li)}</li>
+          ))}
+        </ul>,
+      );
+      list = [];
+    }
+  };
+  for (const raw of lines) {
+    const line = raw.trimEnd();
+    const h = /^(#{1,4})\s+(.*)$/.exec(line);
+    const li = /^[-*]\s+(.*)$/.exec(line);
+    if (h) {
+      flush();
+      const lvl = h[1].length;
+      const cls =
+        lvl <= 1
+          ? "text-lg font-bold"
+          : lvl === 2
+            ? "text-base font-semibold"
+            : "text-sm font-semibold";
+      blocks.push(
+        <div key={`h-${blocks.length}`} className={`${cls} text-neutral-900 dark:text-neutral-50`}>
+          {renderInline(h[2])}
+        </div>,
+      );
+    } else if (li) {
+      list.push(li[1]);
+    } else if (line.trim() === "") {
+      flush();
+    } else {
+      flush();
+      blocks.push(
+        <p key={`p-${blocks.length}`} className="text-sm leading-relaxed text-neutral-800 dark:text-neutral-200">
+          {renderInline(line)}
+        </p>,
+      );
+    }
+  }
+  flush();
+  return <div className="space-y-2">{blocks}</div>;
+}
+
+function MarkdownResult({
+  result,
+  keyName,
+  title,
+}: {
+  result: Record<string, unknown>;
+  keyName: string;
+  title: string;
+}) {
+  const md = result[keyName];
+  if (typeof md !== "string" || !md.trim()) return null;
+  return (
+    <Section title={title} right={<CopyButton text={md} />}>
+      <div className="max-h-[32rem] overflow-auto">
+        <Markdown text={md} />
+      </div>
+    </Section>
+  );
+}
+
+function ResumeBuilderView({ result }: { result: Record<string, unknown> }) {
+  return (
+    <div className="space-y-5">
+      {typeof result.target_role === "string" && result.target_role && (
+        <Pill>Target: {result.target_role}</Pill>
+      )}
+      <MarkdownResult result={result} keyName="resume_markdown" title="Resume" />
+    </div>
+  );
+}
+
+function ImproveDocumentView({ result }: { result: Record<string, unknown> }) {
+  return (
+    <div className="space-y-5">
+      {typeof result.goal === "string" && result.goal && <Pill>Tujuan: {result.goal}</Pill>}
+      <MarkdownResult result={result} keyName="improved" title="Dokumen Diperbaiki" />
+    </div>
+  );
+}
+
+function AiRewriterView({ result }: { result: Record<string, unknown> }) {
+  return (
+    <div className="space-y-5">
+      {typeof result.tone === "string" && result.tone && <Pill>Gaya: {result.tone}</Pill>}
+      <MarkdownResult result={result} keyName="result" title="Hasil Parafrase" />
+    </div>
+  );
+}
+
+/* ──────────────────────────── Reader Reactions ─────────────────────────── */
+
+const SENTIMENT_TONE: Record<string, string> = {
+  positif: "var(--brand)",
+  netral: "#f59e0b",
+  negatif: "#ef4444",
+};
+
+function ReaderReactionsView({ result }: { result: Record<string, unknown> }) {
+  const reactions = Array.isArray(result.reactions)
+    ? (result.reactions as Record<string, unknown>[])
+    : [];
+  const clarity = num(result.clarity_score);
+  const engagement = num(result.engagement_score);
+  const overall = (result.overall_sentiment as string) ?? "";
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center gap-6 rounded-xl border border-c surface-2 p-5">
+        {clarity !== null && <Gauge value={clarity} label="Kejelasan" tone="var(--brand)" />}
+        {engagement !== null && (
+          <Gauge value={engagement} label="Keterlibatan" tone="var(--brand)" />
+        )}
+        <div className="min-w-0 flex-1 space-y-3">
+          {overall && (
+            <Pill tone={SENTIMENT_TONE[overall.toLowerCase()] ?? "var(--brand)"}>
+              Sentimen keseluruhan: {overall}
+            </Pill>
+          )}
+          {typeof result.summary === "string" && (
+            <p className="text-sm leading-relaxed text-neutral-700 dark:text-neutral-300">
+              {result.summary}
+            </p>
+          )}
+        </div>
+      </div>
+
+      {reactions.length > 0 && (
+        <Section title={`Reaksi Pembaca (${reactions.length})`}>
+          <ul className="space-y-3">
+            {reactions.map((r, i) => {
+              const sent = (r.sentiment as string) ?? "";
+              const col = SENTIMENT_TONE[sent.toLowerCase()] ?? "var(--brand)";
+              return (
+                <li
+                  key={i}
+                  className="rounded-lg border-l-2 px-3 py-2"
+                  style={{ borderColor: col, background: `color-mix(in srgb, ${col} 5%, transparent)` }}
+                >
+                  <div className="mb-1 flex items-center gap-2">
+                    <span className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                      {(r.persona as string) ?? `Pembaca ${i + 1}`}
+                    </span>
+                    {sent && <Pill tone={col}>{sent}</Pill>}
+                  </div>
+                  <p className="text-sm text-neutral-700 dark:text-neutral-300">
+                    {(r.reaction as string) ?? ""}
+                  </p>
+                </li>
+              );
+            })}
+          </ul>
+        </Section>
+      )}
+    </div>
+  );
+}
+
+/* ─────────────────────────────── Daftar Isi ────────────────────────────── */
+
+function TocView({ result }: { result: Record<string, unknown> }) {
+  const entries = Array.isArray(result.entries)
+    ? (result.entries as Record<string, unknown>[])
+    : [];
+
+  return (
+    <div className="space-y-5">
+      {entries.length > 0 ? (
+        <Section title={`Daftar Isi (${entries.length} entri)`}>
+          <ul className="space-y-1">
+            {entries.map((e, i) => {
+              const lvl = Math.max(1, Math.min(3, (num(e.level) as number) ?? 1));
+              return (
+                <li
+                  key={i}
+                  className="flex gap-2 text-sm text-neutral-700 dark:text-neutral-300"
+                  style={{ paddingLeft: `${(lvl - 1) * 1.25}rem` }}
+                >
+                  {e.number != null && (
+                    <span className="font-mono text-[color:var(--brand)]">
+                      {e.number as string}
+                    </span>
+                  )}
+                  <span className={lvl === 1 ? "font-semibold" : ""}>
+                    {(e.title as string) ?? ""}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </Section>
+      ) : (
+        <MarkdownResult result={result} keyName="markdown" title="Daftar Isi" />
+      )}
+    </div>
+  );
+}
+
 /* ──────────────────────────── dispatcher ───────────────────────────────── */
 
 const VIEWS: Record<string, (p: { result: Record<string, unknown> }) => React.ReactElement> = {
@@ -862,6 +1089,11 @@ const VIEWS: Record<string, (p: { result: Record<string, unknown> }) => React.Re
   "grammar-checker": GrammarCheckerView,
   "publikasi-jurnal": PublikasiJurnalView,
   "transkrip-audio": TranscriptView,
+  "resume-builder": ResumeBuilderView,
+  "perbaikan-dokumen": ImproveDocumentView,
+  "reader-reactions": ReaderReactionsView,
+  "daftar-isi": TocView,
+  "ai-rewriter": AiRewriterView,
 };
 
 export function hasRichToolView(tool: string): boolean {
