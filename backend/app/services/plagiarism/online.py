@@ -235,13 +235,16 @@ async def _unpaywall_oa_pdf(client: httpx.AsyncClient, doi: str | None) -> str |
 async def _enrich_fulltext(
     client: httpx.AsyncClient, cands: list[dict], doc: str, title_hint: str = ""
 ) -> None:
-    """Perkaya kandidat identitas-publikasi dengan TEKS PENUH open-access.
+    """Perkaya kandidat dengan TEKS PENUH open-access (ephemeral, nol disk).
 
-    Hanya kandidat paling menyerupai publikasi dokumen yang diambil teks
-    penuhnya (DOI sendiri → judul paling mirip), dibatasi `max_docs` unduhan
-    agar latensi & jaringan terkendali. Teks penuh menggantikan abstrak
-    sebagai `_fulltext`, sehingga pencocokan baris-per-baris mencakup seluruh
-    naskah (bukan hanya abstrak) → % akurat untuk karya terbit/duplikat.
+    Dua kelompok kandidat diambil teks penuhnya:
+    1. Identitas-publikasi: paper yang kemungkinan dokumen itu sendiri
+       (DOI/judul sendiri, atau abstrak hampir seluruhnya termuat).
+    2. Paling mirip: calon sumber plagiarisme ber-tumpang-tindih abstrak
+       tinggi dengan dokumen.
+    Teks penuh (diunduh ephemeral, tak disimpan) menggantikan abstrak sebagai
+    `_fulltext`, sehingga pencocokan baris-per-baris mencakup SELURUH isi
+    sumber (bukan hanya abstrak) → % akurat untuk karya terbit/duplikat/salinan.
     """
     if not settings.online_fulltext_enabled:
         return
@@ -276,15 +279,27 @@ async def _enrich_fulltext(
             or _abs_containment(c) >= 0.5
         )
 
-    promising = [c for c in cands if _passes_gate(c)]
-    promising.sort(key=_rank, reverse=True)
+    identity = [c for c in cands if _passes_gate(c)]
+    identity.sort(key=_rank, reverse=True)
+
+    # Selain identitas-publikasi, pilih kandidat PALING MIRIP (calon sumber
+    # plagiarisme) berdasarkan tumpang-tindih abstrak dengan dokumen, agar
+    # teks PENUH-nya ikut diperiksa — bukan hanya abstrak. Ini yang membuat
+    # pemeriksaan mencakup seluruh isi sumber, tetap ephemeral (nol disk).
+    id_keys = {id(c) for c in identity}
+    similar = [
+        c for c in cands if id(c) not in id_keys and _abs_containment(c) >= 0.10
+    ]
+    similar.sort(key=_abs_containment, reverse=True)
+    similar = similar[: max(0, settings.online_fulltext_similar_docs)]
+
+    # Gabungan kandidat yang akan diperkaya teks penuh (identitas + termirip).
+    promising = identity[: max(1, settings.online_fulltext_max_docs)] + similar
 
     # Perluas cakupan: untuk kandidat menjanjikan yang punya DOI tetapi belum
     # memiliki URL PDF OA, coba resolusi lewat Unpaywall (hanya salinan OA sah).
     if settings.online_unpaywall_enabled:
-        need_oa = [c for c in promising if c.get("doi") and not c.get("_oa_url")][
-            : max(1, settings.online_fulltext_max_docs) + 3
-        ]
+        need_oa = [c for c in promising if c.get("doi") and not c.get("_oa_url")]
         resolved = await asyncio.gather(
             *(_unpaywall_oa_pdf(client, c.get("doi")) for c in need_oa),
             return_exceptions=True,
@@ -294,7 +309,6 @@ async def _enrich_fulltext(
                 c["_oa_url"] = oa
 
     targets = [c for c in promising if c.get("_oa_url")]
-    targets = targets[: max(1, settings.online_fulltext_max_docs)]
     if not targets:
         return
     results = await asyncio.gather(
@@ -445,6 +459,13 @@ async def _q_arxiv(client: httpx.AsyncClient, sentence: str) -> list[dict]:
         title = _clean(e.findtext("a:title", default="", namespaces=ns))
         summary = _clean(e.findtext("a:summary", default="", namespaces=ns))
         url = e.findtext("a:id", default="", namespaces=ns) or None
+        # arXiv seluruhnya Open Access → turunkan URL PDF agar teks penuhnya
+        # bisa diambil ephemeral (abs/ID → pdf/ID). Nol tambahan disk.
+        oa_url = None
+        if url:
+            m = re.search(r"arxiv\.org/abs/([^\s?#]+)", url)
+            if m:
+                oa_url = f"https://arxiv.org/pdf/{m.group(1)}"
         out.append(
             {
                 "title": title,
@@ -452,6 +473,7 @@ async def _q_arxiv(client: httpx.AsyncClient, sentence: str) -> list[dict]:
                 "source": "arXiv",
                 "url": url,
                 "_fulltext": summary,
+                "_oa_url": oa_url,
             }
         )
     return out
