@@ -351,8 +351,6 @@ export function buildReportHtml(args: {
   .verdict{font-size:17px;font-weight:700;} .vnote{color:#475569;font-size:12px;margin-top:4px;max-width:520px;}
   .metrics{display:flex;gap:18px;flex-wrap:wrap;margin:8px 0 4px;font-size:12px;color:#334155;}
   .metrics b{color:#0e1726;}
-  .pubmatch{background:#fff7ed;border:1px solid #fdba74;border-left:4px solid #ea580c;border-radius:8px;padding:10px 14px;margin:6px 0 10px;font-size:12px;color:#9a3412;line-height:1.5;}
-  .pubmatch a{color:#9a3412;}
   h2{font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:#0e1726;border-bottom:1px solid #e2e8f0;padding-bottom:6px;margin-top:26px;}
   table{width:100%;border-collapse:collapse;font-size:12px;} td{padding:7px 8px;border-bottom:1px solid #eef2f7;vertical-align:top;}
   td.pct{width:52px;font-weight:700;text-align:center;color:#0e1726;} td.num{width:30px;}
@@ -380,25 +378,6 @@ export function buildReportHtml(args: {
   }%</span><span class="cap">SIMILARITY</span></div>
   <div><div class="verdict">${v.label}</div><div class="vnote">${v.note}</div></div>
 </div>
-${
-  report.publication_match
-    ? `<div class="pubmatch"><b>⚠️ Terdeteksi sebagai publikasi terindeks.</b> ${
-        report.publication_match.by_doi
-          ? "Dokumen ini mencantumkan DOI yang sama dengan karya terbit di korpus — kemungkinan besar merupakan karya yang sudah dipublikasikan itu sendiri (atau <i>self-plagiarism</i>/duplikasi)."
-          : report.publication_match.by_title
-            ? "Judul dokumen ini sama dengan karya terbit — kemungkinan besar merupakan karya yang sudah dipublikasikan itu sendiri (atau <i>self-plagiarism</i>/duplikasi)."
-            : `${report.publication_match.containment.toFixed(0)}% teks sumber termuat di dokumen ini — kemungkinan karya sudah dipublikasikan (atau <i>self-plagiarism</i>/duplikasi).`
-      } Sumber: ${
-        report.publication_match.url
-          ? `<a href="${escHtml(report.publication_match.url)}" target="_blank" rel="noopener noreferrer">${escHtml(
-              report.publication_match.title || report.publication_match.doi || report.publication_match.url,
-            )}</a>`
-          : escHtml(report.publication_match.title || report.publication_match.doi || "(tanpa judul)")
-      }${
-        report.publication_match.source ? ` · ${escHtml(report.publication_match.source)}` : ""
-      }. <span class="pubnote">Catatan: persentase kecocokan baris-per-baris tetap rendah karena korpus &amp; sumber daring umumnya hanya memuat <b>abstrak</b>, bukan naskah penuh — jadi hanya porsi abstrak yang terhitung cocok, bukan 100%.</span></div>`
-    : ""
-}
 <div class="metrics">
   <div><b>${report.word_count}</b> kata</div>
   <div><b>${report.char_count}</b> karakter</div>

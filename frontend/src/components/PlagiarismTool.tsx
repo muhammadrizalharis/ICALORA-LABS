@@ -13,7 +13,7 @@ export default function PlagiarismTool() {
   const launch = useJobLauncher();
 
   function run() {
-    if (!text.trim()) return;
+    if (!text.trim() || !docTitle.trim()) return;
     const original = file;
     launch({
       tool: "plagiarism-checker",
@@ -35,12 +35,13 @@ export default function PlagiarismTool() {
 
       <div>
         <label className="mb-1.5 block text-xs font-medium text-neutral-600 dark:text-neutral-300">
-          Judul Dokumen (opsional)
+          Judul Dokumen <span className="text-[color:var(--brand)]">*</span>
         </label>
         <input
           value={docTitle}
           onChange={(e) => setDocTitle(e.target.value)}
           placeholder="Masukkan judul dokumen…"
+          required
           className="mb-3 w-full rounded-lg border border-c surface px-3 py-2 text-sm text-neutral-900 outline-none focus:border-[color:var(--brand)] dark:text-neutral-100 dark:placeholder:text-neutral-500"
         />
         <TextInput
@@ -51,6 +52,17 @@ export default function PlagiarismTool() {
           rows={10}
         />
       </div>
+
+      <button
+        onClick={run}
+        disabled={text.trim().length === 0 || docTitle.trim().length === 0}
+        className="w-full rounded-xl bg-[color:var(--brand)] px-5 py-3 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
+      >
+        Periksa Kemiripan
+      </button>
+      <p className="text-center text-xs text-neutral-400 dark:text-neutral-500">
+        Dibandingkan dengan korpus akses-terbuka ICALORA-LABS · laporan dapat diunduh sebagai PDF.
+      </p>
 
       <div className="flex items-start gap-3 rounded-xl border border-c bg-[color:var(--brand-soft)] px-4 py-3">
         <span className="text-lg">✨</span>
@@ -65,17 +77,6 @@ export default function PlagiarismTool() {
           </p>
         </div>
       </div>
-
-      <button
-        onClick={run}
-        disabled={text.trim().length === 0}
-        className="w-full rounded-xl bg-[color:var(--brand)] px-5 py-3 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
-      >
-        Periksa Kemiripan
-      </button>
-      <p className="text-center text-xs text-neutral-400 dark:text-neutral-500">
-        Dibandingkan dengan korpus akses-terbuka ICALORA-LABS · laporan dapat diunduh sebagai PDF.
-      </p>
     </div>
   );
 }
