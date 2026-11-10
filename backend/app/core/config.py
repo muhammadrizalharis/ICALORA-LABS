@@ -93,7 +93,7 @@ class Settings(BaseSettings):
     # penyimpanan. Ini membuat % plagiarisme akurat untuk karya terbit/duplikat.
     online_fulltext_enabled: bool = Field(default=True)
     online_fulltext_max_bytes: int = Field(default=20 * 1024 * 1024)
-    online_fulltext_max_docs: int = Field(default=3)
+    online_fulltext_max_docs: int = Field(default=5)
 
     @property
     def database_url(self) -> str:
