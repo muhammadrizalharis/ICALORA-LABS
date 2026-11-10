@@ -3,10 +3,23 @@
 from __future__ import annotations
 
 import io
+import re
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 
 _TXT_EXT = {".txt", ".md", ".csv", ".tex"}
+
+# Tanda hubung patah-baris pada PDF (teks justified/2-kolom) kerap terekstrak
+# sebagai "reduc- ing" / "effi-\ncient" — kata yang sebenarnya UTUH terpecah.
+# Ini menurunkan kecocokan teks secara keliru (pemeriksaan plagiarisme menilai
+# TEKS, bukan tata letak), jadi disatukan kembali. Hanya menyatukan bila tanda
+# hubung diikuti spasi/baris-baru lalu HURUF KECIL — pola khas pemenggalan kata;
+# tanda hubung majemuk sah ("inter-cluster", tanpa spasi) tidak terpengaruh.
+_HYPHEN_BREAK_RE = re.compile(r"(\w)-\s+([a-z])")
+
+
+def _dehyphenate(text: str) -> str:
+    return _HYPHEN_BREAK_RE.sub(r"\1\2", text or "")
 
 
 def _extract_pdf(data: bytes) -> str:
@@ -14,7 +27,7 @@ def _extract_pdf(data: bytes) -> str:
 
     reader = PdfReader(io.BytesIO(data))
     parts = [page.extract_text() or "" for page in reader.pages]
-    return "\n".join(parts)
+    return _dehyphenate("\n".join(parts))
 
 
 def _extract_docx(data: bytes) -> str:
