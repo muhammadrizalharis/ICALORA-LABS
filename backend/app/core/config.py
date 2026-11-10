@@ -114,6 +114,12 @@ class Settings(BaseSettings):
     online_websearch_enabled: bool = Field(default=True)
     online_websearch_sentences: int = Field(default=20)
     online_websearch_per_sentence: int = Field(default=8)
+    # REM PENGAMAN kuota: batas keras jumlah kueri web-search per BULAN. Begitu
+    # tercapai, web-search otomatis nonaktif hingga bulan depan → mustahil
+    # melewati kuota gratis penyedia, mustahil kena tagih. Default konservatif
+    # (di bawah tier gratis Brave). Naikkan hanya setelah memastikan kuota gratis
+    # akun Anda di dashboard penyedia.
+    online_websearch_monthly_cap: int = Field(default=900)
 
     @property
     def database_url(self) -> str:
