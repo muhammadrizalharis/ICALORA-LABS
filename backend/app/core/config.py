@@ -94,6 +94,11 @@ class Settings(BaseSettings):
     online_fulltext_enabled: bool = Field(default=True)
     online_fulltext_max_bytes: int = Field(default=20 * 1024 * 1024)
     online_fulltext_max_docs: int = Field(default=5)
+    # Penyedia Open Access tambahan (gratis, legal — hanya metadata/abstrak OA).
+    # DOAJ: Directory of Open Access Journals (banyak jurnal Indonesia).
+    # Unpaywall: resolver DOI → URL PDF OA legal (memperluas cakupan teks-penuh).
+    online_doaj_enabled: bool = Field(default=True)
+    online_unpaywall_enabled: bool = Field(default=True)
 
     @property
     def database_url(self) -> str:
