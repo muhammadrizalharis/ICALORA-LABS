@@ -203,15 +203,28 @@ def humanize_ep(body: TextIn, request: Request) -> dict:
         raise HTTPException(status_code=502, detail=f"LLM gagal: {exc}") from exc
 
 
-async def _run_plagiarism_merged(text: str, top_k: int) -> dict:
+def _title_hint_from_filename(filename: str | None) -> str:
+    """Judul perkiraan dari nama berkas unggahan (banyak PDF akademik dinamai
+    sesuai judulnya). Buang ekstensi & pemisah umum agar jadi query judul."""
+    import os
+    import re as _re
+
+    stem = os.path.splitext(filename or "")[0]
+    stem = _re.sub(r"[_\-]+", " ", stem)
+    stem = _re.sub(r"\s+", " ", stem).strip()
+    return stem
+
+
+async def _run_plagiarism_merged(text: str, top_k: int, title_hint: str = "") -> dict:
     """Jalankan cek plagiarisme korpus lokal, lalu—bila diaktifkan—gabungkan
     sumber daring (tanpa-unduh) ke dalam skor yang sama. Galat daring tidak
-    membatalkan laporan; cukup turun ke hasil korpus lokal saja."""
+    membatalkan laporan; cukup turun ke hasil korpus lokal saja. `title_hint`
+    (mis. nama berkas) membantu menemukan paper terbit yang identik."""
     extra: list[dict] = []
     providers: dict = {}
     if settings.online_check_enabled:
         try:
-            extra, providers = await online_candidates(text)
+            extra, providers = await online_candidates(text, title_hint)
         except Exception:  # noqa: BLE001, S110
             extra, providers = [], {}
     res = await run_in_threadpool(check_plagiarism, text, top_k, extra)
@@ -271,7 +284,9 @@ async def plagiarism_file_ep(  # noqa: B008
         raise HTTPException(status_code=422, detail="Tidak ada teks yang dapat diekstrak.")
     _guard(text)
     try:
-        res = await _run_plagiarism_merged(text, min(max(top_k, 1), 60))
+        res = await _run_plagiarism_merged(
+            text, min(max(top_k, 1), 60), _title_hint_from_filename(file.filename)
+        )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Cek plagiarisme gagal: {exc}") from exc
 
@@ -325,7 +340,7 @@ async def _job_run_file(
     is_pdf: bool, top_k: int,
 ) -> None:
     try:
-        res = await _run_plagiarism_merged(text, top_k)
+        res = await _run_plagiarism_merged(text, top_k, _title_hint_from_filename(filename))
         res["has_original_pdf"] = is_pdf
         res["source_filename"] = filename
         hist_id = None
