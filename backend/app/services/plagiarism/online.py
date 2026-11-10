@@ -18,6 +18,7 @@ import asyncio
 import hashlib
 import re
 from datetime import datetime, timezone
+from urllib.parse import quote_plus
 from xml.etree import ElementTree as ET
 
 import httpx
@@ -207,6 +208,30 @@ def _title_jaccard(a: str, b: str) -> float:
     return len(wa & wb) / len(wa | wb)
 
 
+async def _unpaywall_oa_pdf(client: httpx.AsyncClient, doi: str | None) -> str | None:
+    """Resolver DOI → URL PDF Open Access legal via Unpaywall.
+
+    Unpaywall hanya mengindeks salinan OA yang SAH (repositori/penerbit), jadi
+    aman dipakai untuk memperluas cakupan teks-penuh kandidat yang punya DOI
+    tetapi belum memiliki `_oa_url` dari provider aslinya.
+    """
+    if not doi or not settings.online_unpaywall_enabled:
+        return None
+    r = await _get_json(
+        client,
+        f"https://api.unpaywall.org/v2/{quote_plus(doi)}",
+        {"email": _MAILTO},
+    )
+    if r is None:
+        return None
+    try:
+        data = r.json()
+    except Exception:  # noqa: BLE001
+        return None
+    loc = data.get("best_oa_location") or {}
+    return loc.get("url_for_pdf") or None
+
+
 async def _enrich_fulltext(
     client: httpx.AsyncClient, cands: list[dict], doc: str, title_hint: str = ""
 ) -> None:
@@ -244,17 +269,31 @@ async def _enrich_fulltext(
         base = 1.0 if (c.get("doi") or "").lower() in own_dois else 0.0
         return base + _title_sim(c) + _abs_containment(c)
 
-    targets = [
-        c
-        for c in cands
-        if c.get("_oa_url")
-        and (
+    def _passes_gate(c: dict) -> bool:
+        return (
             (c.get("doi") or "").lower() in own_dois
             or _title_sim(c) >= 0.6
             or _abs_containment(c) >= 0.5
         )
-    ]
-    targets.sort(key=_rank, reverse=True)
+
+    promising = [c for c in cands if _passes_gate(c)]
+    promising.sort(key=_rank, reverse=True)
+
+    # Perluas cakupan: untuk kandidat menjanjikan yang punya DOI tetapi belum
+    # memiliki URL PDF OA, coba resolusi lewat Unpaywall (hanya salinan OA sah).
+    if settings.online_unpaywall_enabled:
+        need_oa = [c for c in promising if c.get("doi") and not c.get("_oa_url")][
+            : max(1, settings.online_fulltext_max_docs) + 3
+        ]
+        resolved = await asyncio.gather(
+            *(_unpaywall_oa_pdf(client, c.get("doi")) for c in need_oa),
+            return_exceptions=True,
+        )
+        for c, oa in zip(need_oa, resolved, strict=False):
+            if isinstance(oa, str) and oa:
+                c["_oa_url"] = oa
+
+    targets = [c for c in promising if c.get("_oa_url")]
     targets = targets[: max(1, settings.online_fulltext_max_docs)]
     if not targets:
         return
@@ -522,6 +561,59 @@ async def _q_europepmc(client: httpx.AsyncClient, sentence: str) -> list[dict]:
     return out
 
 
+async def _q_doaj(client: httpx.AsyncClient, sentence: str) -> list[dict]:
+    """DOAJ: Directory of Open Access Journals (gratis, tanpa kunci; banyak
+    jurnal Indonesia). Seluruh kontennya Open Access → legal untuk dibandingkan.
+    """
+    if not settings.online_doaj_enabled:
+        return []
+    q = quote_plus(sentence[:200])
+    r = await _get_json(
+        client,
+        f"https://doaj.org/api/search/articles/{q}",
+        {"pageSize": _PER_PROVIDER},
+    )
+    if r is None:
+        return []
+    try:
+        data = r.json()
+    except Exception:  # noqa: BLE001
+        return []
+    out = []
+    for w in (data.get("results", []) or [])[:_PER_PROVIDER]:
+        bj = w.get("bibjson") or {}
+        title = _clean(bj.get("title") or "")
+        abstract = _clean(bj.get("abstract") or "")
+        if not (title or abstract):
+            continue
+        doi = None
+        for ident in bj.get("identifier") or []:
+            if (ident.get("type") or "").lower() == "doi":
+                doi = (ident.get("id") or "").replace("https://doi.org/", "").lower() or None
+        url = None
+        oa_url = None
+        for lnk in bj.get("link") or []:
+            if (lnk.get("type") or "").lower() == "fulltext":
+                u = lnk.get("url")
+                url = url or u
+                ct = (lnk.get("content_type") or "").lower()
+                if u and ("pdf" in ct or u.lower().endswith(".pdf")):
+                    oa_url = u
+        year = bj.get("year")
+        out.append(
+            {
+                "title": title,
+                "doi": doi,
+                "source": "DOAJ",
+                "url": url or (f"https://doi.org/{doi}" if doi else None),
+                "pub_year": int(year) if str(year or "").isdigit() else None,
+                "_fulltext": abstract or title,
+                "_oa_url": oa_url,
+            }
+        )
+    return out
+
+
 async def _q_semanticscholar(client: httpx.AsyncClient, sentence: str) -> list[dict]:
     """Semantic Scholar: korpus lintas-disiplin (gratis; dibatasi laju ketat,
     kegagalan 429 ditangani anggun sebagai hasil kosong)."""
@@ -570,6 +662,7 @@ _PROVIDER_PLAN: list[tuple] = [
     (_q_openalex, 3, 0.40, 60),
     (_q_crossref, 8, 1.00, _SENT_CAP),
     (_q_europepmc, 8, 1.00, _SENT_CAP),
+    (_q_doaj, 4, 0.60, 80),
     (_q_wikipedia, 6, 0.60, 80),
     (_q_arxiv, 3, 0.60, 80),
     (_q_semanticscholar, 1, 0.25, 20),
