@@ -636,6 +636,54 @@ async def _q_doaj(client: httpx.AsyncClient, sentence: str) -> list[dict]:
     return out
 
 
+async def _q_brave(client: httpx.AsyncClient, sentence: str) -> list[dict]:
+    """Web search umum (Brave Search API) sebagai VERIFIER bertarget — menangkap
+    sumber yang lolos dari provider akademik (mis. halaman penerbit, repositori,
+    blog). NONAKTIF otomatis bila `brave_api_key` kosong. Agar hemat kuota, hanya
+    dipanggil untuk kalimat paling khas (lihat `_gather_candidates`). Hasilnya
+    tetap ephemeral (snippet; teks-penuh OA hanya bila URL PDF) → nol disk.
+    """
+    if not settings.brave_api_key or not settings.online_websearch_enabled:
+        return []
+    r = await _get_json(
+        client,
+        "https://api.search.brave.com/res/v1/web/search",
+        {"q": sentence[:380], "count": settings.online_websearch_per_sentence},
+        headers={
+            "X-Subscription-Token": settings.brave_api_key,
+            "Accept": "application/json",
+        },
+    )
+    if r is None:
+        return []
+    try:
+        data = r.json()
+    except Exception:  # noqa: BLE001
+        return []
+    out = []
+    web = (data.get("web") or {}).get("results") or []
+    for w in web[: settings.online_websearch_per_sentence]:
+        title = _clean(w.get("title") or "")
+        desc = _clean(w.get("description") or "")
+        url = w.get("url")
+        if not (title and url):
+            continue
+        # Hanya URL PDF yang diambil teks-penuhnya (ephemeral); halaman HTML
+        # memakai snippet saja agar legal & ringan.
+        oa_url = url if url.lower().split("?")[0].endswith(".pdf") else None
+        out.append(
+            {
+                "title": title,
+                "doi": None,
+                "source": "Web",
+                "url": url,
+                "_fulltext": desc or title,
+                "_oa_url": oa_url,
+            }
+        )
+    return out
+
+
 async def _q_semanticscholar(client: httpx.AsyncClient, sentence: str) -> list[dict]:
     """Semantic Scholar: korpus lintas-disiplin (gratis; dibatasi laju ketat,
     kegagalan 429 ditangani anggun sebagai hasil kosong)."""
@@ -818,7 +866,18 @@ async def _gather_candidates(
         )
         results = await asyncio.gather(*tasks, return_exceptions=True)
         pub_results = await pub_task
-    for res in list(results) + [pub_results]:
+        # Fase VERIFIER web search (Brave): HANYA kalimat paling khas, serial
+        # dengan jeda ~1 dtk menghormati batas 1 kueri/detik paket gratis.
+        # Nonaktif otomatis bila kunci kosong (nol kuota terpakai).
+        brave_results: list = []
+        if settings.brave_api_key and settings.online_websearch_enabled:
+            for s in sentences[: settings.online_websearch_sentences]:
+                try:
+                    brave_results.append(await _q_brave(client, s))
+                except Exception:  # noqa: BLE001
+                    pass
+                await asyncio.sleep(1.1)
+    for res in list(results) + [pub_results] + brave_results:
         if isinstance(res, Exception) or not res:
             continue
         for cand in res:
