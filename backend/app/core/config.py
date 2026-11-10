@@ -104,6 +104,16 @@ class Settings(BaseSettings):
     # Unpaywall: resolver DOI → URL PDF OA legal (memperluas cakupan teks-penuh).
     online_doaj_enabled: bool = Field(default=True)
     online_unpaywall_enabled: bool = Field(default=True)
+    # Web search umum (ala Google) sebagai VERIFIER bertarget. Menangkap sumber
+    # yang lolos dari provider ilmiah (mis. halaman penerbit). Agar hemat kuota
+    # API, HANYA dijalankan untuk N kalimat PALING KHAS per dokumen. NONAKTIF
+    # otomatis bila `brave_api_key` kosong. Brave Search API gratis = 2.000
+    # kueri/bulan → 20 kalimat/paper ≈ 100 paper/bulan. Hasilnya tetap ephemeral
+    # (snippet/teks-penuh OA di memori) → nol tambahan disk.
+    brave_api_key: str = Field(default="")
+    online_websearch_enabled: bool = Field(default=True)
+    online_websearch_sentences: int = Field(default=20)
+    online_websearch_per_sentence: int = Field(default=8)
 
     @property
     def database_url(self) -> str:
