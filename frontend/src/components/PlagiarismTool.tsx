@@ -3,7 +3,6 @@
 import { useState } from "react";
 import TextInput from "@/components/TextInput";
 import { useJobLauncher } from "@/lib/useJobs";
-import { jobTitle } from "@/lib/jobs";
 import { submitPlagiarismJob } from "@/lib/plagiarismJob";
 
 export default function PlagiarismTool() {
@@ -17,12 +16,12 @@ export default function PlagiarismTool() {
   const launch = useJobLauncher();
 
   function run() {
-    if (!text.trim() || !docTitle.trim()) return;
+    if (!file || !docTitle.trim()) return;
     const original = file;
     const minPct = exMatches ? Math.max(0, Math.min(100, parseFloat(exMinPct) || 0)) : 0;
     launch({
       tool: "plagiarism-checker",
-      title: docTitle.trim() || (original ? original.name : jobTitle(text)),
+      title: docTitle.trim() || original.name,
       run: () =>
         submitPlagiarismJob({
           text,
@@ -63,9 +62,9 @@ export default function PlagiarismTool() {
           value={text}
           onChange={setText}
           onFile={setFile}
+          uploadOnly
           accept=".pdf"
           acceptHint="Hanya PDF (maks 10 MB) — agar laporan berformat identik bisa dibuat"
-          placeholder="Tempel teks/abstrak, atau unggah berkas PDF untuk diperiksa keasliannya…"
           rows={10}
         />
       </div>
@@ -115,7 +114,7 @@ export default function PlagiarismTool() {
 
       <button
         onClick={run}
-        disabled={text.trim().length === 0 || docTitle.trim().length === 0}
+        disabled={!file || docTitle.trim().length === 0}
         className="w-full rounded-xl bg-[color:var(--brand)] px-5 py-3 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
       >
         Periksa Kemiripan

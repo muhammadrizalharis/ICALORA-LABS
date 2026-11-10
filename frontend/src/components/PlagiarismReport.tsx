@@ -7,7 +7,6 @@ import {
   HILITE,
   MATCH_GROUP_META,
   MATCH_GROUP_ORDER,
-  escHtml,
   buildHighlight,
   buildReportHtml,
   verdictFor,
@@ -288,22 +287,6 @@ export default function PlagiarismReport({ report, documentText, docTitle = "", 
               </li>
             ))}
           </ul>
-        </div>
-      )}
-
-      {text && (
-        <div>
-          <div className="mb-2 text-sm font-semibold text-neutral-800 dark:text-neutral-200">
-            Dokumen dengan Sorotan
-          </div>
-          <div
-            className="max-h-96 overflow-auto whitespace-pre-wrap rounded-lg border border-c bg-white p-4 text-sm leading-relaxed text-neutral-800 dark:bg-neutral-900 dark:text-neutral-100"
-            dangerouslySetInnerHTML={{ __html: hi.html || escHtml(text) }}
-          />
-          <p className="mt-1 text-[11px] text-neutral-400">
-            Bagian yang disorot cocok dengan sumber bernomor pada ringkasan di atas.
-            {report.document_truncated && " (Dokumen panjang — ditampilkan sebagian.)"}
-          </p>
         </div>
       )}
 
