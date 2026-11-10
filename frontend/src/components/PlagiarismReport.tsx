@@ -5,8 +5,6 @@ import { downloadPdfReport } from "@/lib/download";
 import { API_BASE } from "@/lib/api";
 import {
   HILITE,
-  MIN_WORDS,
-  MIN_PCT,
   MATCH_GROUP_META,
   MATCH_GROUP_ORDER,
   escHtml,
@@ -45,36 +43,22 @@ interface Props {
 
 /** Laporan kemiripan interaktif — dipakai di halaman tool & penampil riwayat. */
 export default function PlagiarismReport({ report, documentText, docTitle = "", historyId }: Props) {
-  const [exShort, setExShort] = useState(false);
-  const [exSmall, setExSmall] = useState(false);
-  const [exQuotes, setExQuotes] = useState(false);
-  const [exBib, setExBib] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const text = documentText ?? report.document_text ?? "";
 
-  function activePassages(): MatchedPassage[] {
-    return report.matched_passages.filter(
-      (p) => !(exQuotes && p.quoted) && !(exBib && p.in_bibliography),
-    );
-  }
-
-  function hiOpts(): { minWords: number; exclude: Set<string> } {
-    let exclude = new Set<string>();
-    if (exSmall) {
-      const base = buildHighlight(text, activePassages(), report.char_count);
-      exclude = new Set(base.sources.filter((s) => s.pct < MIN_PCT).map((s) => s.key));
-    }
-    return { minWords: exShort ? MIN_WORDS : 0, exclude };
-  }
+  // Pengaturan Exclude dipilih SEBELUM cek & diterapkan di sisi server; laporan
+  // hanya menampilkan hasil yang sudah difilter + ringkasan setelan terkunci.
+  const passages: MatchedPassage[] = report.matched_passages;
+  const hiOptsConst = { minWords: 0, exclude: new Set<string>() };
 
   function reportHtml(): string {
     return buildReportHtml({
       report,
       text,
       docTitle,
-      passages: activePassages(),
-      hiOpts: hiOpts(),
+      passages,
+      hiOpts: hiOptsConst,
     });
   }
 
@@ -113,12 +97,14 @@ export default function PlagiarismReport({ report, documentText, docTitle = "", 
     }
   }
 
-  const hi = buildHighlight(text, activePassages(), report.char_count, false, hiOpts());
-  const filtersActive = exShort || exSmall || exQuotes || exBib;
-  const headlineIndex = report.integrity_index ?? report.overall_similarity;
-  const shownIndex = filtersActive
-    ? Math.min(100, Math.round(hi.sources.reduce((a, s) => a + s.pct, 0) * 10) / 10)
-    : headlineIndex;
+  const hi = buildHighlight(text, passages, report.char_count, false, hiOptsConst);
+  const shownIndex = report.integrity_index ?? report.overall_similarity;
+  const ex = report.exclude_settings;
+  const exLabels: string[] = [];
+  if (ex?.bibliography) exLabels.push("Tanpa daftar pustaka");
+  if (ex?.quotes) exLabels.push("Tanpa kutipan");
+  if (ex && ex.min_source_percent > 0)
+    exLabels.push(`Kecualikan sumber < ${ex.min_source_percent}%`);
 
   const hasOriginal = Boolean(report.has_original_pdf && historyId);
   const originalReportUrl = (dl: boolean) =>
@@ -195,7 +181,7 @@ export default function PlagiarismReport({ report, documentText, docTitle = "", 
       <div className="flex flex-wrap items-center gap-8">
         <ScoreRing
           value={shownIndex}
-          label={filtersActive ? "Similarity (disesuaikan)" : "Similarity Index"}
+          label="Similarity Index"
           tone={toneForScore(shownIndex)}
         />
         <div className="min-w-0 flex-1">
@@ -257,31 +243,23 @@ export default function PlagiarismReport({ report, documentText, docTitle = "", 
       )}
 
       <div className="rounded-lg border border-c bg-neutral-50 px-3 py-2.5 dark:bg-white/5">
-        <div className="mb-1.5 text-xs font-semibold text-neutral-700 dark:text-neutral-200">
-          Pengaturan Exclude (skor dihitung ulang)
+        <div className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-neutral-700 dark:text-neutral-200">
+          <span>🔒</span> Pengaturan Exclude (dikunci saat pemeriksaan)
         </div>
-        <div className="flex flex-wrap gap-x-5 gap-y-1.5 text-xs text-neutral-600 dark:text-neutral-300">
-          <label className="inline-flex cursor-pointer items-center gap-2">
-            <input type="checkbox" checked={exShort} onChange={(e) => setExShort(e.target.checked)} />
-            Kecualikan kecocokan pendek (&lt; {MIN_WORDS} kata)
-          </label>
-          <label className="inline-flex cursor-pointer items-center gap-2">
-            <input type="checkbox" checked={exSmall} onChange={(e) => setExSmall(e.target.checked)} />
-            Kecualikan sumber kecil (&lt; {MIN_PCT}%)
-          </label>
-          <label className="inline-flex cursor-pointer items-center gap-2">
-            <input type="checkbox" checked={exQuotes} onChange={(e) => setExQuotes(e.target.checked)} />
-            Kecualikan teks dalam kutipan
-          </label>
-          <label className="inline-flex cursor-pointer items-center gap-2">
-            <input type="checkbox" checked={exBib} onChange={(e) => setExBib(e.target.checked)} />
-            Kecualikan daftar pustaka
-          </label>
-        </div>
-        {filtersActive && (
-          <p className="mt-1.5 text-[11px] text-neutral-400">
-            Skor disesuaikan dari {headlineIndex.toFixed(1)}% → {shownIndex.toFixed(1)}%
-            setelah filter diterapkan.
+        {exLabels.length > 0 ? (
+          <div className="flex flex-wrap gap-1.5">
+            {exLabels.map((l) => (
+              <span
+                key={l}
+                className="rounded-full border border-c bg-white px-2.5 py-1 text-[11px] font-medium text-neutral-600 dark:bg-white/10 dark:text-neutral-300"
+              >
+                {l}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <p className="text-[11px] text-neutral-400">
+            Tidak ada pengecualian — seluruh kecocokan dihitung.
           </p>
         )}
       </div>

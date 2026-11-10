@@ -64,8 +64,17 @@ class ParaphraseIn(TextIn):
     style: str = Field(default="standar")
 
 
+class ExcludeIn(BaseModel):
+    """Pengaturan Exclude pra-pengecekan (dikunci pada hasil)."""
+
+    bibliography: bool = False
+    quotes: bool = False
+    min_source_percent: float = Field(default=0.0, ge=0.0, le=100.0)
+
+
 class PlagiarismIn(TextIn):
     top_k: int = Field(default=30, ge=1, le=60)
+    exclude: ExcludeIn | None = None
 
 
 class RewriteIn(TextIn):
@@ -215,11 +224,14 @@ def _title_hint_from_filename(filename: str | None) -> str:
     return stem
 
 
-async def _run_plagiarism_merged(text: str, top_k: int, title_hint: str = "") -> dict:
+async def _run_plagiarism_merged(
+    text: str, top_k: int, title_hint: str = "", exclude: dict | None = None
+) -> dict:
     """Jalankan cek plagiarisme korpus lokal, lalu—bila diaktifkan—gabungkan
     sumber daring (tanpa-unduh) ke dalam skor yang sama. Galat daring tidak
     membatalkan laporan; cukup turun ke hasil korpus lokal saja. `title_hint`
-    (mis. nama berkas) membantu menemukan paper terbit yang identik."""
+    (mis. nama berkas) membantu menemukan paper terbit yang identik. `exclude`
+    adalah pengaturan Exclude pra-pengecekan yang dikunci pada hasil."""
     extra: list[dict] = []
     providers: dict = {}
     if settings.online_check_enabled:
@@ -227,7 +239,7 @@ async def _run_plagiarism_merged(text: str, top_k: int, title_hint: str = "") ->
             extra, providers = await online_candidates(text, title_hint)
         except Exception:  # noqa: BLE001, S110
             extra, providers = [], {}
-    res = await run_in_threadpool(check_plagiarism, text, top_k, extra)
+    res = await run_in_threadpool(check_plagiarism, text, top_k, extra, exclude)
     res["online_merged"] = bool(extra)
     res["online_providers"] = [
         {"name": k, "hits": v} for k, v in sorted(providers.items(), key=lambda kv: -kv[1])
@@ -238,8 +250,9 @@ async def _run_plagiarism_merged(text: str, top_k: int, title_hint: str = "") ->
 @router.post("/plagiarism")
 async def plagiarism_ep(body: PlagiarismIn, request: Request) -> dict:
     _guard(body.text)
+    ex = body.exclude.model_dump() if body.exclude else None
     try:
-        res = await _run_plagiarism_merged(body.text, body.top_k)
+        res = await _run_plagiarism_merged(body.text, body.top_k, exclude=ex)
         _log(request, "plagiarism-checker", "Cek Plagiarisme", body.text[:200], res)
         return res
     except Exception as exc:  # noqa: BLE001
@@ -261,11 +274,25 @@ async def plagiarism_online_ep(body: PlagiarismIn, request: Request) -> dict:
     return res
 
 
+def _exclude_from_query(
+    exclude_bibliography: bool, exclude_quotes: bool, exclude_min_percent: float
+) -> dict:
+    """Bangun pengaturan Exclude dari query param (untuk endpoint unggah berkas)."""
+    return {
+        "bibliography": bool(exclude_bibliography),
+        "quotes": bool(exclude_quotes),
+        "min_source_percent": max(0.0, min(100.0, float(exclude_min_percent or 0.0))),
+    }
+
+
 @router.post("/plagiarism-file")
 async def plagiarism_file_ep(  # noqa: B008
     request: Request,
     file: UploadFile = File(...),  # noqa: B008
     top_k: int = 30,
+    exclude_bibliography: bool = False,
+    exclude_quotes: bool = False,
+    exclude_min_percent: float = 0.0,
 ) -> dict:
     """Cek plagiarisme dari BERKAS asli; simpan PDF asli di VM untuk laporan
     berformat identik (sorotan di atas dokumen asli)."""
@@ -283,9 +310,10 @@ async def plagiarism_file_ep(  # noqa: B008
     if not text:
         raise HTTPException(status_code=422, detail="Tidak ada teks yang dapat diekstrak.")
     _guard(text)
+    ex = _exclude_from_query(exclude_bibliography, exclude_quotes, exclude_min_percent)
     try:
         res = await _run_plagiarism_merged(
-            text, min(max(top_k, 1), 60), _title_hint_from_filename(file.filename)
+            text, min(max(top_k, 1), 60), _title_hint_from_filename(file.filename), ex
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Cek plagiarisme gagal: {exc}") from exc
@@ -322,9 +350,12 @@ def _spawn(coro) -> None:
     task.add_done_callback(_BG_TASKS.discard)
 
 
-async def _job_run_text(job_id: str, user_id: int | None, text: str, top_k: int, title: str) -> None:
+async def _job_run_text(
+    job_id: str, user_id: int | None, text: str, top_k: int, title: str,
+    exclude: dict | None = None,
+) -> None:
     try:
-        res = await _run_plagiarism_merged(text, top_k)
+        res = await _run_plagiarism_merged(text, top_k, exclude=exclude)
         hist_id = None
         if user_id is not None:
             hist_id = await run_in_threadpool(
@@ -337,10 +368,12 @@ async def _job_run_text(job_id: str, user_id: int | None, text: str, top_k: int,
 
 async def _job_run_file(
     job_id: str, user_id: int | None, text: str, data: bytes, filename: str | None,
-    is_pdf: bool, top_k: int,
+    is_pdf: bool, top_k: int, exclude: dict | None = None,
 ) -> None:
     try:
-        res = await _run_plagiarism_merged(text, top_k, _title_hint_from_filename(filename))
+        res = await _run_plagiarism_merged(
+            text, top_k, _title_hint_from_filename(filename), exclude
+        )
         res["has_original_pdf"] = is_pdf
         res["source_filename"] = filename
         hist_id = None
@@ -366,8 +399,9 @@ async def plagiarism_async_ep(body: PlagiarismIn, request: Request) -> dict:
     user = optional_user_from_request(request)
     uid = user["id"] if user else None
     title = body.text[:60].strip() or "Cek Plagiarisme"
+    ex = body.exclude.model_dump() if body.exclude else None
     job_id = create_job(uid, "plagiarism-checker", title)
-    _spawn(_job_run_text(job_id, uid, body.text, body.top_k, title))
+    _spawn(_job_run_text(job_id, uid, body.text, body.top_k, title, ex))
     return {"job_id": job_id, "status": "processing"}
 
 
@@ -376,6 +410,9 @@ async def plagiarism_file_async_ep(  # noqa: B008
     request: Request,
     file: UploadFile = File(...),  # noqa: B008
     top_k: int = 30,
+    exclude_bibliography: bool = False,
+    exclude_quotes: bool = False,
+    exclude_min_percent: float = 0.0,
 ) -> dict:
     """Versi async dari cek berkas; kembalikan `job_id` segera."""
     data = await file.read()
@@ -395,10 +432,11 @@ async def plagiarism_file_async_ep(  # noqa: B008
     user = optional_user_from_request(request)
     uid = user["id"] if user else None
     is_pdf = (file.filename or "").lower().endswith(".pdf")
+    ex = _exclude_from_query(exclude_bibliography, exclude_quotes, exclude_min_percent)
     job_id = create_job(uid, "plagiarism-checker", file.filename or "Cek Plagiarisme")
     _spawn(
         _job_run_file(
-            job_id, uid, text, data, file.filename, is_pdf, min(max(top_k, 1), 60)
+            job_id, uid, text, data, file.filename, is_pdf, min(max(top_k, 1), 60), ex
         )
     )
     return {"job_id": job_id, "status": "processing"}

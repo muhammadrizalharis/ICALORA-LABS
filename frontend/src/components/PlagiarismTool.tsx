@@ -10,15 +10,30 @@ export default function PlagiarismTool() {
   const [text, setText] = useState("");
   const [docTitle, setDocTitle] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [exBib, setExBib] = useState(true);
+  const [exQuotes, setExQuotes] = useState(true);
+  const [exMatches, setExMatches] = useState(false);
+  const [exMinPct, setExMinPct] = useState("1");
   const launch = useJobLauncher();
 
   function run() {
     if (!text.trim() || !docTitle.trim()) return;
     const original = file;
+    const minPct = exMatches ? Math.max(0, Math.min(100, parseFloat(exMinPct) || 0)) : 0;
     launch({
       tool: "plagiarism-checker",
       title: docTitle.trim() || (original ? original.name : jobTitle(text)),
-      run: () => submitPlagiarismJob({ text, file: original, topK: 30 }),
+      run: () =>
+        submitPlagiarismJob({
+          text,
+          file: original,
+          topK: 30,
+          exclude: {
+            bibliography: exBib,
+            quotes: exQuotes,
+            min_source_percent: minPct,
+          },
+        }),
     });
   }
 
@@ -53,6 +68,49 @@ export default function PlagiarismTool() {
         />
       </div>
 
+      <div className="rounded-xl border border-c bg-neutral-50 px-4 py-3 dark:bg-white/5">
+        <div className="mb-0.5 text-xs font-semibold text-neutral-700 dark:text-neutral-200">
+          Pengaturan Exclude
+        </div>
+        <p className="mb-2.5 text-[11px] text-neutral-400">
+          Dipilih sebelum pemeriksaan dan <span className="font-medium">dikunci</span> pada hasil —
+          tidak bisa diubah setelah cek berjalan.
+        </p>
+        <div className="space-y-2 text-xs text-neutral-600 dark:text-neutral-300">
+          <label className="flex cursor-pointer items-center gap-2">
+            <input type="checkbox" checked={exBib} onChange={(e) => setExBib(e.target.checked)} />
+            Tanpa daftar pustaka
+          </label>
+          <label className="flex cursor-pointer items-center gap-2">
+            <input
+              type="checkbox"
+              checked={exQuotes}
+              onChange={(e) => setExQuotes(e.target.checked)}
+            />
+            Tanpa kutipan
+          </label>
+          <label className="flex cursor-pointer items-center gap-2">
+            <input
+              type="checkbox"
+              checked={exMatches}
+              onChange={(e) => setExMatches(e.target.checked)}
+            />
+            Kecualikan kecocokan dari sumber yang menyumbang kurang dari
+            <input
+              type="number"
+              min={0}
+              max={100}
+              step="0.1"
+              value={exMinPct}
+              disabled={!exMatches}
+              onChange={(e) => setExMinPct(e.target.value)}
+              className="w-16 rounded border border-c surface px-2 py-1 text-center text-xs outline-none focus:border-[color:var(--brand)] disabled:opacity-40"
+            />
+            %
+          </label>
+        </div>
+      </div>
+
       <button
         onClick={run}
         disabled={text.trim().length === 0 || docTitle.trim().length === 0}
@@ -72,8 +130,8 @@ export default function PlagiarismTool() {
           </div>
           <p className="mt-0.5 text-neutral-600 dark:text-neutral-300">
             Seluruh pencocokan dijalankan di infrastruktur milik ICALORA-LABS sendiri. Kamu akan
-            menerima rincian sumber yang mirip serta penandaan bagian teks terkait, lengkap dengan
-            filter bibliografi/kutipan yang bisa diatur saat membuka hasil.
+            menerima rincian sumber yang mirip serta penandaan bagian teks terkait, sesuai
+            pengaturan Exclude yang kamu pilih sebelum pemeriksaan.
           </p>
         </div>
       </div>
