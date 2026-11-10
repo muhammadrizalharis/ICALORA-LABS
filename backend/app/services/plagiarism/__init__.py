@@ -535,9 +535,14 @@ def check_plagiarism(
         # Reverse-containment tinggi HANYA dihitung sebagai identitas bila judul
         # sumber juga ada di front-matter — mencegah paper yang sekadar dirujuk
         # (abstraknya banyak dikutip) salah ditandai sebagai publikasi.
+        # sumber juga ada di front-matter — ATAU sumber itu teks-PENUH OA.
+        # Teks penuh yang ~separuhnya termuat di dokumen tak mungkin berasal
+        # dari paper yang sekadar dirujuk (hanya abstraknya yang akan cocok),
+        # jadi containment-tinggi atas teks penuh = identitas publikasi yang
+        # andal meski judul tak terekstrak dari PDF (mis. header hilang).
         if (
             containment >= _PUBMATCH_MIN
-            and s["title_identity"]
+            and (s["title_identity"] or s.get("fulltext_oa"))
             and (contain_pub is None or containment > contain_pub["containment"] / 100)
         ):
             contain_pub = {
@@ -548,7 +553,7 @@ def check_plagiarism(
                 "containment": round(containment * 100, 1),
                 "online": bool(s.get("online")),
                 "by_doi": False,
-                "by_title": True,
+                "by_title": bool(s["title_identity"]),
             }
     if title_pub is not None:
         title_pub.pop("_overlap", None)

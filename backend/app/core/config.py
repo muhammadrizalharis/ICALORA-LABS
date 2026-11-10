@@ -87,6 +87,13 @@ class Settings(BaseSettings):
     online_check_enabled: bool = Field(default=True)
     core_api_key: str = Field(default="")
     core_enabled: bool = Field(default=True)
+    # Ambil teks-PENUH open-access (PDF/HTML) untuk paper yang teridentifikasi
+    # sebagai publikasi dokumen (DOI/judul sendiri). Diproses ephemeral di
+    # memori saat pengecekan — TIDAK disimpan ke disk/DB, jadi tak menambah
+    # penyimpanan. Ini membuat % plagiarisme akurat untuk karya terbit/duplikat.
+    online_fulltext_enabled: bool = Field(default=True)
+    online_fulltext_max_bytes: int = Field(default=20 * 1024 * 1024)
+    online_fulltext_max_docs: int = Field(default=3)
 
     @property
     def database_url(self) -> str:

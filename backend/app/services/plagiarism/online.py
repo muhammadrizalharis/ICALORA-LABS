@@ -15,18 +15,18 @@ dipakai; CORE hanya aktif bila `core_api_key` diisi dan `core_enabled` benar
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import re
+from datetime import datetime, timezone
 from xml.etree import ElementTree as ET
 
 import httpx
 
 from app.core.config import get_settings
-
-from . import _WORD_RE, _chunk_match, _extract_own_dois, _report_id, _sentences
-from datetime import datetime, timezone
-import hashlib
-
 from app.ingest.common import text_metrics
+from app.services.file_extract import extract_text
+
+from . import _WORD_RE, _chunk_match, _extract_own_dois, _report_id, _sentences, _shingles
 
 settings = get_settings()
 
@@ -115,6 +115,142 @@ def _extract_dois(doc: str, limit: int = 5) -> list[str]:
     return out
 
 
+def _oa_pdf_from_openalex(w: dict) -> str | None:
+    """URL PDF open-access dari work OpenAlex (best_oa/primary location)."""
+    for loc in (w.get("best_oa_location"), w.get("primary_location")):
+        if isinstance(loc, dict):
+            pdf = loc.get("pdf_url")
+            if pdf:
+                return pdf
+    oa = w.get("open_access") or {}
+    return oa.get("oa_url") or None
+
+
+def _oa_pdf_from_crossref(it: dict) -> str | None:
+    """URL PDF teks-penuh dari field `link` Crossref (content-type pdf)."""
+    links = it.get("link") or []
+    pdfs = [
+        lnk.get("URL")
+        for lnk in links
+        if isinstance(lnk, dict) and (lnk.get("content-type") == "application/pdf")
+    ]
+    if pdfs:
+        return pdfs[0]
+    for lnk in links:
+        if isinstance(lnk, dict) and (lnk.get("URL") or "").lower().endswith(".pdf"):
+            return lnk["URL"]
+    return None
+
+
+async def _fetch_fulltext(client: httpx.AsyncClient, url: str | None) -> str:
+    """Ambil teks-PENUH open-access (PDF/HTML) secara ephemeral.
+
+    Tidak menyimpan apa pun ke disk/DB — byte diproses di memori lalu dibuang.
+    Dibatasi ukuran (`online_fulltext_max_bytes`) agar tidak mengunduh berkas
+    raksasa. Mengembalikan "" bila gagal/terlalu besar/bukan dokumen teks.
+    """
+    if not url or not settings.online_fulltext_enabled:
+        return ""
+    cap = settings.online_fulltext_max_bytes
+    try:
+        async with client.stream(
+            "GET", url, headers={"User-Agent": "Mozilla/5.0 (ICALORA-LABS)"}
+        ) as resp:
+            if resp.status_code != 200:
+                return ""
+            ctype = (resp.headers.get("content-type") or "").lower()
+            buf = bytearray()
+            async for chunk in resp.aiter_bytes():
+                buf.extend(chunk)
+                if len(buf) > cap:
+                    return ""
+        data = bytes(buf)
+    except Exception:  # noqa: BLE001
+        return ""
+    if "html" in ctype and b"%PDF" not in data[:1024]:
+        try:
+            html = data.decode("utf-8", "ignore")
+        except Exception:  # noqa: BLE001
+            return ""
+        return _clean(_TAG_RE.sub(" ", html))
+    try:
+        text = await asyncio.to_thread(extract_text, "oa.pdf", data)
+    except Exception:  # noqa: BLE001
+        return ""
+    return _clean(text)
+
+
+def _title_jaccard(a: str, b: str) -> float:
+    wa = {w.lower() for w in _WORD_RE.findall(a or "")}
+    wb = {w.lower() for w in _WORD_RE.findall(b or "")}
+    if not wa or not wb:
+        return 0.0
+    return len(wa & wb) / len(wa | wb)
+
+
+async def _enrich_fulltext(
+    client: httpx.AsyncClient, cands: list[dict], doc: str, title_hint: str = ""
+) -> None:
+    """Perkaya kandidat identitas-publikasi dengan TEKS PENUH open-access.
+
+    Hanya kandidat paling menyerupai publikasi dokumen yang diambil teks
+    penuhnya (DOI sendiri → judul paling mirip), dibatasi `max_docs` unduhan
+    agar latensi & jaringan terkendali. Teks penuh menggantikan abstrak
+    sebagai `_fulltext`, sehingga pencocokan baris-per-baris mencakup seluruh
+    naskah (bukan hanya abstrak) → % akurat untuk karya terbit/duplikat.
+    """
+    if not settings.online_fulltext_enabled:
+        return
+    titles = [t for t in (_extract_title(doc), _clean(title_hint or "")) if t]
+    own_dois = {d.lower() for d in _extract_own_dois(doc)}
+    doc_sh = _shingles([w.lower() for w in _WORD_RE.findall(doc)], 3)
+
+    def _title_sim(c: dict) -> float:
+        ct = c.get("title") or ""
+        return max((_title_jaccard(ct, t) for t in titles), default=0.0)
+
+    def _abs_containment(c: dict) -> float:
+        # Porsi abstrak sumber yang sudah muncul di dokumen. Abstrak yang
+        # hampir seluruhnya termuat = kandidat kuat sebagai publikasi dokumen
+        # (bahkan bila judul tak terekstrak dari PDF, seperti header hilang).
+        words = [w.lower() for w in _WORD_RE.findall(c.get("_fulltext") or "")]
+        if len(words) < 40:
+            return 0.0
+        ssh = _shingles(words, 3)
+        if not ssh or not doc_sh:
+            return 0.0
+        return len(ssh & doc_sh) / len(ssh)
+
+    def _rank(c: dict) -> float:
+        base = 1.0 if (c.get("doi") or "").lower() in own_dois else 0.0
+        return base + _title_sim(c) + _abs_containment(c)
+
+    targets = [
+        c
+        for c in cands
+        if c.get("_oa_url")
+        and (
+            (c.get("doi") or "").lower() in own_dois
+            or _title_sim(c) >= 0.6
+            or _abs_containment(c) >= 0.5
+        )
+    ]
+    targets.sort(key=_rank, reverse=True)
+    targets = targets[: max(1, settings.online_fulltext_max_docs)]
+    if not targets:
+        return
+    results = await asyncio.gather(
+        *(_fetch_fulltext(client, c.get("_oa_url")) for c in targets),
+        return_exceptions=True,
+    )
+    for c, full in zip(targets, results, strict=False):
+        if isinstance(full, str) and len(full) > len(c.get("_fulltext") or ""):
+            c["_fulltext"] = full
+            c["source"] = f"{c.get('source', '')} (teks penuh OA)".strip()
+            c["_fulltext_full"] = True
+            c["fulltext_oa"] = True
+
+
 _TITLE_SKIP_KW = (
     "doi", "http", "@", "abstract", "abstrak", "keywords", "kata kunci",
     "received", "revised", "accepted", "published", "copyright", "©",
@@ -200,6 +336,7 @@ async def _q_openalex(client: httpx.AsyncClient, sentence: str) -> list[dict]:
                 "source": "OpenAlex",
                 "url": w.get("id") or (f"https://doi.org/{doi}" if doi else None),
                 "_fulltext": abstract or title,
+                "_oa_url": _oa_pdf_from_openalex(w),
             }
         )
     return out
@@ -226,6 +363,7 @@ async def _q_crossref(client: httpx.AsyncClient, sentence: str) -> list[dict]:
                 "source": "Crossref",
                 "url": it.get("URL") or (f"https://doi.org/{doi}" if doi else None),
                 "_fulltext": abstract or title,
+                "_oa_url": _oa_pdf_from_crossref(it),
             }
         )
     return out
@@ -246,8 +384,8 @@ async def _q_arxiv(client: httpx.AsyncClient, sentence: str) -> list[dict]:
     ns = {"a": "http://www.w3.org/2005/Atom"}
     out = []
     for e in root.findall("a:entry", ns)[:_PER_PROVIDER]:
-        title = _clean((e.findtext("a:title", default="", namespaces=ns)))
-        summary = _clean((e.findtext("a:summary", default="", namespaces=ns)))
+        title = _clean(e.findtext("a:title", default="", namespaces=ns))
+        summary = _clean(e.findtext("a:summary", default="", namespaces=ns))
         url = e.findtext("a:id", default="", namespaces=ns) or None
         out.append(
             {
@@ -440,6 +578,7 @@ async def _q_openalex_doi(client: httpx.AsyncClient, doi: str) -> dict | None:
         "source": "OpenAlex",
         "url": w.get("id") or f"https://doi.org/{doi}",
         "_fulltext": abstract,
+        "_oa_url": _oa_pdf_from_openalex(w),
     }
 
 
@@ -458,6 +597,7 @@ async def _q_crossref_doi(client: httpx.AsyncClient, doi: str) -> dict | None:
         "source": "Crossref",
         "url": it.get("URL") or f"https://doi.org/{doi}",
         "_fulltext": abstract or title,
+        "_oa_url": _oa_pdf_from_crossref(it),
     }
 
 
@@ -477,17 +617,28 @@ async def _q_title(client: httpx.AsyncClient, title: str) -> list[dict]:
     return out
 
 
-async def _resolve_publication(client: httpx.AsyncClient, doc: str) -> list[dict]:
+async def _resolve_publication(
+    client: httpx.AsyncClient, doc: str, title_hint: str = ""
+) -> list[dict]:
     """Kumpulkan kandidat 'identitas publikasi' via DOI SENDIRI + judul.
 
     Hanya DOI milik dokumen sendiri (front-matter) yang di-resolve — DOI
     referensi yang dikutip diabaikan agar tidak salah-tandai sebagai publikasi.
+    `title_hint` (mis. nama berkas unggahan) ditambahkan sebagai query judul
+    cadangan: banyak PDF akademik dinamai sesuai judulnya, sehingga membantu
+    menemukan paper terbit saat judul tak terekstrak dari isi PDF.
     """
     tasks: list = []
     for doi in _extract_own_dois(doc):
         tasks.append(_q_openalex_doi(client, doi))
         tasks.append(_q_crossref_doi(client, doi))
-    tasks.append(_q_title(client, _extract_title(doc)))
+    queries = {_extract_title(doc)}
+    hint = _clean(title_hint or "")
+    if hint and len(_WORD_RE.findall(hint)) >= 4:
+        queries.add(hint)
+    for q in queries:
+        if q:
+            tasks.append(_q_title(client, q))
     results = await asyncio.gather(*tasks, return_exceptions=True)
     out: list[dict] = []
     for res in results:
@@ -498,7 +649,9 @@ async def _resolve_publication(client: httpx.AsyncClient, doc: str) -> list[dict
     return out
 
 
-async def _gather_candidates(doc: str) -> tuple[list[dict], list[str], dict]:
+async def _gather_candidates(
+    doc: str, title_hint: str = ""
+) -> tuple[list[dict], list[str], dict]:
     sentences = _risky_sentences(doc)
     plan = _provider_plan()
     provider_hits: dict[str, int] = {}
@@ -516,7 +669,9 @@ async def _gather_candidates(doc: str) -> tuple[list[dict], list[str], dict]:
             for s in sentences[:sent_budget]:
                 tasks.append(_run(provider, psem, s))
         # Resolusi identitas publikasi (DOI + judul) berjalan paralel.
-        pub_task = asyncio.create_task(_resolve_publication(doc=doc, client=client))
+        pub_task = asyncio.create_task(
+            _resolve_publication(doc=doc, client=client, title_hint=title_hint)
+        )
         results = await asyncio.gather(*tasks, return_exceptions=True)
         pub_results = await pub_task
     for res in list(results) + [pub_results]:
@@ -530,21 +685,37 @@ async def _gather_candidates(doc: str) -> tuple[list[dict], list[str], dict]:
             if key not in seen:
                 cand["doc_id"] = None
                 seen[key] = cand
-            elif len(cand["_fulltext"]) > len(seen[key].get("_fulltext") or ""):
-                seen[key]["_fulltext"] = cand["_fulltext"]
-    return list(seen.values()), sentences, provider_hits
+            else:
+                if not seen[key].get("_oa_url") and cand.get("_oa_url"):
+                    seen[key]["_oa_url"] = cand["_oa_url"]
+                if len(cand["_fulltext"]) > len(seen[key].get("_fulltext") or ""):
+                    seen[key]["_fulltext"] = cand["_fulltext"]
+    candidates = list(seen.values())
+    # Fase terpisah: perkaya kandidat identitas-publikasi dengan TEKS PENUH
+    # open-access. Dijalankan SETELAH query kalimat selesai (pool koneksi
+    # senggang) memakai klien khusus bertimeout lebih panjang, agar unduhan
+    # PDF besar tidak bersaing dan timeout. Ephemeral — tidak disimpan ke disk.
+    if settings.online_fulltext_enabled:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(45.0, connect=10.0),
+            headers=_UA,
+            follow_redirects=True,
+        ) as ftclient:
+            await _enrich_fulltext(ftclient, candidates, doc, title_hint)
+    return candidates, sentences, provider_hits
 
 
-async def online_candidates(doc: str) -> tuple[list[dict], dict]:
+async def online_candidates(doc: str, title_hint: str = "") -> tuple[list[dict], dict]:
     """Kumpulkan kandidat sumber daring (tanpa-unduh) untuk digabungkan ke
     pemeriksaan plagiarisme utama. Kembalikan (kandidat, hits-per-penyedia).
     Aman dipanggil opsional: galat jaringan menghasilkan daftar kosong.
+    `title_hint` opsional (mis. nama berkas) membantu menemukan paper terbit.
     """
     doc = (doc or "").strip()
     if not doc or not _active_providers():
         return [], {}
     try:
-        candidates, _sentences, provider_hits = await _gather_candidates(doc)
+        candidates, _sentences, provider_hits = await _gather_candidates(doc, title_hint)
     except Exception:  # noqa: BLE001
         return [], {}
     return candidates, provider_hits
