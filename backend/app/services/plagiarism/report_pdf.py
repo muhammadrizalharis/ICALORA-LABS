@@ -4,7 +4,7 @@ Alih-alih membangun ulang dokumen dari teks (kehilangan tata letak), modul ini
 menempelkan sorotan (highlight) sebagai anotasi DI ATAS PDF asli memakai
 PyMuPDF — sehingga kolom, font, gambar, dan format asli tetap utuh. Yang
 ditambahkan hanya: sorotan per-temuan, header, footer, dan satu halaman
-sampul "Ringkasan Integritas" (desain orisinal, bukan tiruan alat komersial).
+sampul "Ringkasan Kemiripan" (desain orisinal, bukan tiruan alat komersial).
 """
 
 from __future__ import annotations
@@ -55,7 +55,7 @@ def _ring_tone(v: float) -> str:
 
 
 def _cover_html(report: dict) -> str:
-    """Halaman sampul 'Ringkasan Integritas' — tata letak & istilah orisinal."""
+    """Halaman sampul 'Ringkasan Kemiripan' — tata letak & istilah orisinal."""
     idx = float(report.get("integrity_index", report.get("overall_similarity", 0)) or 0)
     idx_display = ("&lt;1%" if 0 < idx < 1 else f"{idx:.1f}%" if idx < 10 else f"{idx:.0f}%")
     copy_sim = float(report.get("copy_similarity", 0) or 0)
@@ -116,45 +116,6 @@ def _cover_html(report: dict) -> str:
             f"pencocokan real-time tanpa-unduh ke sumber daring: {names}.</div>"
         )
 
-    pub_banner = ""
-    pm = report.get("publication_match")
-    if pm:
-        contain = float(pm.get("containment", 0) or 0)
-        src_label = _esc(str(pm.get("title") or pm.get("doi") or "(tanpa judul)"))
-        src_meta = _esc(str(pm.get("source") or ""))
-        online_tag = " (abstrak daring)" if pm.get("online") else ""
-        if pm.get("by_doi"):
-            pub_banner = (
-                '<div class="pubmatch"><b>⚠️ Terdeteksi sebagai publikasi terindeks (identitas DOI).</b> '
-                "Dokumen ini mencantumkan DOI yang sama dengan karya terbit di korpus — "
-                "kemungkinan besar merupakan karya yang sudah dipublikasikan itu sendiri "
-                "(atau duplikasi/self-plagiarism). Sumber: "
-                f"<b>{src_label}</b>{(' · ' + src_meta) if src_meta else ''}. "
-                "<span style=\"color:#7c2d12\">Catatan: korpus daring umumnya hanya memaparkan "
-                "abstrak (teks penuh berbayar/berhak cipta), sehingga Indeks Kemiripan "
-                "baris-per-baris tetap rendah; identitas publikasi ini dihitung terpisah.</span></div>"
-            )
-        elif pm.get("by_title"):
-            pub_banner = (
-                '<div class="pubmatch"><b>⚠️ Terdeteksi sebagai publikasi terindeks (identitas judul).</b> '
-                "Judul dokumen ini sama dengan karya terbit — kemungkinan besar merupakan "
-                "karya yang sudah dipublikasikan itu sendiri (atau duplikasi/self-plagiarism). Sumber: "
-                f"<b>{src_label}</b>{(' · ' + src_meta) if src_meta else ''}. "
-                "<span style=\"color:#7c2d12\">Catatan: korpus &amp; sumber daring umumnya hanya "
-                "memaparkan abstrak (teks penuh berbayar/berhak cipta), sehingga Indeks Kemiripan "
-                "baris-per-baris tetap rendah — hanya porsi abstrak yang terhitung cocok, bukan 100%.</span></div>"
-            )
-        else:
-            pub_banner = (
-                '<div class="pubmatch"><b>⚠️ Terdeteksi sebagai publikasi terindeks.</b> '
-                f"{contain:.0f}% teks sumber{online_tag} termuat di dokumen ini — kemungkinan "
-                "karya sudah dipublikasikan (atau self-plagiarism/duplikasi). Sumber: "
-                f"<b>{src_label}</b>{(' · ' + src_meta) if src_meta else ''}. "
-                "<span style=\"color:#7c2d12\">Catatan: sumber daring hanya memaparkan abstrak, "
-                "sehingga Indeks Kemiripan baris-per-baris tetap rendah; sinyal identitas ini "
-                "dihitung terpisah.</span></div>"
-            )
-
     return f"""<!doctype html><html><head><meta charset="utf-8"><style>
     @page {{ size: A4; margin: 24mm 18mm; }}
     body {{ font-family: 'Helvetica','Arial',sans-serif; color:#0f172a; font-size:12px; }}
@@ -174,20 +135,16 @@ def _cover_html(report: dict) -> str:
     .stat {{ display:inline-block; margin-right:18px; }}
     .stat b {{ font-size:15px; }}
     .note {{ color:#64748b; font-size:11px; margin-top:6px; }}
-    .pubmatch {{ background:#fff7ed; border:1px solid #fdba74; border-left:4px solid #ea580c;
-                 border-radius:8px; padding:9px 13px; margin:12px 0; font-size:11px;
-                 color:#9a3412; line-height:1.5; }}
     </style></head><body>
     <div class="head">
-      <div><div class="brand">Ringkasan Integritas</div>
+      <div><div class="brand">Ringkasan Kemiripan</div>
       <div class="sub">ICALORA-LABS · MRH INNOVEX — pemeriksaan mandiri (self-hosted)</div></div>
       <div class="rid">ID: <b>{_esc(rid)}</b><br>Hash: {_esc(sha)}<br>Korpus akses-terbuka</div>
     </div>
-    {pub_banner}
     <div class="hero">
-      <div class="ring"><div class="n">{idx_display}</div><div class="l">INTEGRITAS</div></div>
+      <div class="ring"><div class="n">{idx_display}</div><div class="l">SIMILARITY</div></div>
       <div>
-        <div style="font-size:16px;font-weight:700">Indeks Integritas {idx:.1f}%</div>
+        <div style="font-size:16px;font-weight:700">Similarity Index {idx:.1f}%</div>
         <div class="note">Gabungan tumpang-tindih teks ({copy_sim:.1f}%) dan indikasi
         parafrase semantik (hingga {para:.0f}%). Angka adalah alat bantu tinjauan,
         bukan vonis akhir.</div>
@@ -264,7 +221,7 @@ def annotate_pdf(original_pdf: bytes, report: dict) -> bytes:
 
 
 def build_report_pdf(original_pdf: bytes, report: dict) -> bytes:
-    """Gabungkan sampul Ringkasan Integritas + PDF asli bersorotan."""
+    """Gabungkan sampul Ringkasan Kemiripan + PDF asli bersorotan."""
     cover = render_pdf(_cover_html(report))
     annotated = annotate_pdf(original_pdf, report)
 

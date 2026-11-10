@@ -166,7 +166,7 @@ export default function PlagiarismReport({ report, documentText, docTitle = "", 
       {hasOriginal && (
         <p className="-mt-3 text-[11px] text-neutral-400">
           Laporan mempertahankan tata letak berkas asli; temuan ditandai langsung di atas halaman
-          dokumen beserta sampul ringkasan integritas.
+          dokumen beserta sampul ringkasan kemiripan.
         </p>
       )}
 
@@ -222,42 +222,6 @@ export default function PlagiarismReport({ report, documentText, docTitle = "", 
           </div>
         </div>
       </div>
-
-      {report.publication_match && (
-        <div className="rounded-lg border border-orange-300 border-l-4 border-l-orange-600 bg-orange-50 px-4 py-3 text-xs leading-relaxed text-orange-900 dark:border-orange-900 dark:border-l-orange-500 dark:bg-orange-950/40 dark:text-orange-200">
-          <b>⚠️ Terdeteksi sebagai publikasi terindeks.</b>{" "}
-          {report.publication_match.by_doi
-            ? "Dokumen ini mencantumkan DOI yang sama dengan karya terbit di korpus — kemungkinan besar merupakan karya yang sudah dipublikasikan itu sendiri"
-            : report.publication_match.by_title
-              ? "Judul dokumen ini sama dengan karya terbit — kemungkinan besar merupakan karya yang sudah dipublikasikan itu sendiri"
-              : `${report.publication_match.containment.toFixed(0)}% teks sumber termuat di dokumen ini — kemungkinan karya sudah dipublikasikan`}
-          {" "}(atau{" "}
-          <i>self-plagiarism</i>/duplikasi). Sumber:{" "}
-          {report.publication_match.url ? (
-            <a
-              href={report.publication_match.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="underline"
-            >
-              {report.publication_match.title ||
-                report.publication_match.doi ||
-                report.publication_match.url}
-            </a>
-          ) : (
-            report.publication_match.title ||
-            report.publication_match.doi ||
-            "(tanpa judul)"
-          )}
-          {report.publication_match.source ? ` · ${report.publication_match.source}` : ""}.{" "}
-          <span className="opacity-80">
-            Catatan: persentase kecocokan baris-per-baris tetap rendah karena
-            korpus &amp; sumber daring umumnya hanya memuat <b>abstrak</b>, bukan
-            naskah penuh — jadi hanya porsi abstrak yang terhitung cocok, bukan
-            100%.
-          </span>
-        </div>
-      )}
 
       {report.match_groups && report.match_groups.some((g) => g.count > 0) && (
         <div>
