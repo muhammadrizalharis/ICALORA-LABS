@@ -23,6 +23,7 @@ from xml.etree import ElementTree as ET
 
 import httpx
 
+from app.core.clients import redis_client
 from app.core.config import get_settings
 from app.ingest.common import text_metrics
 from app.services.file_extract import extract_text
@@ -636,6 +637,42 @@ async def _q_doaj(client: httpx.AsyncClient, sentence: str) -> list[dict]:
     return out
 
 
+def _websearch_reserve() -> bool:
+    """REM PENGAMAN kuota: pesan satu slot kueri web-search untuk bulan berjalan
+    secara atomik (Redis INCR). Kembalikan True bila MASIH di dalam batas bulanan
+    (`online_websearch_monthly_cap`) sehingga aman memanggil API berbayar.
+
+    GAGAL-AMAN: bila Redis bermasalah atau cap<=0, kembalikan False → lewati API
+    (nol panggilan, nol risiko tagihan). Kunci ber-nama per-bulan (YYYY-MM) dan
+    kedaluwarsa otomatis ~45 hari, jadi kuota ter-reset tiap bulan tanpa campur
+    tangan. Begitu cap tercapai, semua kueri berikutnya bulan itu dilewati.
+    """
+    cap = settings.online_websearch_monthly_cap
+    if cap <= 0:
+        return False
+    try:
+        r = redis_client()
+        key = f"websearch:brave:{datetime.now(timezone.utc):%Y-%m}"
+        n = r.incr(key)
+        if n == 1:
+            r.expire(key, 45 * 24 * 3600)
+        return n <= cap
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def websearch_usage() -> dict:
+    """Pemakaian kuota web-search bulan berjalan (untuk pemantauan/admin)."""
+    cap = settings.online_websearch_monthly_cap
+    try:
+        r = redis_client()
+        key = f"websearch:brave:{datetime.now(timezone.utc):%Y-%m}"
+        used = int(r.get(key) or 0)
+    except Exception:  # noqa: BLE001
+        used = -1
+    return {"month": f"{datetime.now(timezone.utc):%Y-%m}", "used": used, "cap": cap}
+
+
 async def _q_brave(client: httpx.AsyncClient, sentence: str) -> list[dict]:
     """Web search umum (Brave Search API) sebagai VERIFIER bertarget — menangkap
     sumber yang lolos dari provider akademik (mis. halaman penerbit, repositori,
@@ -644,6 +681,10 @@ async def _q_brave(client: httpx.AsyncClient, sentence: str) -> list[dict]:
     tetap ephemeral (snippet; teks-penuh OA hanya bila URL PDF) → nol disk.
     """
     if not settings.brave_api_key or not settings.online_websearch_enabled:
+        return []
+    # Rem pengaman: pesan slot kuota bulanan dulu. Bila sudah mentok batas,
+    # LEWATI panggilan API (tak ada request terkirim → tak ada tagihan).
+    if not _websearch_reserve():
         return []
     r = await _get_json(
         client,
