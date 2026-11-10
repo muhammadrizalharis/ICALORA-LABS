@@ -16,6 +16,10 @@ interface TextInputProps {
   rows?: number;
   /** Dipanggil dengan berkas asli saat diunggah (null bila pengguna mengetik/menempel). */
   onFile?: (file: File | null) => void;
+  /** Daftar ekstensi yang diterima (mis. ".pdf"). Default: txt/pdf/docx. */
+  accept?: string;
+  /** Teks bantuan format di area unggah. */
+  acceptHint?: string;
 }
 
 const ACCEPT = ".txt,.md,.csv,.tex,.pdf,.docx";
@@ -26,6 +30,8 @@ export default function TextInput({
   placeholder = "Tempel atau ketik teks di sini…",
   rows = 8,
   onFile,
+  accept = ACCEPT,
+  acceptHint = "Mendukung .txt, .pdf, .docx (maks 10 MB)",
 }: TextInputProps) {
   const [mode, setMode] = useState<"paste" | "upload">("paste");
   const [dragOver, setDragOver] = useState(false);
@@ -36,6 +42,20 @@ export default function TextInput({
 
   async function handleFile(file: File) {
     setErr(null);
+    const exts = accept
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean);
+    const name = file.name.toLowerCase();
+    if (exts.length && !exts.some((ext) => name.endsWith(ext))) {
+      setErr(
+        `Format tidak didukung. Hanya menerima: ${exts.join(", ")}.` +
+          (exts.length === 1 && exts[0] === ".pdf"
+            ? " Simpan dokumen Word Anda sebagai PDF lalu unggah ulang."
+            : ""),
+      );
+      return;
+    }
     setUploading(true);
     try {
       const res = await apiUpload<ExtractResult>("/tools/extract-text", file);
@@ -114,7 +134,7 @@ export default function TextInput({
           <input
             ref={inputRef}
             type="file"
-            accept={ACCEPT}
+            accept={accept}
             className="hidden"
             onChange={(e) => {
               const f = e.target.files?.[0];
@@ -127,7 +147,7 @@ export default function TextInput({
             {uploading ? "Mengekstrak teks…" : "Seret berkas ke sini atau klik untuk pilih"}
           </div>
           <div className="text-xs text-neutral-500 dark:text-neutral-400">
-            Mendukung .txt, .pdf, .docx (maks 10 MB)
+            {acceptHint}
           </div>
         </div>
       )}

@@ -63,7 +63,9 @@ export default function PlagiarismTool() {
           value={text}
           onChange={setText}
           onFile={setFile}
-          placeholder="Tempel teks/abstrak, atau unggah berkas .pdf/.docx/.txt untuk diperiksa keasliannya…"
+          accept=".pdf"
+          acceptHint="Hanya PDF (maks 10 MB) — agar laporan berformat identik bisa dibuat"
+          placeholder="Tempel teks/abstrak, atau unggah berkas PDF untuk diperiksa keasliannya…"
           rows={10}
         />
       </div>

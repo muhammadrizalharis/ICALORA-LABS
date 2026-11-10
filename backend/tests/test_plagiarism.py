@@ -180,3 +180,17 @@ def test_chunk_match_exclude_min_source_percent():
     )
     assert excl["matched_sentences"] == 0
     assert excl["excluded_sources"]
+
+
+def test_require_pdf_upload_rejects_non_pdf():
+    import pytest
+    from fastapi import HTTPException
+
+    from app.api.tools import _require_pdf_upload
+
+    _require_pdf_upload("paper.pdf")  # tidak melempar
+    _require_pdf_upload("PAPER.PDF")  # case-insensitive
+    for bad in ("paper.docx", "paper.doc", "paper.txt", None, ""):
+        with pytest.raises(HTTPException) as exc:
+            _require_pdf_upload(bad)
+        assert exc.value.status_code == 415
