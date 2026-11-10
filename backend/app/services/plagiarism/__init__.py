@@ -70,6 +70,13 @@ _MATCH_GROUP_ORDER = [
 _MATCH_MIN = 0.30      # minimum containment shingle agar dihitung sebagai temuan
 _VERBATIM_AT = 0.80    # >= ini: dianggap salinan nyaris persis
 _STRUCTURAL_AT = 0.45  # >= ini: kemiripan kuat terstruktur
+# Deteksi frasa (sub-kalimat): lari kata verbatim beruntun sepanjang ini atau
+# lebih DI DALAM kalimat yang secara keseluruhan tak melewati ambang containment
+# tetap ditandai sebagai salinan langsung (fragmen). Ini menangkap potongan
+# teks yang disalin persis meski sisanya diubah — selaras dengan alat komersial
+# yang menyorot fragmen pendek, tanpa menggelembungkan skor (bobot proporsional
+# pada porsi kalimat yang benar-benar identik). 8 kata = ambang standar plagiat.
+_PHRASE_MIN_WORDS = 8
 
 # Deteksi identitas publikasi (reverse-containment): bila teks SUMBER
 # (mis. abstrak dari OpenAlex) nyaris seluruhnya termuat di dokumen, dokumen
@@ -99,8 +106,14 @@ def _classify_match(
     quoted_spans: list[tuple[int, int]],
     cite_spans: list[tuple[int, int]],
     bib_start: int | None,
+    run_words: int = 0,
 ) -> dict:
-    """Tentukan kategori temuan berdasar atribusi + kekuatan kecocokan."""
+    """Tentukan kategori temuan berdasar atribusi + kekuatan kecocokan.
+
+    `run_words` = panjang lari kata verbatim terpanjang di kalimat ini. Bila
+    >= `_PHRASE_MIN_WORDS`, kalimat memuat fragmen yang disalin persis sehingga
+    digolongkan `salinan_langsung` meski containment keseluruhannya rendah.
+    """
     if idx < 0:
         quoted = cited = in_bib = False
     else:
@@ -114,6 +127,9 @@ def _classify_match(
         group = "sumber_terkredit"
     elif best_ratio >= _VERBATIM_AT:
         group = "salinan_langsung"
+    elif run_words >= _PHRASE_MIN_WORDS:
+        # Fragmen verbatim panjang di dalam kalimat = salinan langsung (parsial).
+        group = "salinan_langsung"
     elif best_ratio >= _STRUCTURAL_AT:
         group = "kemiripan_kuat"
     else:
@@ -126,6 +142,28 @@ def _shingles(words: list[str], n: int = _SHINGLE) -> set[str]:
     if len(words) < n:
         return {" ".join(words)} if words else set()
     return {" ".join(words[i : i + n]) for i in range(len(words) - n + 1)}
+
+
+def _shingle_seq(words: list[str], n: int = _SHINGLE) -> list[str]:
+    """Shingle BERURUTAN (list) — untuk mendeteksi lari verbatim beruntun.
+    `set(_shingle_seq(w)) == _shingles(w)`.
+    """
+    if len(words) < n:
+        return [" ".join(words)] if words else []
+    return [" ".join(words[i : i + n]) for i in range(len(words) - n + 1)]
+
+
+def _longest_shingle_run(seq: list[str], cset: set[str]) -> int:
+    """Jumlah shingle beruntun terpanjang di `seq` yang ada di `cset`."""
+    best = cur = 0
+    for sh in seq:
+        if sh in cset:
+            cur += 1
+            if cur > best:
+                best = cur
+        else:
+            cur = 0
+    return best
 
 
 def _sentences(s: str) -> list[str]:
@@ -181,29 +219,52 @@ def _chunk_match(
     raw: list[dict] = []
     for sent in sentences:
         words = [w.lower() for w in _WORD_RE.findall(sent)]
-        sh = _shingles(words)
+        sh_seq = _shingle_seq(words)
+        sh = set(sh_seq)
         if not sh:
             continue
+        sent_wc = max(len(words), 1)
+        best_score = 0.0
         best_ratio = 0.0
+        best_run_words = 0
         best_src: dict | None = None
         for c, cset in cand_shingles:
             if not cset:
                 continue
             overlap = len(sh & cset)
             ratio = overlap / len(sh)
-            if ratio > best_ratio:
+            run = _longest_shingle_run(sh_seq, cset)
+            # Lari `run` shingle beruntun ≈ (run + n-1) kata verbatim, dibatasi
+            # jumlah kata kalimat (kalimat pendek tak boleh dihitung berlebih).
+            run_words = min(run + _SHINGLE - 1, len(words)) if run > 0 else 0
+            run_cov = run_words / sent_wc
+            score = max(ratio, run_cov)
+            if score > best_score:
+                best_score = score
                 best_ratio = ratio
+                best_run_words = run_words
                 best_src = c
-        if best_ratio >= threshold and best_src is not None:
+        qualifies = best_src is not None and (
+            best_ratio >= threshold or best_run_words >= _PHRASE_MIN_WORDS
+        )
+        if qualifies:
             idx = doc.find(sent)
             if idx < 0:
                 idx = low_doc.find(sent.lower())
-            status = _classify_match(sent, idx, best_ratio, quoted_spans, cite_spans, bib_start)
+            status = _classify_match(
+                sent, idx, best_ratio, quoted_spans, cite_spans, bib_start,
+                run_words=best_run_words,
+            )
+            # Porsi kalimat yang benar-benar tumpang-tindih: ambil yang lebih
+            # besar antara containment keseluruhan dan cakupan fragmen verbatim,
+            # agar pembobotan indeks proporsional terhadap teks yang identik.
+            effective = max(best_ratio, best_run_words / sent_wc)
             skey = (best_src.get("doi") or best_src.get("title") or "").lower().strip()
             raw.append(
                 {
                     "sent": sent,
-                    "best_ratio": best_ratio,
+                    "best_ratio": effective,
+                    "verbatim_words": best_run_words,
                     "best_src": best_src,
                     "skey": skey,
                     "status": status,
@@ -263,6 +324,7 @@ def _chunk_match(
                 "source_doi": best_src.get("doi"),
                 "doc_id": best_src.get("doc_id"),
                 "char_len": len(sent),
+                "verbatim_words": m.get("verbatim_words", 0),
                 "quoted": status["quoted"],
                 "cited": status["cited"],
                 "in_bibliography": status["in_bibliography"],

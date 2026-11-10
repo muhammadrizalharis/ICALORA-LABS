@@ -26,6 +26,12 @@ services:
     env_file:
       - ../../backend/.env
     command: ["uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "58010"]
+    # CORE (api.core.ac.uk) di balik Cloudflare: dari VM ini IP default
+    # (172.67.x) & IPv6 di-RESET, sedangkan edge 104.26.x andal (10/10 uji).
+    # Pin ke edge yang hidup agar sumber teks-penuh OA CORE bisa dipakai.
+    # Gagal-aman: bila IP ini mati, _q_core cuma mengembalikan daftar kosong.
+    extra_hosts:
+      - "api.core.ac.uk:104.26.0.0"
     security_opt:
       - no-new-privileges:true
     healthcheck:

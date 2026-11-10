@@ -42,6 +42,33 @@ def test_chunk_match_detects_copy():
     assert res["matched_passages"][0]["source_title"] == "Sumber Uji"
 
 
+def test_chunk_match_detects_verbatim_phrase_in_mixed_sentence():
+    # Kalimat panjang yang HANYA sebagian disalin verbatim (fragmen >= 8 kata),
+    # sisanya orisinal → containment keseluruhan di bawah ambang, tapi harus
+    # tetap tertangkap sebagai salinan langsung (deteksi frasa sub-kalimat).
+    copied = "the rapid expansion of urban population density across coastal regions"
+    sentence = (
+        "In our detailed longitudinal observational field investigation we carefully "
+        f"documented {copied} using an entirely novel measurement protocol we devised."
+    )
+    candidates = [
+        {
+            "doc_id": 7,
+            "title": "Sumber Frasa",
+            "doi": "10.0/phrase",
+            "_fulltext": (
+                "Earlier studies examined " + copied + " under various climate scenarios."
+            ),
+        }
+    ]
+    # Ambang default 0.30: tanpa deteksi frasa, kalimat campuran ini terlewat.
+    res = _chunk_match(sentence, candidates)
+    assert res["matched_sentences"] == 1
+    mp = res["matched_passages"][0]
+    assert mp["group"] == "salinan_langsung"
+    assert mp["verbatim_words"] >= 8
+
+
 def test_chunk_match_no_false_positive():
     sentence = "The weather today is sunny with a gentle breeze over the coastal town."
     candidates = [
