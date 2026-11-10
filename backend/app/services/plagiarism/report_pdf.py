@@ -116,6 +116,21 @@ def _cover_html(report: dict) -> str:
             f"pencocokan real-time tanpa-unduh ke sumber daring: {names}.</div>"
         )
 
+    exclude_note = ""
+    ex = report.get("exclude_settings") or {}
+    ex_labels = []
+    if ex.get("bibliography"):
+        ex_labels.append("tanpa daftar pustaka")
+    if ex.get("quotes"):
+        ex_labels.append("tanpa kutipan")
+    if float(ex.get("min_source_percent", 0) or 0) > 0:
+        ex_labels.append(f"kecualikan sumber &lt; {float(ex['min_source_percent']):g}%")
+    if ex_labels:
+        exclude_note = (
+            '<div class="note" style="margin-top:6px">🔒 Pengaturan Exclude (dikunci saat '
+            f"pemeriksaan): {_esc(', '.join(ex_labels))}.</div>"
+        )
+
     return f"""<!doctype html><html><head><meta charset="utf-8"><style>
     @page {{ size: A4; margin: 24mm 18mm; }}
     body {{ font-family: 'Helvetica','Arial',sans-serif; color:#0f172a; font-size:12px; }}
@@ -160,6 +175,7 @@ def _cover_html(report: dict) -> str:
     <h2>Sumber Teratas</h2>
     <table>{src_rows or '<tr><td class="note">Tidak ada sumber dengan kemiripan berarti.</td></tr>'}</table>
     {online_note}
+    {exclude_note}
     <div class="note" style="margin-top:18px">Halaman berikut menampilkan dokumen asli
     Anda dengan format utuh; bagian yang cocok diberi sorotan sesuai warna kategori di atas.</div>
     </body></html>"""

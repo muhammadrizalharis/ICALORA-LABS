@@ -50,11 +50,18 @@ export interface PublicationMatch {
   by_title?: boolean;
 }
 
+export interface ExcludeSettings {
+  bibliography: boolean;
+  quotes: boolean;
+  min_source_percent: number;
+}
+
 export interface Report {
   overall_similarity: number;
   integrity_index?: number;
   copy_similarity?: number;
   paraphrase_component?: number;
+  exclude_settings?: ExcludeSettings;
   publication_match?: PublicationMatch | null;
   document_lexical_similarity: number;
   paraphrase_similarity: number;

@@ -132,7 +132,12 @@ def _sentences(s: str) -> list[str]:
     return [m.group(0).strip() for m in _SENT_RE.finditer(s) if len(m.group(0).strip()) >= 20]
 
 
-def _chunk_match(doc: str, candidates: list[dict], threshold: float = _MATCH_MIN) -> dict:
+def _chunk_match(
+    doc: str,
+    candidates: list[dict],
+    threshold: float = _MATCH_MIN,
+    exclude: dict | None = None,
+) -> dict:
     """Pencocokan tingkat-kalimat (tingkat kalimat) terhadap dokumen kandidat.
 
     Untuk tiap kalimat masukan, hitung containment shingle terhadap gabungan
@@ -140,7 +145,20 @@ def _chunk_match(doc: str, candidates: list[dict], threshold: float = _MATCH_MIN
     ditandai sebagai temuan dan diberi kategori sesuai kekuatan kecocokan.
     Indeks Integritas = proporsi karakter yang cocok, DIBOBOT per kategori
     (salinan penuh bobot 1.0, parsial/parafrase lebih kecil).
+
+    `exclude` adalah pengaturan yang DIKUNCI saat cek dijalankan (dipilih user
+    sebelum pengecekan): kecocokan yang dikecualikan tidak ikut menghitung
+    Indeks Integritas maupun tampil sebagai temuan. Kunci yang didukung:
+      - ``bibliography`` (bool): abaikan kecocokan di bagian daftar pustaka.
+      - ``quotes`` (bool): abaikan kecocokan yang berada dalam tanda kutip.
+      - ``min_source_percent`` (float): abaikan sumber yang kontribusinya
+        kurang dari N% dokumen (0 = nonaktif).
     """
+    exclude = exclude or {}
+    ex_bib = bool(exclude.get("bibliography"))
+    ex_quotes = bool(exclude.get("quotes"))
+    min_pct = max(0.0, float(exclude.get("min_source_percent") or 0.0))
+
     cand_shingles: list[tuple[dict, set[str]]] = []
     for c in candidates:
         body = c.get("_fulltext") or ""
@@ -150,8 +168,6 @@ def _chunk_match(doc: str, candidates: list[dict], threshold: float = _MATCH_MIN
         cand_shingles.append((c, _shingles(words)))
 
     sentences = _sentences(doc)
-    matched: list[dict] = []
-    weighted_chars = 0.0
     total_chars = max(len(doc), 1)
 
     quoted_spans = [(m.start(), m.end()) for m in _QUOTE_RE.finditer(doc)]
@@ -159,10 +175,10 @@ def _chunk_match(doc: str, candidates: list[dict], threshold: float = _MATCH_MIN
     bib_m = _BIB_RE.search(doc)
     bib_start = bib_m.start() if bib_m else None
     low_doc = doc.lower()
-    group_chars = {k: 0 for k in _MATCH_GROUP_ORDER}
-    group_count = {k: 0 for k in _MATCH_GROUP_ORDER}
-    source_contrib: dict[str, float] = {}
 
+    # Kumpulkan dulu seluruh kecocokan mentah; exclude diterapkan setelahnya
+    # (ambang per-sumber butuh total kontribusi tiap sumber lebih dulu).
+    raw: list[dict] = []
     for sent in sentences:
         words = [w.lower() for w in _WORD_RE.findall(sent)]
         sh = _shingles(words)
@@ -183,31 +199,76 @@ def _chunk_match(doc: str, candidates: list[dict], threshold: float = _MATCH_MIN
             if idx < 0:
                 idx = low_doc.find(sent.lower())
             status = _classify_match(sent, idx, best_ratio, quoted_spans, cite_spans, bib_start)
-            grp = status["group"]
-            group_chars[grp] += len(sent)
-            group_count[grp] += 1
-            # Kontribusi ke indeks: proporsi kalimat yang benar-benar cocok,
-            # dibobot kategori — bukan seluruh panjang kalimat.
-            weighted_chars += len(sent) * best_ratio * _GROUP_WEIGHT[grp]
-            # Kontribusi per-sumber (porsi dokumen yang tersorot ke sumber ini) —
-            # dipakai agar "Sumber Teratas" selaras dengan "Ringkasan Kecocokan".
             skey = (best_src.get("doi") or best_src.get("title") or "").lower().strip()
-            if skey:
-                source_contrib[skey] = source_contrib.get(skey, 0.0) + len(sent)
-            matched.append(
+            raw.append(
                 {
-                    "sentence": sent[:300],
-                    "match_ratio": round(best_ratio * 100, 1),
-                    "source_title": best_src.get("title"),
-                    "source_doi": best_src.get("doi"),
-                    "doc_id": best_src.get("doc_id"),
-                    "char_len": len(sent),
-                    "quoted": status["quoted"],
-                    "cited": status["cited"],
-                    "in_bibliography": status["in_bibliography"],
-                    "group": grp,
+                    "sent": sent,
+                    "best_ratio": best_ratio,
+                    "best_src": best_src,
+                    "skey": skey,
+                    "status": status,
+                    "group": status["group"],
                 }
             )
+
+    # Terapkan exclude bibliografi/kutipan lebih dulu, lalu ambang per-sumber
+    # dihitung dari sisa kecocokan (sumber yang hanya muncul di daftar pustaka
+    # tak ikut terhitung).
+    def _attrib_ok(m: dict) -> bool:
+        if ex_bib and m["status"]["in_bibliography"]:
+            return False
+        if ex_quotes and m["status"]["quoted"]:
+            return False
+        return True
+
+    kept = [m for m in raw if _attrib_ok(m)]
+
+    excluded_sources: set[str] = set()
+    if min_pct > 0:
+        pre_chars: dict[str, float] = {}
+        for m in kept:
+            if m["skey"]:
+                pre_chars[m["skey"]] = pre_chars.get(m["skey"], 0.0) + len(m["sent"])
+        for key, chars in pre_chars.items():
+            if chars / total_chars * 100 < min_pct:
+                excluded_sources.add(key)
+        if excluded_sources:
+            kept = [m for m in kept if m["skey"] not in excluded_sources]
+
+    matched: list[dict] = []
+    weighted_chars = 0.0
+    group_chars = {k: 0 for k in _MATCH_GROUP_ORDER}
+    group_count = {k: 0 for k in _MATCH_GROUP_ORDER}
+    source_contrib: dict[str, float] = {}
+    for m in kept:
+        sent = m["sent"]
+        best_ratio = m["best_ratio"]
+        best_src = m["best_src"]
+        status = m["status"]
+        grp = m["group"]
+        group_chars[grp] += len(sent)
+        group_count[grp] += 1
+        # Kontribusi ke indeks: proporsi kalimat yang benar-benar cocok,
+        # dibobot kategori — bukan seluruh panjang kalimat.
+        weighted_chars += len(sent) * best_ratio * _GROUP_WEIGHT[grp]
+        # Kontribusi per-sumber (porsi dokumen yang tersorot ke sumber ini) —
+        # dipakai agar "Sumber Teratas" selaras dengan "Ringkasan Kecocokan".
+        if m["skey"]:
+            source_contrib[m["skey"]] = source_contrib.get(m["skey"], 0.0) + len(sent)
+        matched.append(
+            {
+                "sentence": sent[:300],
+                "match_ratio": round(best_ratio * 100, 1),
+                "source_title": best_src.get("title"),
+                "source_doi": best_src.get("doi"),
+                "doc_id": best_src.get("doc_id"),
+                "char_len": len(sent),
+                "quoted": status["quoted"],
+                "cited": status["cited"],
+                "in_bibliography": status["in_bibliography"],
+                "group": grp,
+            }
+        )
 
     # Indeks Integritas (leksikal berbobot): seberapa besar porsi dokumen yang
     # tumpang-tindih dengan korpus, menimbang kekuatan tiap kecocokan.
@@ -232,6 +293,7 @@ def _chunk_match(doc: str, candidates: list[dict], threshold: float = _MATCH_MIN
         "matched_passages": matched[:50],
         "match_groups": match_groups,
         "source_percent": source_percent,
+        "excluded_sources": excluded_sources,
     }
 
 
@@ -368,8 +430,25 @@ def _report_id(doc: str, generated_at: datetime) -> str:
     return f"ICL-{generated_at:%Y%m%d}-{h[:10].upper()}"
 
 
+def _normalize_exclude(exclude: dict | None) -> dict:
+    """Bakukan pengaturan Exclude yang dipilih user sebelum cek (dikunci)."""
+    exclude = exclude or {}
+    try:
+        min_pct = max(0.0, min(100.0, float(exclude.get("min_source_percent") or 0.0)))
+    except (TypeError, ValueError):
+        min_pct = 0.0
+    return {
+        "bibliography": bool(exclude.get("bibliography")),
+        "quotes": bool(exclude.get("quotes")),
+        "min_source_percent": round(min_pct, 2),
+    }
+
+
 def check_plagiarism(
-    doc: str, top_k: int = 30, extra_candidates: list[dict] | None = None
+    doc: str,
+    top_k: int = 30,
+    extra_candidates: list[dict] | None = None,
+    exclude: dict | None = None,
 ) -> dict:
     """Bandingkan `doc` dengan korpus; kembalikan laporan kemiripan.
 
@@ -378,7 +457,13 @@ def check_plagiarism(
     sehingga Indeks Integritas mencakup korpus lokal + sumber daring sekaligus.
     Tiap kandidat minimal memuat `_fulltext` dan `title` (opsional `doi`,
     `url`, `source`, `pub_year`).
+
+    `exclude` adalah pengaturan Exclude yang dipilih user SEBELUM pengecekan
+    dan DIKUNCI pada hasil (tanpa daftar pustaka / tanpa kutipan / kecualikan
+    sumber di bawah N%). Diterapkan di sisi server agar Indeks Integritas,
+    daftar sumber, dan laporan konsisten di mana pun dibuka.
     """
+    exclude_settings = _normalize_exclude(exclude)
     doc = doc.strip()
     wc, cc = text_metrics(doc)
     if cc == 0:
@@ -476,7 +561,7 @@ def check_plagiarism(
         )
 
     # Pencocokan tingkat-kalimat (korpus lokal + sumber daring) untuk indeks.
-    chunk = _chunk_match(doc, sources + online_sources)
+    chunk = _chunk_match(doc, sources + online_sources, exclude=exclude_settings)
 
     # ── Deteksi Identitas Publikasi (reverse-containment + DOI) ──────────────
     # Indeks kemiripan mengukur "berapa % DOKUMEN termuat di sumber". Untuk
@@ -619,7 +704,6 @@ def check_plagiarism(
     integrity_index = round(
         min(100.0, max(copy_index, lexical_doc) + paraphrase_component), 1
     )
-    similarity_index = integrity_index
     generated_at = datetime.now(timezone.utc)
     total_docs = _corpus_size()
     embedded_docs = embedded_corpus_size()
@@ -627,6 +711,7 @@ def check_plagiarism(
     return {
         "overall_similarity": integrity_index,
         "integrity_index": integrity_index,
+        "exclude_settings": exclude_settings,
         "copy_similarity": copy_index,
         "document_lexical_similarity": lexical_doc,
         "paraphrase_similarity": paraphrase,

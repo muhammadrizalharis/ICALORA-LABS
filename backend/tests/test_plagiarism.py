@@ -140,3 +140,43 @@ def test_chunk_match_includes_group_metadata():
     }
     assert res["matched_passages"][0]["group"] == "salinan_langsung"
     assert res["matched_passages"][0]["char_len"] > 0
+
+
+def test_chunk_match_exclude_bibliography():
+    """Exclude daftar pustaka: kecocokan di bagian referensi tak dihitung."""
+    copied = (
+        "Deep learning has fundamentally transformed modern medical image analysis pipelines."
+    )
+    doc = (
+        "Pendahuluan singkat yang orisinal tanpa kecocokan apa pun di sini.\n"
+        "Daftar Pustaka\n" + copied
+    )
+    candidates = [{"doc_id": 1, "title": "Sumber Uji", "doi": "10.0/abc",
+                   "_fulltext": copied + " trailing context."}]
+    base = _chunk_match(doc, candidates, threshold=0.55)
+    assert base["matched_sentences"] == 1
+    excl = _chunk_match(doc, candidates, threshold=0.55, exclude={"bibliography": True})
+    assert excl["matched_sentences"] == 0
+    assert excl["similarity_index"] == 0.0
+
+
+def test_chunk_match_exclude_min_source_percent():
+    """Exclude sumber di bawah ambang persen yang diisi user."""
+    copied = (
+        "Deep learning has fundamentally transformed modern medical image analysis pipelines."
+    )
+    candidates = [{"doc_id": 1, "title": "Sumber Uji", "doi": "10.0/abc",
+                   "_fulltext": copied + " trailing context."}]
+    base = _chunk_match(copied, candidates, threshold=0.55)
+    assert base["matched_sentences"] == 1
+    # Sumber menyumbang ~100% dokumen; ambang 100% tak mengecualikannya,
+    # tetapi ambang di atas kontribusi (>100 mustahil) → pakai dokumen besar.
+    big_doc = copied + " " + ("Kalimat orisinal yang panjang dan tak cocok. " * 40)
+    base2 = _chunk_match(big_doc, candidates, threshold=0.55)
+    pct = next(iter(base2["source_percent"].values()))
+    excl = _chunk_match(
+        big_doc, candidates, threshold=0.55,
+        exclude={"min_source_percent": pct + 5},
+    )
+    assert excl["matched_sentences"] == 0
+    assert excl["excluded_sources"]

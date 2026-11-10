@@ -36,14 +36,33 @@ async function pollJob(jobId: string): Promise<void> {
 // Kirim tugas cek plagiarisme ke latar belakang server, lalu pantau statusnya
 // lewat polling. Promise ini selesai saat server merampungkan & mencatat hasil
 // ke riwayat — tanpa menahan satu koneksi HTTP panjang (aman dari timeout proxy).
+export interface ExcludeOpts {
+  bibliography: boolean;
+  quotes: boolean;
+  min_source_percent: number;
+}
+
 export async function submitPlagiarismJob(opts: {
   text: string;
   file: File | null;
   topK?: number;
+  exclude?: ExcludeOpts;
 }): Promise<void> {
   const topK = opts.topK ?? 30;
+  const ex = opts.exclude;
   const start = opts.file
-    ? await apiUpload<JobStart>(`/tools/plagiarism-file-async?top_k=${topK}`, opts.file)
-    : await apiPost<JobStart>("/tools/plagiarism-async", { text: opts.text, top_k: topK });
+    ? await apiUpload<JobStart>(
+        `/tools/plagiarism-file-async?top_k=${topK}` +
+          (ex
+            ? `&exclude_bibliography=${ex.bibliography}&exclude_quotes=${ex.quotes}` +
+              `&exclude_min_percent=${ex.min_source_percent}`
+            : ""),
+        opts.file,
+      )
+    : await apiPost<JobStart>("/tools/plagiarism-async", {
+        text: opts.text,
+        top_k: topK,
+        ...(ex ? { exclude: ex } : {}),
+      });
   await pollJob(start.job_id);
 }
