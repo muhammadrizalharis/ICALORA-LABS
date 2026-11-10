@@ -309,11 +309,34 @@ async def _enrich_fulltext(
             if isinstance(oa, str) and oa:
                 c["_oa_url"] = oa
 
-    targets = [c for c in promising if c.get("_oa_url")]
+    targets = [c for c in promising if c.get("_oa_url") or c.get("url")]
     if not targets:
         return
+
+    async def _best_fulltext(c: dict) -> str:
+        # Coba SEMUA URL yang tersedia untuk kandidat ini — URL PDF OA
+        # (`_oa_url`) DAN URL hasil/unduh (`url`, mis. tautan unduh OJS yang
+        # kerap menyajikan PDF langsung) — lalu ambil teks TERPANJANG. Ini
+        # penting karena `_oa_url` dari mirror (mis. semanticscholar) sering
+        # mati/kosong, sedangkan `url` penerbit justru berisi teks penuh.
+        urls: list[str] = []
+        for u in (c.get("_oa_url"), c.get("url")):
+            if u and u not in urls:
+                urls.append(u)
+        if not urls:
+            return ""
+        fetched = await asyncio.gather(
+            *(_fetch_fulltext(client, u) for u in urls),
+            return_exceptions=True,
+        )
+        best = ""
+        for t in fetched:
+            if isinstance(t, str) and len(t) > len(best):
+                best = t
+        return best
+
     results = await asyncio.gather(
-        *(_fetch_fulltext(client, c.get("_oa_url")) for c in targets),
+        *(_best_fulltext(c) for c in targets),
         return_exceptions=True,
     )
     for c, full in zip(targets, results, strict=False):
