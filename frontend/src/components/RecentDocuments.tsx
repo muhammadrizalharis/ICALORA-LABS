@@ -7,6 +7,7 @@ import { getFeature } from "@/lib/features";
 import { useAuth } from "@/lib/auth";
 import { useJobs, useHistoryVersion } from "@/lib/useJobs";
 import { dismissJob, type Job } from "@/lib/jobs";
+import NewDocumentMenu from "@/components/NewDocumentMenu";
 
 interface HistoryItem {
   id: number;
@@ -102,12 +103,17 @@ export default function RecentDocuments({ limit = 6 }: { limit?: number }) {
   const historyVersion = useHistoryVersion();
   const [items, setItems] = useState<HistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState("");
+
+  // Ambil lebih banyak dari yang ditampilkan agar pencarian mencakup riwayat
+  // yang lebih luas, bukan hanya beberapa dokumen terakhir.
+  const fetchLimit = Math.max(limit, 50);
 
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
-        const res = await fetch(`${API_BASE}/auth/history?limit=${limit}`, {
+        const res = await fetch(`${API_BASE}/auth/history?limit=${fetchLimit}`, {
           credentials: "include",
           cache: "no-store",
         });
@@ -123,35 +129,75 @@ export default function RecentDocuments({ limit = 6 }: { limit?: number }) {
     return () => {
       alive = false;
     };
-  }, [limit, historyVersion]);
+  }, [fetchLimit, historyVersion]);
+
+  const q = query.trim().toLowerCase();
+
+  function matchesQuery(tool: string, title: string | null, preview: string | null): boolean {
+    if (!q) return true;
+    const f = getFeature(tool);
+    return [title, preview, f?.name, tool].some((s) => (s ?? "").toLowerCase().includes(q));
+  }
 
   // Jangan tampilkan dobel: sembunyikan riwayat yang sudah diwakili kartu job "selesai".
   const doneJobIds = new Set(
     jobs.filter((j) => j.status === "done" && j.historyId).map((j) => j.historyId),
   );
-  const visibleItems = items.filter((it) => !doneJobIds.has(it.id));
+  const visibleJobs = jobs.filter((j) => matchesQuery(j.tool, j.title, null));
+  const filteredItems = items.filter(
+    (it) => !doneJobIds.has(it.id) && matchesQuery(it.tool, it.title, it.input_preview),
+  );
+  // Tanpa pencarian: batasi ke `limit` dokumen terakhir. Saat mencari: tampilkan
+  // semua yang cocok dari kumpulan yang diambil.
+  const visibleItems = q ? filteredItems : filteredItems.slice(0, limit);
 
   return (
     <div>
-      <div className="mb-2 flex items-end justify-between">
+      <div className="mb-2 flex flex-wrap items-end justify-between gap-2">
         <h2 className="text-lg font-semibold">Dokumen terakhir</h2>
         <Link href="/dashboard/history" className="text-xs text-[color:var(--brand)] hover:underline">
           Lihat semua riwayat →
         </Link>
       </div>
-      <p className="mb-4 text-xs text-neutral-400">
+      <p className="mb-3 text-xs text-neutral-400">
         Hasil tersimpan maksimal {historyRetentionDays} hari, lalu dihapus otomatis dari server.
       </p>
 
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <div className="relative min-w-0 flex-1">
+          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-neutral-400">
+            🔍
+          </span>
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Cari dokumen berdasarkan judul, isi, atau tool…"
+            className="w-full rounded-lg border border-c surface py-2 pl-9 pr-3 text-sm outline-none focus:border-[color:var(--brand)]"
+          />
+          {query && (
+            <button
+              onClick={() => setQuery("")}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-neutral-400 hover:text-neutral-600"
+              aria-label="Bersihkan pencarian"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+        <NewDocumentMenu />
+      </div>
+
       {loading && jobs.length === 0 ? (
         <p className="text-sm text-neutral-400">Memuat…</p>
-      ) : jobs.length === 0 && visibleItems.length === 0 ? (
+      ) : visibleJobs.length === 0 && visibleItems.length === 0 ? (
         <div className="rounded-xl border border-dashed border-c p-8 text-center text-sm text-neutral-400">
-          Belum ada dokumen. Mulai gunakan salah satu layanan di bawah.
+          {q
+            ? "Tidak ada dokumen yang cocok dengan pencarian."
+            : "Belum ada dokumen. Klik “Tambah baru” untuk mulai memeriksa."}
         </div>
       ) : (
         <div className="space-y-2">
-          {jobs.map((j) => (
+          {visibleJobs.map((j) => (
             <JobRow key={j.tempId} job={j} />
           ))}
           {visibleItems.map((it) => {
