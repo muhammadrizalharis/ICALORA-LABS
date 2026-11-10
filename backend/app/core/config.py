@@ -94,6 +94,11 @@ class Settings(BaseSettings):
     online_fulltext_enabled: bool = Field(default=True)
     online_fulltext_max_bytes: int = Field(default=20 * 1024 * 1024)
     online_fulltext_max_docs: int = Field(default=5)
+    # Selain kandidat ber-identitas-publikasi, ambil teks-PENUH OA untuk
+    # kandidat PALING MIRIP (calon sumber plagiarisme) agar perbandingan
+    # mencakup seluruh isi sumber, bukan hanya abstrak. Tetap ephemeral
+    # (di memori, tak disimpan) → nol tambahan disk.
+    online_fulltext_similar_docs: int = Field(default=8)
     # Penyedia Open Access tambahan (gratis, legal — hanya metadata/abstrak OA).
     # DOAJ: Directory of Open Access Journals (banyak jurnal Indonesia).
     # Unpaywall: resolver DOI → URL PDF OA legal (memperluas cakupan teks-penuh).
