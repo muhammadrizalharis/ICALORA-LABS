@@ -111,6 +111,7 @@ class Settings(BaseSettings):
     # kueri/bulan → 20 kalimat/paper ≈ 100 paper/bulan. Hasilnya tetap ephemeral
     # (snippet/teks-penuh OA di memori) → nol tambahan disk.
     brave_api_key: str = Field(default="")
+    tavily_api_key: str = Field(default="")
     online_websearch_enabled: bool = Field(default=True)
     online_websearch_sentences: int = Field(default=20)
     online_websearch_per_sentence: int = Field(default=8)
