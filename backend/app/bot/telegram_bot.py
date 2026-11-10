@@ -7,8 +7,9 @@ pemanggil agar bisa dikunci.
 
 Perintah:
   /cek, /grammar, /parafrase, /humanize, /hitung  — fitur teks
-  /status  — status korpus & ingest (admin)
-  /backup  — jalankan backup DB ke Drive (admin)
+  /status  — status lengkap (API, infra, web-search, korpus)
+  /ping    — cek bot & backend hidup
+  /services, /restart, /logs, /ingest, /backup  — admin (wajib secret)
   /start, /help, /whoami
 
 Jalankan:
@@ -18,6 +19,7 @@ Jalankan:
 from __future__ import annotations
 
 import html
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -39,22 +41,29 @@ _HELP = (
     "/parafrase &lt;teks&gt; — parafrase\n"
     "/humanize &lt;teks&gt; — humanize teks AI\n"
     "/hitung &lt;teks&gt; — word count\n"
-    "/status — status korpus &amp; ingest\n"
+    "/status — status lengkap (API, DB, web-search, korpus)\n"
+    "/ping — cek bot &amp; backend hidup\n"
     "/whoami — chat id Anda\n\n"
     "<b>Admin (wajib secret):</b>\n"
     "/backup &lt;secret&gt; — backup DB ke Drive\n"
     "/services &lt;secret&gt; — status semua layanan\n"
     "/restart &lt;secret&gt; &lt;layanan&gt; — restart layanan\n"
-    "/ingest &lt;secret&gt; &lt;openalex|pmc|embed&gt; &lt;start|stop|restart&gt;\n"
-    "/logs &lt;secret&gt; &lt;layanan&gt; — 15 baris log terakhir\n\n"
-    "layanan: backend, frontend, bot, openalex, pmc, embed, all"
+    "/ingest &lt;secret&gt; &lt;openalex|pmc|embed&gt; &lt;start|stop|restart|status&gt;\n"
+    "/logs &lt;secret&gt; &lt;layanan&gt; — 20 baris log terakhir\n\n"
+    "layanan: backend, frontend, bot, redis, storage, all"
 )
 
-# Nama ramah -> unit systemd
+# Nama ramah -> kontainer Docker (deploy utama). Fallback systemd memakai nama
+# unit yang sama (icalora-backend.service, dst.) bila Docker tak tersedia.
 _UNITS = {
     "backend": "icalora-backend",
     "frontend": "icalora-frontend",
     "bot": "icalora-bot",
+    "redis": "icalora-redis",
+    "storage": "icalora-seaweedfs",
+}
+# Unit ingest (korpus) — berjalan sebagai systemd one-shot di host, bukan kontainer.
+_INGEST_UNITS = {
     "openalex": "icalora-ingest-openalex",
     "pmc": "icalora-ingest-pmc",
     "embed": "icalora-ingest-embed",
@@ -68,6 +77,7 @@ _LOG_FILES = {
     "embed": "ingest_embed.log",
 }
 _LOGDIR = ROOT / "backend" / ".logs"
+_DOCKER_SOCK = "/var/run/docker.sock"
 
 
 def _allowed() -> set[int]:
@@ -119,20 +129,123 @@ def _fmt_plagiarism(d: dict) -> str:
     return "\n".join(lines)
 
 
+def _mark(ok: bool) -> str:
+    return "✅" if ok else "❌"
+
+
 def _status() -> str:
-    d = _get("/ingest/status")
-    parts = ["<b>Status korpus ICALORA</b>", f"Total dokumen: {d.get('total_documents', '?')}"]
-    by_source = d.get("by_source", {})
-    if isinstance(by_source, dict):
-        for src, cnt in by_source.items():
-            parts.append(f"• {src}: {cnt}")
-    jobs = d.get("jobs", [])
-    running = [j for j in jobs if j.get("status") == "running"]
-    if running:
-        parts.append("\n<b>Job ingest berjalan:</b>")
-        for j in running[:6]:
-            parts.append(f"• {j.get('source')} [{j.get('status')}] {j.get('docs_ingested')}")
-    return "\n".join(parts)
+    """Status menyeluruh: API, infrastruktur, web-search (kuota), korpus & ingest."""
+    try:
+        d = _get("/health/status")
+    except Exception as exc:  # noqa: BLE001
+        return f"❌ <b>Backend tak terjangkau</b>\n<code>{html.escape(str(exc))}</code>"
+
+    overall_ok = d.get("status") == "ok"
+    out = [
+        f"{_mark(overall_ok)} <b>Status ICALORA-LABS</b> — "
+        f"<code>{html.escape(str(d.get('status', '?')))}</code>",
+        "",
+        "<b>🔌 API &amp; Infrastruktur</b>",
+    ]
+
+    infra = d.get("infra", {}).get("services", {})
+
+    pg = infra.get("postgres", {})
+    out.append(
+        f"{_mark(pg.get('ok'))} PostgreSQL"
+        + (f" · pgvector {'aktif' if pg.get('pgvector') else 'nonaktif'}" if pg.get("ok") else "")
+        + (f" · <code>{html.escape(str(pg.get('error'))[:60])}</code>" if pg.get("error") else "")
+    )
+
+    rd = infra.get("redis", {})
+    out.append(
+        f"{_mark(rd.get('ok'))} Redis"
+        + (f" · <code>{html.escape(str(rd.get('error'))[:60])}</code>" if rd.get("error") else "")
+    )
+
+    s3 = infra.get("s3", {})
+    buckets = s3.get("buckets") or []
+    out.append(
+        f"{_mark(s3.get('ok'))} Object storage (S3)"
+        + (f" · {len(buckets)} bucket" if s3.get("ok") else "")
+        + (f" · <code>{html.escape(str(s3.get('error'))[:60])}</code>" if s3.get("error") else "")
+    )
+
+    llm = infra.get("llm", {})
+    out.append(
+        f"{_mark(llm.get('ok'))} LLM ({html.escape(str(llm.get('provider', '?')))})"
+        + (
+            f" · model <code>{html.escape(str(llm.get('model', '?')))}</code>"
+            f" {'tersedia' if llm.get('model_available') else 'BELUM diunduh'}"
+            if llm.get("ok")
+            else ""
+        )
+        + (f" · <code>{html.escape(str(llm.get('error'))[:60])}</code>" if llm.get("error") else "")
+    )
+
+    # ---- Web-search (verifikasi daring) ----
+    ws = d.get("websearch", {})
+    out.append("")
+    out.append("<b>🌐 Web-search daring (verifikasi)</b>")
+    if not ws.get("enabled"):
+        out.append("⚪ Dinonaktifkan (ONLINE_WEBSEARCH_ENABLED=false)")
+    elif not ws.get("provider"):
+        out.append("⚠️ Tak ada penyedia terpasang (Tavily/Brave key kosong)")
+    else:
+        used = ws.get("used", -1)
+        cap = ws.get("cap", 0)
+        remaining = ws.get("remaining")
+        prov = str(ws.get("provider", "?")).capitalize()
+        if used == -1:
+            quota_ok = False
+            quota_txt = "kuota tak terbaca (Redis?)"
+        else:
+            quota_ok = remaining is None or remaining > 0
+            pct = f" ({used * 100 // cap}%)" if cap else ""
+            rem_txt = f" · sisa {remaining}" if remaining is not None else ""
+            quota_txt = f"{used}/{cap}{pct}{rem_txt} — bulan {ws.get('month', '?')}"
+        out.append(f"{_mark(bool(ws.get('provider')))} Penyedia aktif: <b>{prov}</b>")
+        tav = ws.get("providers_configured", {}).get("tavily")
+        brv = ws.get("providers_configured", {}).get("brave")
+        out.append(f"   Kunci: Tavily {_mark(tav)} · Brave {_mark(brv)}")
+        out.append(f"{_mark(quota_ok)} Kuota: {quota_txt}")
+        out.append(
+            f"   Tuning: {ws.get('sentences_per_paper', '?')} kalimat/paper · "
+            f"{ws.get('results_per_sentence', '?')} hasil/kalimat"
+        )
+
+    # ---- Korpus & ingest ----
+    corpus = d.get("corpus", {})
+    out.append("")
+    out.append("<b>📚 Korpus &amp; ingest</b>")
+    if corpus.get("error"):
+        out.append(f"❌ <code>{html.escape(str(corpus['error'])[:80])}</code>")
+    else:
+        out.append(f"Total dokumen: <b>{corpus.get('total_documents', '?')}</b>")
+        by_source = corpus.get("by_source", {})
+        if isinstance(by_source, dict) and by_source:
+            for src, cnt in sorted(by_source.items(), key=lambda kv: -int(kv[1] or 0)):
+                out.append(f"• {html.escape(str(src))}: {cnt}")
+        jobs = corpus.get("jobs", [])
+        running = [j for j in jobs if j.get("status") == "running"]
+        if running:
+            out.append("<b>Job ingest berjalan:</b>")
+            for j in running[:6]:
+                out.append(
+                    f"🔄 {html.escape(str(j.get('source')))} · "
+                    f"{j.get('docs_ingested')}/{j.get('docs_target') or '?'}"
+                )
+        else:
+            out.append("Tidak ada job ingest berjalan.")
+        errored = [j for j in jobs if j.get("status") == "error" and j.get("last_error")]
+        if errored:
+            j = errored[0]
+            out.append(
+                f"⚠️ Error terbaru ({html.escape(str(j.get('source')))}): "
+                f"<code>{html.escape(str(j.get('last_error'))[:80])}</code>"
+            )
+
+    return "\n".join(out)
 
 
 def _run_backup() -> str:
@@ -163,9 +276,53 @@ def _systemctl(*args: str) -> str:
         return f"Gagal systemctl: {exc}"
 
 
+def _docker_available() -> bool:
+    return os.path.exists(_DOCKER_SOCK)
+
+
+def _docker_api(method: str, path: str, *, stream: bool = False):
+    """Panggil Docker Engine API lewat unix socket (tanpa perlu CLI docker)."""
+    transport = httpx.HTTPTransport(uds=_DOCKER_SOCK)
+    with httpx.Client(transport=transport, base_url="http://docker", timeout=30) as client:
+        r = client.request(method, path)
+        r.raise_for_status()
+        return r.content if stream else r
+
+
+def _docker_list() -> dict[str, dict]:
+    """Peta nama kontainer -> {state, status} untuk semua kontainer ICALORA."""
+    out: dict[str, dict] = {}
+    try:
+        r = _docker_api("GET", "/containers/json?all=1")
+        for c in r.json():
+            for raw in c.get("Names", []):
+                name = raw.lstrip("/")
+                out[name] = {"state": c.get("State", "?"), "status": c.get("Status", "")}
+    except Exception as exc:  # noqa: BLE001
+        out["_error"] = {"state": "error", "status": str(exc)}
+    return out
+
+
 def _services_status() -> str:
     lines = ["<b>Status layanan:</b>"]
-    for name, unit in _UNITS.items():
+    if _docker_available():
+        info = _docker_list()
+        if "_error" in info:
+            err = html.escape(info["_error"]["status"][:80])
+            lines.append(f"❌ Docker API error: <code>{err}</code>")
+            return "\n".join(lines)
+        for name, cname in _UNITS.items():
+            c = info.get(cname)
+            if not c:
+                lines.append(f"⚪ {name}: <code>tidak ada</code>")
+                continue
+            running = c["state"] == "running"
+            healthy = "unhealthy" not in c["status"]
+            mark = "✅" if (running and healthy) else ("⚠️" if running else "❌")
+            lines.append(f"{mark} {name}: <code>{html.escape(c['status'] or c['state'])}</code>")
+        return "\n".join(lines)
+    # Fallback systemd (deploy host)
+    for name, unit in {**_UNITS, **_INGEST_UNITS}.items():
         state = _systemctl("is-active", unit).splitlines()[0] if unit else "?"
         mark = "✅" if state == "active" else "⚠️"
         lines.append(f"{mark} {name}: <code>{state}</code>")
@@ -175,13 +332,26 @@ def _services_status() -> str:
 def _restart_service(name: str) -> str:
     name = name.lower().strip()
     if name == "all":
-        units = list(_UNITS.values())
+        targets = list(_UNITS.keys())
     elif name in _UNITS:
-        units = [_UNITS[name]]
+        targets = [name]
     else:
         return f"Layanan tidak dikenal: {html.escape(name)}"
     # restart bot terakhir supaya balasan sempat terkirim
-    units.sort(key=lambda u: u == "icalora-bot")
+    targets.sort(key=lambda n: n == "bot")
+    if _docker_available():
+        done, failed = [], []
+        for n in targets:
+            try:
+                _docker_api("POST", f"/containers/{_UNITS[n]}/restart?t=10")
+                done.append(n)
+            except Exception as exc:  # noqa: BLE001
+                failed.append(f"{n} ({str(exc)[:40]})")
+        msg = f"Restart terkirim: {', '.join(done)}" if done else "Tidak ada yang direstart."
+        if failed:
+            msg += f"\n⚠️ Gagal: {html.escape(', '.join(failed))}"
+        return msg
+    units = [_UNITS[n] for n in targets]
     _systemctl("restart", *units)
     return f"Restart dikirim: {html.escape(name)}"
 
@@ -189,19 +359,49 @@ def _restart_service(name: str) -> str:
 def _ingest_control(source: str, action: str) -> str:
     source = source.lower().strip()
     action = action.lower().strip()
-    if source not in ("openalex", "pmc", "embed"):
+    if source not in _INGEST_UNITS:
         return f"Sumber tidak dikenal: {html.escape(source)}"
     if action not in ("start", "stop", "restart", "status"):
         return f"Aksi tidak dikenal: {html.escape(action)}"
-    unit = _UNITS[source]
+    unit = _INGEST_UNITS[source]
     if action == "status":
         return f"{source}: <code>{_systemctl('is-active', unit).splitlines()[0]}</code>"
-    _systemctl(action, unit)
+    out = _systemctl(action, unit)
+    if out.startswith("Gagal"):
+        return (
+            f"ingest {source}: {action} GAGAL (systemd tak tersedia). "
+            "Ingest korpus dijalankan sebagai job host, bukan kontainer."
+        )
     return f"ingest {source}: {action} dikirim."
 
 
-def _tail_log(name: str, lines: int = 15) -> str:
+def _demux_docker_logs(data: bytes) -> str:
+    """Docker non-TTY logs memakai framing 8-byte header. Buang header, ambil payload."""
+    out = bytearray()
+    i, n = 0, len(data)
+    while i + 8 <= n:
+        size = int.from_bytes(data[i + 4 : i + 8], "big")
+        i += 8
+        out += data[i : i + size]
+        i += size
+    return out.decode("utf-8", "replace") if out else data.decode("utf-8", "replace")
+
+
+def _tail_log(name: str, lines: int = 20) -> str:
     name = name.lower().strip()
+    if _docker_available() and name in _UNITS:
+        try:
+            raw = _docker_api(
+                "GET",
+                f"/containers/{_UNITS[name]}/logs?stdout=1&stderr=1&tail={lines}",
+                stream=True,
+            )
+            text = _demux_docker_logs(raw).strip() or "(log kosong)"
+            text = text[-3500:]
+            return f"<b>{name} (akhir {lines} baris):</b>\n<pre>{html.escape(text)}</pre>"
+        except Exception as exc:  # noqa: BLE001
+            return f"Gagal baca log docker: {html.escape(str(exc))}"
+    # Fallback file log (deploy host)
     fname = _LOG_FILES.get(name)
     if not fname:
         return f"Layanan tidak dikenal: {html.escape(name)}"
@@ -239,6 +439,16 @@ def _handle(chat_id: int, text: str) -> None:
         return
     if cmd == "whoami":
         _send(chat_id, f"chat_id Anda: <code>{chat_id}</code>")
+        return
+    if cmd == "ping":
+        t0 = time.monotonic()
+        try:
+            _get("/health")
+            dt = int((time.monotonic() - t0) * 1000)
+            _send(chat_id, f"🏓 Pong! Bot ✅ · Backend ✅ ({dt} ms)")
+        except Exception as exc:  # noqa: BLE001
+            err = html.escape(str(exc)[:80])
+            _send(chat_id, f"🏓 Pong! Bot ✅ · Backend ❌\n<code>{err}</code>")
         return
 
     # ---- Perintah admin (wajib secret) ----
