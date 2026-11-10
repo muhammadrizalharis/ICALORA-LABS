@@ -41,10 +41,10 @@ _TIMEOUT = httpx.Timeout(22.0, connect=8.0)
 # Jumlah kalimat kueri bersifat ADAPTIF terhadap panjang dokumen: dokumen tebal
 # (mis. 25+ halaman) memakai lebih banyak kalimat khas yang tersebar merata agar
 # penemuan sumber lebih teliti. Tetap dalam anggaran waktu pemeriksaan (5–10 mnt).
-_SENT_BASE = 48  # minimum kalimat kueri (dokumen pendek)
-_SENT_CAP = 140  # plafon kalimat kueri (dokumen sangat tebal)
-_PER_PROVIDER = 8  # kandidat teratas per kalimat per provider
-_CONCURRENCY = 24  # batasi koneksi serempak agar provider tidak menolak
+_SENT_BASE = 60  # minimum kalimat kueri (dokumen pendek)
+_SENT_CAP = 220  # plafon kalimat kueri (dokumen sangat tebal)
+_PER_PROVIDER = 12  # kandidat teratas per kalimat per provider
+_CONCURRENCY = 32  # batasi koneksi serempak agar provider tidak menolak
 _MAILTO = "noreply@icalora-labs.local"  # OpenAlex/Crossref "polite pool"
 
 
