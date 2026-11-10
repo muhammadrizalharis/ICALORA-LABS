@@ -37,9 +37,13 @@ _DOI_RE = re.compile(r"10\.\d{4,9}/[-._;()/:A-Za-z0-9]+", re.UNICODE)
 _WORD_RE = re.compile(r"[A-Za-z\u00C0-\u024F]{2,}", re.UNICODE)
 _UA = {"User-Agent": "ICALORA-LABS/1.0 (academic integrity; mailto:noreply@icalora-labs.local)"}
 _TIMEOUT = httpx.Timeout(22.0, connect=8.0)
-_MAX_SENTENCES = 36
+# Jumlah kalimat kueri bersifat ADAPTIF terhadap panjang dokumen: dokumen tebal
+# (mis. 25+ halaman) memakai lebih banyak kalimat khas yang tersebar merata agar
+# penemuan sumber lebih teliti. Tetap dalam anggaran waktu pemeriksaan (5–10 mnt).
+_SENT_BASE = 48  # minimum kalimat kueri (dokumen pendek)
+_SENT_CAP = 140  # plafon kalimat kueri (dokumen sangat tebal)
 _PER_PROVIDER = 8  # kandidat teratas per kalimat per provider
-_CONCURRENCY = 20  # batasi koneksi serempak agar provider tidak menolak
+_CONCURRENCY = 24  # batasi koneksi serempak agar provider tidak menolak
 _MAILTO = "noreply@icalora-labs.local"  # OpenAlex/Crossref "polite pool"
 
 
@@ -76,7 +80,22 @@ def _clean(txt: str) -> str:
     return _WS_RE.sub(" ", _TAG_RE.sub(" ", txt or "")).strip()
 
 
-def _risky_sentences(doc: str, limit: int = _MAX_SENTENCES) -> list[str]:
+def _sentence_budget(doc: str) -> int:
+    """Jumlah kalimat kueri yang menyesuaikan panjang dokumen.
+
+    Dokumen pendek memakai `_SENT_BASE`; dokumen tebal naik proporsional
+    hingga `_SENT_CAP`, sehingga paper 25+ halaman tetap tercakup menyeluruh
+    tanpa melewati anggaran waktu pemeriksaan.
+    """
+    n = 0
+    for s in _sentences(doc):
+        wc = len(_WORD_RE.findall(s))
+        if 8 <= wc <= 60:
+            n += 1
+    return max(_SENT_BASE, min(_SENT_CAP, round(n * 0.35)))
+
+
+def _risky_sentences(doc: str, limit: int = _SENT_CAP) -> list[str]:
     """Pilih kalimat paling khas (panjang + banyak kata jarang) sebagai sampel
     kueri — menghindari kalimat umum yang menghasilkan kueri tak berarti."""
     out: list[tuple[float, str]] = []
@@ -543,20 +562,29 @@ async def _q_semanticscholar(client: httpx.AsyncClient, sentence: str) -> list[d
 # Rencana penyedia: (fungsi, konkurensi-maks, jatah-kalimat). Penyedia yang
 # dibatasi laju ketat (arXiv, Semantic Scholar) diberi konkurensi & jatah
 # kalimat lebih kecil agar tidak diblokir dan tetap dalam anggaran waktu.
+# (provider, konkurensi, bobot jatah, plafon jatah). Jatah kalimat tiap provider
+# dihitung = clamp(bobot × anggaran_kalimat, 8, plafon). Provider kuat/cepat
+# (Crossref, Europe PMC) memakai anggaran penuh; yang lambat/rawan rate-limit
+# (Semantic Scholar) dibatasi ketat.
 _PROVIDER_PLAN: list[tuple] = [
-    (_q_openalex, 3, 12),
-    (_q_crossref, 8, _MAX_SENTENCES),
-    (_q_europepmc, 8, _MAX_SENTENCES),
-    (_q_wikipedia, 6, 22),
-    (_q_arxiv, 3, 22),
-    (_q_semanticscholar, 1, 12),
+    (_q_openalex, 3, 0.40, 60),
+    (_q_crossref, 8, 1.00, _SENT_CAP),
+    (_q_europepmc, 8, 1.00, _SENT_CAP),
+    (_q_wikipedia, 6, 0.60, 80),
+    (_q_arxiv, 3, 0.60, 80),
+    (_q_semanticscholar, 1, 0.25, 20),
 ]
 
 
-def _provider_plan() -> list[tuple]:
-    plan = list(_PROVIDER_PLAN)
+def _provider_plan(budget: int = _SENT_CAP) -> list[tuple]:
+    """Hitung jatah kalimat per provider dari anggaran kalimat dokumen."""
+
+    def _slot(weight: float, cap: int) -> int:
+        return max(8, min(cap, round(budget * weight)))
+
+    plan = [(fn, conc, _slot(weight, cap)) for fn, conc, weight, cap in _PROVIDER_PLAN]
     if settings.core_enabled and settings.core_api_key:
-        plan.append((_q_core, 4, _MAX_SENTENCES))
+        plan.append((_q_core, 4, _slot(1.00, _SENT_CAP)))
     return plan
 
 
@@ -652,8 +680,9 @@ async def _resolve_publication(
 async def _gather_candidates(
     doc: str, title_hint: str = ""
 ) -> tuple[list[dict], list[str], dict]:
-    sentences = _risky_sentences(doc)
-    plan = _provider_plan()
+    budget = _sentence_budget(doc)
+    sentences = _risky_sentences(doc, budget)
+    plan = _provider_plan(budget)
     provider_hits: dict[str, int] = {}
     seen: dict[str, dict] = {}
     async with httpx.AsyncClient(timeout=_TIMEOUT, headers=_UA, follow_redirects=True) as client:
