@@ -20,6 +20,8 @@ interface TextInputProps {
   accept?: string;
   /** Teks bantuan format di area unggah. */
   acceptHint?: string;
+  /** Bila true: sembunyikan tab & mode tempel teks — hanya unggah berkas. */
+  uploadOnly?: boolean;
 }
 
 const ACCEPT = ".txt,.md,.csv,.tex,.pdf,.docx";
@@ -32,8 +34,9 @@ export default function TextInput({
   onFile,
   accept = ACCEPT,
   acceptHint = "Mendukung .txt, .pdf, .docx (maks 10 MB)",
+  uploadOnly = false,
 }: TextInputProps) {
-  const [mode, setMode] = useState<"paste" | "upload">("paste");
+  const [mode, setMode] = useState<"paste" | "upload">(uploadOnly ? "upload" : "paste");
   const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [fileInfo, setFileInfo] = useState<string | null>(null);
@@ -62,7 +65,7 @@ export default function TextInput({
       onChange(res.text);
       onFile?.(file);
       setFileInfo(`${res.filename} · ${res.chars.toLocaleString("id-ID")} karakter diekstrak`);
-      setMode("paste");
+      if (!uploadOnly) setMode("paste");
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Gagal mengunggah berkas.");
     } finally {
@@ -80,30 +83,32 @@ export default function TextInput({
   return (
     <div className="space-y-2">
       {/* Tab */}
-      <div className="inline-flex rounded-lg border border-c p-0.5 text-sm">
-        <button
-          type="button"
-          onClick={() => setMode("paste")}
-          className={`rounded-md px-3 py-1.5 font-medium transition ${
-            mode === "paste"
-              ? "bg-[color:var(--brand)] text-white"
-              : "text-neutral-600 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white"
-          }`}
-        >
-          ✍️ Tempel Teks
-        </button>
-        <button
-          type="button"
-          onClick={() => setMode("upload")}
-          className={`rounded-md px-3 py-1.5 font-medium transition ${
-            mode === "upload"
-              ? "bg-[color:var(--brand)] text-white"
-              : "text-neutral-600 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white"
-          }`}
-        >
-          📎 Unggah Berkas
-        </button>
-      </div>
+      {!uploadOnly && (
+        <div className="inline-flex rounded-lg border border-c p-0.5 text-sm">
+          <button
+            type="button"
+            onClick={() => setMode("paste")}
+            className={`rounded-md px-3 py-1.5 font-medium transition ${
+              mode === "paste"
+                ? "bg-[color:var(--brand)] text-white"
+                : "text-neutral-600 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white"
+            }`}
+          >
+            ✍️ Tempel Teks
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode("upload")}
+            className={`rounded-md px-3 py-1.5 font-medium transition ${
+              mode === "upload"
+                ? "bg-[color:var(--brand)] text-white"
+                : "text-neutral-600 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white"
+            }`}
+          >
+            📎 Unggah Berkas
+          </button>
+        </div>
+      )}
 
       {mode === "paste" ? (
         <textarea
@@ -152,7 +157,7 @@ export default function TextInput({
         </div>
       )}
 
-      {fileInfo && mode === "paste" && (
+      {fileInfo && (mode === "paste" || uploadOnly) && (
         <div className="flex items-center gap-2 text-xs text-emerald-600 dark:text-emerald-400">
           <span>✅</span> {fileInfo}
         </div>
