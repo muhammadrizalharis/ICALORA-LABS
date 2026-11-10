@@ -43,6 +43,13 @@ services:
     env_file:
       - ../../backend/.env
     command: ["python", "-m", "app.bot.telegram_bot"]
+    volumes:
+      # Akses Docker Engine API untuk perintah admin (/services, /restart, /logs).
+      # Bot privat (allowlist + secret), hanya VM admin.
+      - /var/run/docker.sock:/var/run/docker.sock
+    # GID grup 'docker' host (pemilik docker.sock) agar appuser bisa akses socket.
+    group_add:
+      - "999"
     depends_on:
       backend:
         condition: service_healthy
