@@ -70,7 +70,9 @@ export default function FileInfoPanel({ item }: { item: HistoryItemFull }) {
   const file = item.file ?? null;
   const exp = expiryInfo(item.expires_at);
   const isPlagiarism = item.tool === "plagiarism-checker";
-  const hasFile = !!file?.filename || (isPlagiarism && !!item.result);
+  const hasOriginalPdf = Boolean(
+    isPlagiarism && item.result && (item.result as Record<string, unknown>).has_original_pdf,
+  );
   const reportUrl = `${API_BASE}/tools/plagiarism-report/${item.id}`;
   const sha = file?.sha256 ?? null;
 
@@ -122,7 +124,7 @@ export default function FileInfoPanel({ item }: { item: HistoryItemFull }) {
           Aksi
         </h2>
         <div className="space-y-2">
-          {isPlagiarism && hasFile && (
+          {isPlagiarism && hasOriginalPdf && (
             <>
               <a
                 href={reportUrl}

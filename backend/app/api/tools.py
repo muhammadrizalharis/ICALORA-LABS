@@ -212,6 +212,28 @@ def humanize_ep(body: TextIn, request: Request) -> dict:
         raise HTTPException(status_code=502, detail=f"LLM gagal: {exc}") from exc
 
 
+def _require_pdf_upload(filename: str | None) -> None:
+    """Plagiarism Checker hanya menerima PDF.
+
+    Laporan berformat identik (sorotan langsung di atas halaman asli) HANYA bisa
+    dibuat dari PDF. Word/DOCX tidak bisa dibuat laporan berformat-asli, dan
+    mengonversinya otomatis ke PDF membuat tata letak & posisi sorotan tidak
+    akurat. Maka berkas non-PDF ditolak dengan panduan jelas; pengguna dapat
+    menempel teks (paste) bila hanya ingin skor, atau menyimpan dokumennya
+    sebagai PDF lalu mengunggah ulang.
+    """
+    if not (filename or "").lower().endswith(".pdf"):
+        raise HTTPException(
+            status_code=415,
+            detail=(
+                "Untuk Plagiarism Checker, unggah berkas PDF. Dokumen Word (.docx) "
+                "tidak didukung karena laporan berformat identik tidak bisa dibuat. "
+                "Simpan dokumen Anda sebagai PDF lalu unggah ulang — atau tempel "
+                "teksnya langsung bila hanya ingin skor kemiripan."
+            ),
+        )
+
+
 def _title_hint_from_filename(filename: str | None) -> str:
     """Judul perkiraan dari nama berkas unggahan (banyak PDF akademik dinamai
     sesuai judulnya). Buang ekstensi & pemisah umum agar jadi query judul."""
@@ -303,6 +325,7 @@ async def plagiarism_file_ep(  # noqa: B008
         raise HTTPException(
             status_code=413, detail=f"Berkas melebihi {MAX_UPLOAD_BYTES // (1024 * 1024)} MB."
         )
+    _require_pdf_upload(file.filename)
     try:
         text = extract_text(file.filename or "", data).strip()
     except ValueError as exc:
@@ -422,6 +445,7 @@ async def plagiarism_file_async_ep(  # noqa: B008
         raise HTTPException(
             status_code=413, detail=f"Berkas melebihi {MAX_UPLOAD_BYTES // (1024 * 1024)} MB."
         )
+    _require_pdf_upload(file.filename)
     try:
         text = extract_text(file.filename or "", data).strip()
     except ValueError as exc:
