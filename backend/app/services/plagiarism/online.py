@@ -652,7 +652,7 @@ def _websearch_reserve() -> bool:
         return False
     try:
         r = redis_client()
-        key = f"websearch:brave:{datetime.now(timezone.utc):%Y-%m}"
+        key = f"websearch:quota:{datetime.now(timezone.utc):%Y-%m}"
         n = r.incr(key)
         if n == 1:
             r.expire(key, 45 * 24 * 3600)
@@ -666,7 +666,7 @@ def websearch_usage() -> dict:
     cap = settings.online_websearch_monthly_cap
     try:
         r = redis_client()
-        key = f"websearch:brave:{datetime.now(timezone.utc):%Y-%m}"
+        key = f"websearch:quota:{datetime.now(timezone.utc):%Y-%m}"
         used = int(r.get(key) or 0)
     except Exception:  # noqa: BLE001
         used = -1
@@ -723,6 +723,66 @@ async def _q_brave(client: httpx.AsyncClient, sentence: str) -> list[dict]:
             }
         )
     return out
+
+
+async def _q_tavily(client: httpx.AsyncClient, sentence: str) -> list[dict]:
+    """Web search umum (Tavily API) sebagai VERIFIER bertarget — menangkap sumber
+    yang lolos dari provider akademik (mis. halaman penerbit, repositori, blog).
+    NONAKTIF otomatis bila `tavily_api_key` kosong. Hemat kuota: hanya dipanggil
+    untuk kalimat paling khas (lihat `_gather_candidates`), `search_depth=basic`
+    = 1 kredit/kueri. Hasil ephemeral (snippet; teks-penuh OA hanya bila URL PDF)
+    → nol disk. Rem pengaman kuota bulanan mencegah lewat tier gratis.
+    """
+    if not settings.tavily_api_key or not settings.online_websearch_enabled:
+        return []
+    if not _websearch_reserve():
+        return []
+    try:
+        resp = await client.post(
+            "https://api.tavily.com/search",
+            json={
+                "query": sentence[:400],
+                "search_depth": "basic",
+                "max_results": settings.online_websearch_per_sentence,
+            },
+            headers={"Authorization": f"Bearer {settings.tavily_api_key}"},
+        )
+        if resp.status_code != 200:
+            return []
+        data = resp.json()
+    except Exception:  # noqa: BLE001
+        return []
+    out = []
+    for w in (data.get("results") or [])[: settings.online_websearch_per_sentence]:
+        title = _clean(w.get("title") or "")
+        content = _clean(w.get("content") or "")
+        url = w.get("url")
+        if not (title and url):
+            continue
+        oa_url = url if url.lower().split("?")[0].endswith(".pdf") else None
+        out.append(
+            {
+                "title": title,
+                "doi": None,
+                "source": "Web",
+                "url": url,
+                "_fulltext": content or title,
+                "_oa_url": oa_url,
+            }
+        )
+    return out
+
+
+def _websearch_provider():
+    """Pilih penyedia web-search aktif: Tavily diutamakan (tanpa kartu → bebas
+    risiko tagihan), lalu Brave. None bila tak ada kunci terpasang."""
+    if not settings.online_websearch_enabled:
+        return None
+    if settings.tavily_api_key:
+        return _q_tavily
+    if settings.brave_api_key:
+        return _q_brave
+    return None
 
 
 async def _q_semanticscholar(client: httpx.AsyncClient, sentence: str) -> list[dict]:
@@ -907,18 +967,20 @@ async def _gather_candidates(
         )
         results = await asyncio.gather(*tasks, return_exceptions=True)
         pub_results = await pub_task
-        # Fase VERIFIER web search (Brave): HANYA kalimat paling khas, serial
-        # dengan jeda ~1 dtk menghormati batas 1 kueri/detik paket gratis.
-        # Nonaktif otomatis bila kunci kosong (nol kuota terpakai).
-        brave_results: list = []
-        if settings.brave_api_key and settings.online_websearch_enabled:
+        # Fase VERIFIER web search (Tavily/Brave): HANYA kalimat paling khas,
+        # serial dengan jeda kecil menghormati batas laju paket gratis. Nonaktif
+        # otomatis bila tak ada kunci (nol kuota). Rem pengaman kuota bulanan di
+        # dalam provider mencegah melewati tier gratis.
+        web_results: list = []
+        web_provider = _websearch_provider()
+        if web_provider is not None:
             for s in sentences[: settings.online_websearch_sentences]:
                 try:
-                    brave_results.append(await _q_brave(client, s))
+                    web_results.append(await web_provider(client, s))
                 except Exception:  # noqa: BLE001
                     pass
                 await asyncio.sleep(1.1)
-    for res in list(results) + [pub_results] + brave_results:
+    for res in list(results) + [pub_results] + web_results:
         if isinstance(res, Exception) or not res:
             continue
         for cand in res:
