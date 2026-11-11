@@ -163,6 +163,36 @@ def _oa_pdf_from_crossref(it: dict) -> str | None:
     return None
 
 
+async def _crawl4ai_markdown(client: httpx.AsyncClient, url: str) -> str:
+    """Ambil teks artikel BERSIH dari URL HTML via Crawl4AI lokal.
+
+    Jauh lebih bersih dari penjungkiran tag mentah (membuang nav/menu/iklan,
+    merender JS), jadi perbandingan plagiarisme lebih presisi & tak "ngawur".
+    Gagal-aman: kembalikan "" bila Crawl4AI mati/menolak (situs tertentu 403/502).
+    """
+    if not settings.crawl4ai_enabled or not settings.crawl4ai_url:
+        return ""
+    base = settings.crawl4ai_url.rstrip("/")
+    headers = {"Content-Type": "application/json"}
+    if settings.crawl4ai_token:
+        headers["Authorization"] = f"Bearer {settings.crawl4ai_token}"
+    try:
+        resp = await client.post(
+            f"{base}/md", json={"url": url}, headers=headers, timeout=_TIMEOUT
+        )
+        if resp.status_code != 200:
+            return ""
+        data = resp.json()
+    except Exception:  # noqa: BLE001
+        return ""
+    md = data.get("markdown")
+    if isinstance(md, dict):  # beberapa versi mengembalikan objek
+        md = md.get("raw_markdown") or md.get("fit_markdown") or ""
+    if not md and isinstance(data.get("result"), dict):
+        md = data["result"].get("markdown") or ""
+    return _clean(md or "")
+
+
 async def _fetch_fulltext(client: httpx.AsyncClient, url: str | None) -> str:
     """Ambil teks-PENUH open-access (PDF/HTML) secara ephemeral.
 
@@ -178,7 +208,9 @@ async def _fetch_fulltext(client: httpx.AsyncClient, url: str | None) -> str:
             "GET", url, headers={"User-Agent": "Mozilla/5.0 (ICALORA-LABS)"}
         ) as resp:
             if resp.status_code != 200:
-                return ""
+                # Halaman yang menolak unduh langsung (403/JS-wall) sering masih
+                # bisa dirender Crawl4AI — coba sebagai cadangan terakhir.
+                return await _crawl4ai_markdown(client, url)
             ctype = (resp.headers.get("content-type") or "").lower()
             buf = bytearray()
             async for chunk in resp.aiter_bytes():
@@ -187,13 +219,18 @@ async def _fetch_fulltext(client: httpx.AsyncClient, url: str | None) -> str:
                     return ""
         data = bytes(buf)
     except Exception:  # noqa: BLE001
-        return ""
+        return await _crawl4ai_markdown(client, url)
     if "html" in ctype and b"%PDF" not in data[:1024]:
+        # Utamakan teks bersih Crawl4AI; mundur ke penjungkiran tag bila kosong.
+        clean = await _crawl4ai_markdown(client, url)
+        if len(clean) >= 400:
+            return clean
         try:
             html = data.decode("utf-8", "ignore")
         except Exception:  # noqa: BLE001
-            return ""
-        return _clean(_TAG_RE.sub(" ", html))
+            return clean
+        stripped = _clean(_TAG_RE.sub(" ", html))
+        return stripped if len(stripped) > len(clean) else clean
     try:
         text = await asyncio.to_thread(extract_text, "oa.pdf", data)
     except Exception:  # noqa: BLE001
@@ -796,11 +833,64 @@ async def _q_tavily(client: httpx.AsyncClient, sentence: str) -> list[dict]:
     return out
 
 
+async def _q_searxng(client: httpx.AsyncClient, sentence: str) -> list[dict]:
+    """Web search umum via SearXNG LOKAL (gratis, keluar lewat Tor → anonim).
+
+    Pengganti/pendamping Tavily/Brave TANPA kuota & tanpa risiko tagihan.
+    Memakai `categories=science` agar menjangkau sumber ilmiah (Google Scholar
+    dsb.) yang lolos dari provider API akademik. Hasil (judul/URL/snippet) tetap
+    ephemeral; teks penuh diambil terpisah via Crawl4AI pada tahap enrich.
+    Gagal-aman: bila SearXNG mati, kembalikan daftar kosong (tak menggagalkan
+    pengecekan).
+    """
+    if not settings.online_websearch_enabled or not settings.searxng_enabled:
+        return []
+    base = settings.searxng_url.rstrip("/")
+    r = await _get_json(
+        client,
+        f"{base}/search",
+        {
+            "q": sentence[:380],
+            "format": "json",
+            "categories": "science",
+            "language": "en",
+        },
+    )
+    if r is None:
+        return []
+    try:
+        data = r.json()
+    except Exception:  # noqa: BLE001
+        return []
+    out = []
+    for w in (data.get("results") or [])[: settings.online_websearch_per_sentence]:
+        title = _clean(w.get("title") or "")
+        content = _clean(w.get("content") or "")
+        url = w.get("url")
+        if not (title and url):
+            continue
+        oa_url = url if url.lower().split("?")[0].endswith(".pdf") else None
+        out.append(
+            {
+                "title": title,
+                "doi": None,
+                "source": "SearXNG",
+                "url": url,
+                "_fulltext": content or title,
+                "_oa_url": oa_url,
+            }
+        )
+    return out
+
+
 def _websearch_provider():
-    """Pilih penyedia web-search aktif: Tavily diutamakan (tanpa kartu → bebas
-    risiko tagihan), lalu Brave. None bila tak ada kunci terpasang."""
+    """Pilih penyedia web-search aktif. SearXNG (lokal, GRATIS, tanpa kuota &
+    keluar lewat Tor) diutamakan; lalu Tavily (tanpa kartu → bebas risiko
+    tagihan), lalu Brave. None bila tak ada yang aktif."""
     if not settings.online_websearch_enabled:
         return None
+    if settings.searxng_enabled and settings.searxng_url:
+        return _q_searxng
     if settings.tavily_api_key:
         return _q_tavily
     if settings.brave_api_key:

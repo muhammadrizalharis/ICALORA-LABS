@@ -122,6 +122,24 @@ class Settings(BaseSettings):
     # akun Anda di dashboard penyedia.
     online_websearch_monthly_cap: int = Field(default=900)
 
+    # --- Layanan AI lokal (local-ai stack di host yang sama) ---
+    # Semua gratis, berjalan di VM ini (lihat ~/local-ai/INTEGRASI-API.md). Dipakai
+    # untuk menaikkan akurasi: SearXNG = mesin cari web gratis (termasuk Google
+    # Scholar via categories=science), Crawl4AI = pengambil teks artikel bersih
+    # dari URL hasil cari, Tika = ekstraktor PDF/DOCX tangguh (fallback). Semua
+    # TETAP ephemeral & fail-safe: bila port mati, fitur mundur anggun ke jalur
+    # lama tanpa menggagalkan pengecekan.
+    searxng_enabled: bool = Field(default=True)
+    searxng_url: str = Field(default="http://127.0.0.1:1003")
+    crawl4ai_enabled: bool = Field(default=True)
+    crawl4ai_url: str = Field(default="http://127.0.0.1:1004")
+    crawl4ai_token: str = Field(default="")
+    tika_enabled: bool = Field(default=True)
+    tika_url: str = Field(default="http://127.0.0.1:1007")
+    # Ambang: bila ekstraksi pypdf menghasilkan teks lebih pendek dari ini,
+    # coba Tika (menangkap PDF 2-kolom/tabel lebih lengkap).
+    tika_fallback_min_chars: int = Field(default=400)
+
     @property
     def database_url(self) -> str:
         return (
