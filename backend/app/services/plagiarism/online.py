@@ -1097,13 +1097,26 @@ async def _gather_candidates(
         )
         results = await asyncio.gather(*tasks, return_exceptions=True)
         pub_results = await pub_task
-        # Fase VERIFIER web search (Tavily/Brave): HANYA kalimat paling khas,
-        # serial dengan jeda kecil menghormati batas laju paket gratis. Nonaktif
-        # otomatis bila tak ada kunci (nol kuota). Rem pengaman kuota bulanan di
-        # dalam provider mencegah melewati tier gratis.
+        # Fase VERIFIER web search: HANYA kalimat paling khas. SearXNG lokal
+        # (gratis, tanpa kuota) dijalankan PARALEL (cepat); Tavily/Brave (API
+        # berbayar/berkuota) tetap serial dengan jeda kecil menghormati batas
+        # laju tier gratis. Nonaktif otomatis bila tak ada penyedia aktif.
         web_results: list = []
         web_provider = _websearch_provider()
-        if web_provider is not None:
+        if web_provider is _q_searxng:
+            wsem = asyncio.Semaphore(6)
+
+            async def _run_web(sentence):
+                async with wsem:
+                    try:
+                        return await web_provider(client, sentence)
+                    except Exception:  # noqa: BLE001
+                        return []
+
+            web_results = await asyncio.gather(
+                *(_run_web(s) for s in sentences[: settings.online_websearch_sentences])
+            )
+        elif web_provider is not None:
             for s in sentences[: settings.online_websearch_sentences]:
                 try:
                     web_results.append(await web_provider(client, s))
