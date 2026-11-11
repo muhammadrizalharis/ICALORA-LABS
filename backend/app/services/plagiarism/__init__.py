@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import unicodedata
 from datetime import datetime, timezone
 
 from sqlalchemy import text
@@ -32,6 +33,14 @@ from app.services.llm.provider import get_llm
 _SHINGLE = 5
 _SENT_RE = re.compile(r"[^.!?\n]+[.!?]?", re.UNICODE)
 _WORD_RE = re.compile(r"\w+", re.UNICODE)
+
+# Pencocokan char-n-gram (tahan artefak ekstraksi PDF). Ekstraksi PDF kolom
+# ganda kerap menyisipkan spasi di tengah kata ("exp loration", "pat terns")
+# atau menempelkan kata ("wheredenotes"), sehingga shingle KATA gagal cocok
+# walau teksnya identik. N-gram KARAKTER atas teks yang dinormalisasi (huruf
+# kecil, non-alfanumerik dibuang) kebal terhadap artefak spasi tersebut. 20
+# karakter cukup spesifik agar frasa umum pendek tak memicu positif palsu.
+_CHAR_NGRAM = 20
 
 # Rentang teks di antara tanda kutip (minimal 10 karakter agar bukan apostrof).
 _QUOTE_RE = re.compile(r'["“”„«»][^"“”„«»]{10,}?["“”„«»]', re.UNICODE)
@@ -170,6 +179,21 @@ def _sentences(s: str) -> list[str]:
     return [m.group(0).strip() for m in _SENT_RE.finditer(s) if len(m.group(0).strip()) >= 20]
 
 
+def _char_norm(s: str) -> str:
+    """Normalisasi untuk pencocokan char-n-gram: NFKD, huruf kecil, hanya
+    alfanumerik (buang spasi/tanda baca). Membuat 'exp loration' dan
+    'exploration' identik → kebal artefak ekstraksi PDF."""
+    s = unicodedata.normalize("NFKD", s or "").lower()
+    return re.sub(r"[^a-z0-9]", "", s)
+
+
+def _char_ngrams(normed: str, n: int = _CHAR_NGRAM) -> set[str]:
+    """Himpunan n-gram karakter dari teks yang SUDAH dinormalisasi (_char_norm)."""
+    if len(normed) < n:
+        return {normed} if normed else set()
+    return {normed[i : i + n] for i in range(len(normed) - n + 1)}
+
+
 def _chunk_match(
     doc: str,
     candidates: list[dict],
@@ -197,13 +221,14 @@ def _chunk_match(
     ex_quotes = bool(exclude.get("quotes"))
     min_pct = max(0.0, float(exclude.get("min_source_percent") or 0.0))
 
-    cand_shingles: list[tuple[dict, set[str]]] = []
+    cand_shingles: list[tuple[dict, set[str], set[str]]] = []
     for c in candidates:
         body = c.get("_fulltext") or ""
         if not body:
             continue
         words = [w.lower() for w in _WORD_RE.findall(body)]
-        cand_shingles.append((c, _shingles(words)))
+        cgrams = _char_ngrams(_char_norm(body))
+        cand_shingles.append((c, _shingles(words), cgrams))
 
     sentences = _sentences(doc)
     total_chars = max(len(doc), 1)
@@ -224,11 +249,12 @@ def _chunk_match(
         if not sh:
             continue
         sent_wc = max(len(words), 1)
+        sent_cgrams = _char_ngrams(_char_norm(sent))
         best_score = 0.0
         best_ratio = 0.0
         best_run_words = 0
         best_src: dict | None = None
-        for c, cset in cand_shingles:
+        for c, cset, ccgrams in cand_shingles:
             if not cset:
                 continue
             overlap = len(sh & cset)
@@ -238,10 +264,16 @@ def _chunk_match(
             # jumlah kata kalimat (kalimat pendek tak boleh dihitung berlebih).
             run_words = min(run + _SHINGLE - 1, len(words)) if run > 0 else 0
             run_cov = run_words / sent_wc
-            score = max(ratio, run_cov)
+            # Containment char-n-gram: tahan artefak spasi ekstraksi PDF. Bila
+            # kalimat ini (dinormalisasi) muncul di sumber meski shingle KATA
+            # gagal karena spasi nyasar, rasio ini tetap tinggi.
+            char_ratio = 0.0
+            if sent_cgrams and ccgrams:
+                char_ratio = len(sent_cgrams & ccgrams) / len(sent_cgrams)
+            score = max(ratio, run_cov, char_ratio)
             if score > best_score:
                 best_score = score
-                best_ratio = ratio
+                best_ratio = max(ratio, char_ratio)
                 best_run_words = run_words
                 best_src = c
         qualifies = best_src is not None and (
