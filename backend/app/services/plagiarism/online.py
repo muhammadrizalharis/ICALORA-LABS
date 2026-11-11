@@ -163,12 +163,23 @@ def _oa_pdf_from_crossref(it: dict) -> str | None:
     return None
 
 
+_CRAWL4AI_SEM: asyncio.Semaphore | None = None
+
+
+def _crawl4ai_sem() -> asyncio.Semaphore:
+    global _CRAWL4AI_SEM
+    if _CRAWL4AI_SEM is None:
+        _CRAWL4AI_SEM = asyncio.Semaphore(max(1, settings.crawl4ai_concurrency))
+    return _CRAWL4AI_SEM
+
+
 async def _crawl4ai_markdown(client: httpx.AsyncClient, url: str) -> str:
     """Ambil teks artikel BERSIH dari URL HTML via Crawl4AI lokal.
 
     Jauh lebih bersih dari penjungkiran tag mentah (membuang nav/menu/iklan,
     merender JS), jadi perbandingan plagiarisme lebih presisi & tak "ngawur".
-    Gagal-aman: kembalikan "" bila Crawl4AI mati/menolak (situs tertentu 403/502).
+    Lambat (merender JS) → konkurensi dibatasi & timeout pendek agar tak
+    melewati anggaran waktu cek. Gagal-aman: "" bila mati/menolak/timeout.
     """
     if not settings.crawl4ai_enabled or not settings.crawl4ai_url:
         return ""
@@ -177,9 +188,13 @@ async def _crawl4ai_markdown(client: httpx.AsyncClient, url: str) -> str:
     if settings.crawl4ai_token:
         headers["Authorization"] = f"Bearer {settings.crawl4ai_token}"
     try:
-        resp = await client.post(
-            f"{base}/md", json={"url": url}, headers=headers, timeout=_TIMEOUT
-        )
+        async with _crawl4ai_sem():
+            resp = await client.post(
+                f"{base}/md",
+                json={"url": url},
+                headers=headers,
+                timeout=httpx.Timeout(float(settings.crawl4ai_timeout), connect=6.0),
+            )
         if resp.status_code != 200:
             return ""
         data = resp.json()
@@ -221,16 +236,18 @@ async def _fetch_fulltext(client: httpx.AsyncClient, url: str | None) -> str:
     except Exception:  # noqa: BLE001
         return await _crawl4ai_markdown(client, url)
     if "html" in ctype and b"%PDF" not in data[:1024]:
-        # Utamakan teks bersih Crawl4AI; mundur ke penjungkiran tag bila kosong.
-        clean = await _crawl4ai_markdown(client, url)
-        if len(clean) >= 400:
-            return clean
+        # Jalur CEPAT: penjungkiran tag murah dulu. Mayoritas halaman penerbit/
+        # arXiv sudah memuat teks artikel di HTML mentah → tak perlu Crawl4AI
+        # yang lambat. Hanya halaman TIPIS/JS-wall yang diselamatkan Crawl4AI.
         try:
             html = data.decode("utf-8", "ignore")
         except Exception:  # noqa: BLE001
-            return clean
+            html = ""
         stripped = _clean(_TAG_RE.sub(" ", html))
-        return stripped if len(stripped) > len(clean) else clean
+        if len(stripped) >= settings.crawl4ai_min_strip_chars:
+            return stripped
+        clean = await _crawl4ai_markdown(client, url)
+        return clean if len(clean) > len(stripped) else stripped
     try:
         text = await asyncio.to_thread(extract_text, "oa.pdf", data)
     except Exception:  # noqa: BLE001
