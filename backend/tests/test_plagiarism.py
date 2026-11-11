@@ -172,8 +172,60 @@ def test_classify_cited_and_quoted():
     assert st["quoted"] and st["cited"]
 
 
+def test_chunk_match_identical_document_near_100():
+    """Dokumen yang IDENTIK dengan sumber harus mendekati 100% (containment
+    char-n-gram tingkat-dokumen), bukan terpotong oleh spasi/header antar-
+    kalimat atau fragmen yang dibuang pemenggal kalimat."""
+    doc = (
+        "Deep learning has transformed medical image analysis. "
+        "Convolutional networks extract hierarchical features automatically. "
+        "Transfer learning reduces the need for large labeled datasets. "
+        "Attention mechanisms further improve segmentation accuracy. "
+        "These advances enable robust clinical decision support systems. "
+    ) * 6
+    candidates = [{"doc_id": 1, "title": "Sumber", "doi": "10.0/x", "_fulltext": doc}]
+    res = _chunk_match(doc, candidates, threshold=0.55)
+    assert res["similarity_index"] >= 95.0
+
+
+def test_chunk_match_half_copied_is_proportional():
+    """Hanya separuh dokumen yang ada di sumber → similarity ~50%, bukan ~100%
+    maupun ~0% (metrik proporsional, bukan abal-abal)."""
+    copied = (
+        "Deep learning has transformed medical image analysis. "
+        "Convolutional networks extract hierarchical features automatically. "
+        "Transfer learning reduces the need for large labeled datasets. "
+    ) * 5
+    original = (
+        "Pada bagian ini penulis menyusun argumen yang sepenuhnya orisinal. "
+        "Tidak ada kalimat yang disalin dari sumber mana pun di sini. "
+        "Analisis dikembangkan berdasarkan pengamatan lapangan sendiri. "
+    ) * 5
+    doc = copied + original
+    candidates = [{"doc_id": 1, "title": "Sumber", "doi": "10.0/x",
+                   "_fulltext": copied + " trailing."}]
+    res = _chunk_match(doc, candidates, threshold=0.55)
+    assert 35.0 <= res["similarity_index"] <= 65.0
+
+
+def test_chunk_match_unrelated_stays_near_zero():
+    """Teks tak-berkaitan harus ~0% walau metrik baru lebih sensitif."""
+    doc = (
+        "The coastal town enjoyed sunny weather with a gentle sea breeze today. "
+        "Local fishermen returned early with a modest catch of mackerel. "
+    ) * 8
+    candidates = [{"doc_id": 2, "title": "Tak Terkait", "doi": None, "_fulltext": (
+        "Quantum chromodynamics describes strong interactions between quarks "
+        "and gluons across the nuclear scale. " * 8
+    )}]
+    res = _chunk_match(doc, candidates, threshold=0.55)
+    assert res["similarity_index"] <= 5.0
+
+
 def test_chunk_match_includes_group_metadata():
-    sentence = "Deep learning has fundamentally transformed modern medical image analysis pipelines."
+    sentence = (
+        "Deep learning has fundamentally transformed modern medical image analysis pipelines."
+    )
     candidates = [
         {
             "doc_id": 1,
