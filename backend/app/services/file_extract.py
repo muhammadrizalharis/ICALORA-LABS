@@ -22,12 +22,51 @@ def _dehyphenate(text: str) -> str:
     return _HYPHEN_BREAK_RE.sub(r"\1\2", text or "")
 
 
+def _tika_extract(data: bytes, content_type: str) -> str:
+    """Ekstrak teks via Apache Tika lokal (PDFBox) sebagai cadangan tangguh.
+
+    Tika sering menangkap PDF 2-kolom/tabel lebih lengkap daripada pypdf.
+    Dipakai hanya bila diaktifkan & hasil pypdf terlalu pendek. Gagal-aman:
+    kembalikan "" bila port Tika mati (fitur mundur ke hasil pypdf).
+    """
+    from app.core.config import get_settings
+
+    s = get_settings()
+    if not s.tika_enabled or not s.tika_url:
+        return ""
+    import httpx
+
+    try:
+        resp = httpx.put(
+            f"{s.tika_url.rstrip('/')}/tika",
+            content=data,
+            headers={"Content-Type": content_type, "Accept": "text/plain"},
+            timeout=60.0,
+        )
+        if resp.status_code != 200:
+            return ""
+        return resp.text or ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def _extract_pdf(data: bytes) -> str:
     from pypdf import PdfReader
 
-    reader = PdfReader(io.BytesIO(data))
-    parts = [page.extract_text() or "" for page in reader.pages]
-    return _dehyphenate("\n".join(parts))
+    try:
+        reader = PdfReader(io.BytesIO(data))
+        text = "\n".join(page.extract_text() or "" for page in reader.pages)
+    except Exception:  # noqa: BLE001
+        text = ""
+    # Bila pypdf menghasilkan sedikit teks (PDF kompleks/2-kolom/berbasis
+    # layer aneh), coba Tika yang kerap lebih lengkap; pakai yang lebih panjang.
+    from app.core.config import get_settings
+
+    if len(text) < get_settings().tika_fallback_min_chars:
+        tika_text = _tika_extract(data, "application/pdf")
+        if len(tika_text) > len(text):
+            text = tika_text
+    return _dehyphenate(text)
 
 
 def _extract_docx(data: bytes) -> str:
