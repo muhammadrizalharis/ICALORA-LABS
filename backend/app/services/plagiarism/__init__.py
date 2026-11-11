@@ -87,6 +87,13 @@ _STRUCTURAL_AT = 0.45  # >= ini: kemiripan kuat terstruktur
 # pada porsi kalimat yang benar-benar identik). 8 kata = ambang standar plagiat.
 _PHRASE_MIN_WORDS = 8
 
+# Dengan sumber daring, kandidat bisa mencapai ribuan. Pencocokan per-kalimat
+# (apalagi + char-n-gram) atas ribuan kandidat melewati anggaran waktu. Pra-
+# peringkat MURAH berbasis containment shingle-kata tingkat-DOKUMEN menyaring
+# ke top-N paling relevan sebelum tahap mahal. Sumber plagiarisme nyata selalu
+# beririsan tinggi dengan dokumen → lolos; ribuan kandidat tak relevan dibuang.
+_MAX_MATCH_CANDIDATES = 200
+
 # Deteksi identitas publikasi (reverse-containment): bila teks SUMBER
 # (mis. abstrak dari OpenAlex) nyaris seluruhnya termuat di dokumen, dokumen
 # kemungkinan adalah publikasi terbit itu sendiri (atau turunannya).
@@ -221,14 +228,27 @@ def _chunk_match(
     ex_quotes = bool(exclude.get("quotes"))
     min_pct = max(0.0, float(exclude.get("min_source_percent") or 0.0))
 
-    cand_shingles: list[tuple[dict, set[str], set[str]]] = []
+    # Pra-peringkat MURAH: hitung containment shingle-KATA tiap kandidat
+    # terhadap SELURUH dokumen (satu set shingle dokumen), lalu pertahankan
+    # hanya top-N untuk pencocokan per-kalimat yang mahal (termasuk char-n-gram).
+    # Char-n-gram dibangun HANYA untuk yang lolos → biaya terbatas. Sumber nyata
+    # (teks penuh) selalu beririsan tinggi → aman; ribuan kandidat tak relevan
+    # dibuang sebelum tahap mahal.
+    doc_words = [w.lower() for w in _WORD_RE.findall(doc)]
+    doc_sh = _shingles(doc_words)
+    prelim: list[tuple[dict, set[str], int]] = []
     for c in candidates:
         body = c.get("_fulltext") or ""
         if not body:
             continue
         words = [w.lower() for w in _WORD_RE.findall(body)]
-        cgrams = _char_ngrams(_char_norm(body))
-        cand_shingles.append((c, _shingles(words), cgrams))
+        wsh = _shingles(words)
+        prelim.append((c, wsh, len(wsh & doc_sh)))
+    prelim.sort(key=lambda t: t[2], reverse=True)
+    cand_shingles: list[tuple[dict, set[str], set[str]]] = [
+        (c, wsh, _char_ngrams(_char_norm(c.get("_fulltext") or "")))
+        for c, wsh, _ov in prelim[:_MAX_MATCH_CANDIDATES]
+    ]
 
     sentences = _sentences(doc)
     total_chars = max(len(doc), 1)
