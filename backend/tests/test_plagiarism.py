@@ -87,6 +87,31 @@ def test_chunk_match_no_false_positive():
     assert res["similarity_index"] == 0.0
 
 
+def test_chunk_match_pdf_artifact_robust():
+    # Kalimat masukan punya artefak ekstraksi PDF kolom-ganda: spasi nyasar di
+    # tengah kata ("exp loration", "pat terns") dan kata menempel ("thedata").
+    # Shingle KATA akan gagal cocok, tetapi char-n-gram harus tetap menandai
+    # kalimat ini sebagai salinan dari sumber yang teksnya identik.
+    sentence = (
+        "The exp loration of over lapping pat terns within thedata reveals "
+        "significant struc tural rela tionships among the observed var iables."
+    )
+    candidates = [
+        {
+            "doc_id": 3,
+            "title": "Sumber Identik",
+            "doi": "10.1234/identical",
+            "_fulltext": (
+                "The exploration of overlapping patterns within the data reveals "
+                "significant structural relationships among the observed variables."
+            ),
+        }
+    ]
+    res = _chunk_match(sentence, candidates, threshold=0.55)
+    assert res["matched_sentences"] == 1
+    assert res["similarity_index"] > 50.0
+
+
 def _spans(doc):
     from app.services.plagiarism import _BIB_RE, _CITATION_RE, _QUOTE_RE
 
