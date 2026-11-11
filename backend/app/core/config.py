@@ -94,6 +94,12 @@ class Settings(BaseSettings):
     online_fulltext_enabled: bool = Field(default=True)
     online_fulltext_max_bytes: int = Field(default=20 * 1024 * 1024)
     online_fulltext_max_docs: int = Field(default=6)
+    # Jumlah percobaan pengambilan teks-PENUH per URL. Unduhan PDF OA (mis.
+    # tautan unduh OJS) sesekali gagal transient (koneksi putus/timeout),
+    # membuat kandidat identitas jatuh ke abstrak saja → skor anjlok (mis.
+    # 55%→23%). Retry singkat memulihkan kegagalan sesaat; hanya berulang saat
+    # hasil kosong, jadi tak menambah beban pada kasus normal.
+    online_fulltext_fetch_attempts: int = Field(default=3)
     # Selain kandidat ber-identitas-publikasi, ambil teks-PENUH OA untuk
     # kandidat PALING MIRIP (calon sumber plagiarisme) agar perbandingan
     # mencakup seluruh isi sumber, bukan hanya abstrak. Tetap ephemeral

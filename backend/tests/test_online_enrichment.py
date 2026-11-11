@@ -84,3 +84,39 @@ def test_websearch_provider_prefers_searxng(monkeypatch):
     monkeypatch.setattr(online_mod.settings, "searxng_enabled", True)
     monkeypatch.setattr(online_mod.settings, "searxng_url", "http://127.0.0.1:1003")
     assert online_mod._websearch_provider() is online_mod._q_searxng
+
+
+def test_fetch_fulltext_resilient_retries_on_transient_failure(monkeypatch):
+    """Unduhan teks-penuh yang gagal transient (kosong) harus diulang hingga
+    berhasil, agar kandidat identitas tidak jatuh ke abstrak saja (55%→23%).
+    """
+    full_body = "published full body sentence. " * 60
+    calls = {"n": 0}
+
+    async def flaky_fetch(_client, _url):
+        calls["n"] += 1
+        return full_body if calls["n"] >= 3 else ""
+
+    monkeypatch.setattr(online_mod, "_fetch_fulltext", flaky_fetch)
+    monkeypatch.setattr(online_mod.settings, "online_fulltext_fetch_attempts", 3)
+
+    out = asyncio.run(
+        online_mod._fetch_fulltext_resilient(None, "https://ojs.example.com/a/1")
+    )
+
+    assert out == full_body
+    assert calls["n"] == 3
+
+
+def test_fetch_fulltext_resilient_gives_up_when_all_fail(monkeypatch):
+    """Bila semua percobaan gagal, kembalikan string kosong (tanpa galat)."""
+
+    async def always_empty(_client, _url):
+        return ""
+
+    monkeypatch.setattr(online_mod, "_fetch_fulltext", always_empty)
+    monkeypatch.setattr(online_mod.settings, "online_fulltext_fetch_attempts", 3)
+
+    out = asyncio.run(online_mod._fetch_fulltext_resilient(None, "https://x/y"))
+
+    assert out == ""

@@ -255,6 +255,26 @@ async def _fetch_fulltext(client: httpx.AsyncClient, url: str | None) -> str:
     return _clean(text)
 
 
+async def _fetch_fulltext_resilient(client: httpx.AsyncClient, url: str | None) -> str:
+    """Seperti `_fetch_fulltext` tetapi ulangi bila hasil kosong.
+
+    Unduhan PDF teks-penuh (mis. tautan unduh OJS) sesekali gagal transient
+    (koneksi putus/timeout di sisi penerbit), menyebabkan kandidat identitas
+    jatuh ke abstrak saja → cakupan pencocokan anjlok (mis. 55%→23%). Retry
+    singkat memulihkan kegagalan sesaat TANPA menambah beban pada kasus normal
+    (hanya berulang saat hasil kosong).
+    """
+    attempts = max(1, settings.online_fulltext_fetch_attempts)
+    text = ""
+    for i in range(attempts):
+        text = await _fetch_fulltext(client, url)
+        if text:
+            return text
+        if i + 1 < attempts:
+            await asyncio.sleep(0.5 * (i + 1))
+    return text
+
+
 def _title_jaccard(a: str, b: str) -> float:
     wa = {w.lower() for w in _WORD_RE.findall(a or "")}
     wb = {w.lower() for w in _WORD_RE.findall(b or "")}
@@ -380,7 +400,7 @@ async def _enrich_fulltext(
         if not urls:
             return ""
         fetched = await asyncio.gather(
-            *(_fetch_fulltext(client, u) for u in urls),
+            *(_fetch_fulltext_resilient(client, u) for u in urls),
             return_exceptions=True,
         )
         best = ""
