@@ -245,13 +245,22 @@ def _chunk_match(
         wsh = _shingles(words)
         prelim.append((c, wsh, len(wsh & doc_sh)))
     prelim.sort(key=lambda t: t[2], reverse=True)
-    cand_shingles: list[tuple[dict, set[str], set[str]]] = [
-        (c, wsh, _char_ngrams(_char_norm(c.get("_fulltext") or "")))
+    cand_shingles: list[tuple[dict, set[str], set[str], str]] = [
+        (
+            c,
+            wsh,
+            _char_ngrams(_char_norm(c.get("_fulltext") or "")),
+            _char_norm(c.get("_fulltext") or ""),
+        )
         for c, wsh, _ov in prelim[:_MAX_MATCH_CANDIDATES]
     ]
 
     sentences = _sentences(doc)
-    total_chars = max(len(doc), 1)
+    # Basis skor = jumlah KATA dokumen (bukan panjang karakter mentah yang ikut
+    # menghitung spasi/baris-baru/header antar-kalimat ~15% dokumen, sehingga
+    # dokumen identik pun tak pernah mencapai ~100%). Dengan basis kata, dokumen
+    # yang benar-benar sama mendekati 100%, sementara teks tak-berkaitan tetap 0.
+    total_words = max(len(doc_words), 1)
 
     quoted_spans = [(m.start(), m.end()) for m in _QUOTE_RE.finditer(doc)]
     cite_spans = [(m.start(), m.end()) for m in _CITATION_RE.finditer(doc)]
@@ -269,12 +278,18 @@ def _chunk_match(
         if not sh:
             continue
         sent_wc = max(len(words), 1)
-        sent_cgrams = _char_ngrams(_char_norm(sent))
+        sent_norm = _char_norm(sent)
+        sent_cgrams = _char_ngrams(sent_norm)
+        # Kalimat PENDEK (ternormalisasi < _CHAR_NGRAM) tak bisa membentuk
+        # n-gram karakter yang cocok dengan jendela 20-char sumber, sehingga
+        # judul-seksi/frasa pendek yang tersalin persis luput. Untuk itu,
+        # cek kemunculan SUBSTRING persis di teks sumber ternormalisasi.
+        sent_short = 0 < len(sent_norm) < _CHAR_NGRAM
         best_score = 0.0
         best_ratio = 0.0
         best_run_words = 0
         best_src: dict | None = None
-        for c, cset, ccgrams in cand_shingles:
+        for c, cset, ccgrams, cnorm in cand_shingles:
             if not cset:
                 continue
             overlap = len(sh & cset)
@@ -288,7 +303,9 @@ def _chunk_match(
             # kalimat ini (dinormalisasi) muncul di sumber meski shingle KATA
             # gagal karena spasi nyasar, rasio ini tetap tinggi.
             char_ratio = 0.0
-            if sent_cgrams and ccgrams:
+            if sent_short:
+                char_ratio = 1.0 if sent_norm in cnorm else 0.0
+            elif sent_cgrams and ccgrams:
                 char_ratio = len(sent_cgrams & ccgrams) / len(sent_cgrams)
             score = max(ratio, run_cov, char_ratio)
             if score > best_score:
@@ -315,6 +332,7 @@ def _chunk_match(
             raw.append(
                 {
                     "sent": sent,
+                    "sent_wc": sent_wc,
                     "best_ratio": effective,
                     "verbatim_words": best_run_words,
                     "best_src": best_src,
@@ -338,36 +356,81 @@ def _chunk_match(
 
     excluded_sources: set[str] = set()
     if min_pct > 0:
-        pre_chars: dict[str, float] = {}
+        pre_words: dict[str, float] = {}
         for m in kept:
             if m["skey"]:
-                pre_chars[m["skey"]] = pre_chars.get(m["skey"], 0.0) + len(m["sent"])
-        for key, chars in pre_chars.items():
-            if chars / total_chars * 100 < min_pct:
+                pre_words[m["skey"]] = pre_words.get(m["skey"], 0.0) + m["sent_wc"]
+        for key, wc in pre_words.items():
+            if wc / total_words * 100 < min_pct:
                 excluded_sources.add(key)
         if excluded_sources:
             kept = [m for m in kept if m["skey"] not in excluded_sources]
 
+    # ── Indeks Kemiripan tingkat-DOKUMEN (containment char-n-gram) ───────────
+    # Pencocokan tingkat-kalimat melewatkan ~15-17% teks yang dibuang pemenggal
+    # kalimat (header seksi, afiliasi, daftar pustaka, fragmen terpotong di
+    # singkatan/angka), sehingga dokumen IDENTIK pun tak pernah ~100%. Indeks
+    # kemiripan utama memakai containment n-gram KARAKTER seluruh dokumen
+    # terhadap gabungan sumber: dokumen sama → ~100%, tak-berkaitan → ~0%,
+    # sebagian-tersalin → proporsional. Menghormati Exclude: buang bibliografi
+    # (potong di `bib_start`) dan kutipan (kosongkan span) sebelum normalisasi.
+    work = doc[:bib_start] if (ex_bib and bib_start is not None) else doc
+    if ex_quotes and quoted_spans:
+        chars = list(work)
+        for s, e in quoted_spans:
+            for i in range(s, min(e, len(chars))):
+                chars[i] = " "
+        work = "".join(chars)
+    doc_cgrams = _char_ngrams(_char_norm(work))
+    active_cands = [
+        (c, ccgrams)
+        for c, _cset, ccgrams, _cnorm in cand_shingles
+        if (c.get("doi") or c.get("title") or "").lower().strip() not in excluded_sources
+    ]
+    covered: set[str] = set()
+    source_coverage: dict[str, float] = {}
+    for c, ccgrams in active_cands:
+        if not doc_cgrams or not ccgrams:
+            continue
+        inter = doc_cgrams & ccgrams
+        if not inter:
+            continue
+        covered |= inter
+        skey = (c.get("doi") or c.get("title") or "").lower().strip()
+        if skey:
+            cov = len(inter) / len(doc_cgrams) * 100
+            if cov > source_coverage.get(skey, 0.0):
+                source_coverage[skey] = round(cov, 1)
+    coverage_index = round(len(covered) / len(doc_cgrams) * 100, 1) if doc_cgrams else 0.0
+
     matched: list[dict] = []
-    weighted_chars = 0.0
-    group_chars = {k: 0 for k in _MATCH_GROUP_ORDER}
+    sim_words = 0.0
+    weighted_words = 0.0
+    group_words = {k: 0.0 for k in _MATCH_GROUP_ORDER}
     group_count = {k: 0 for k in _MATCH_GROUP_ORDER}
     source_contrib: dict[str, float] = {}
     for m in kept:
         sent = m["sent"]
         best_ratio = m["best_ratio"]
+        sent_wc = m["sent_wc"]
         best_src = m["best_src"]
         status = m["status"]
         grp = m["group"]
-        group_chars[grp] += len(sent)
+        matched_words = sent_wc * best_ratio
+        group_words[grp] += matched_words
         group_count[grp] += 1
-        # Kontribusi ke indeks: proporsi kalimat yang benar-benar cocok,
-        # dibobot kategori — bukan seluruh panjang kalimat.
-        weighted_chars += len(sent) * best_ratio * _GROUP_WEIGHT[grp]
+        # Indeks Kemiripan (gaya Turnitin): porsi KATA dokumen yang tumpang-
+        # tindih dengan sumber, TERMASUK materi terkutip/tersitasi (pengguna
+        # dapat mengecualikannya lewat pengaturan Exclude). Dokumen identik →
+        # mendekati 100%.
+        sim_words += matched_words
+        # Indeks berbobot-kategori (untuk komponen integritas): salinan penuh
+        # bobot 1.0, parafrase lebih kecil, materi terkredit 0.
+        weighted_words += matched_words * _GROUP_WEIGHT[grp]
         # Kontribusi per-sumber (porsi dokumen yang tersorot ke sumber ini) —
         # dipakai agar "Sumber Teratas" selaras dengan "Ringkasan Kecocokan".
         if m["skey"]:
-            source_contrib[m["skey"]] = source_contrib.get(m["skey"], 0.0) + len(sent)
+            source_contrib[m["skey"]] = source_contrib.get(m["skey"], 0.0) + matched_words
         matched.append(
             {
                 "sentence": sent[:300],
@@ -384,24 +447,43 @@ def _chunk_match(
             }
         )
 
-    # Indeks Integritas (leksikal berbobot): seberapa besar porsi dokumen yang
-    # tumpang-tindih dengan korpus, menimbang kekuatan tiap kecocokan.
-    integrity_index = round(weighted_chars / total_chars * 100, 1)
+    # Indeks Kemiripan utama = containment char-n-gram tingkat-dokumen
+    # (identik → ~100%, tak-berkaitan → ~0%). Angka berbasis-kalimat disimpan
+    # terpisah untuk rincian kategori/sorotan.
+    similarity_index = coverage_index
+    sentence_sim = round(min(100.0, sim_words / total_words * 100), 1)
+    # Indeks berbobot (materi terkredit tak dihitung) untuk komponen integritas.
+    weighted_index = round(min(100.0, weighted_words / total_words * 100), 1)
     matched.sort(key=lambda m: m["match_ratio"], reverse=True)
+    group_percent = {
+        k: round(group_words[k] / total_words * 100, 1) for k in _MATCH_GROUP_ORDER
+    }
+    # Selaraskan jumlah kategori dengan headline: cakupan verbatim tingkat-
+    # dokumen yang melebihi pencocokan tingkat-kalimat (teks tersalin di
+    # fragmen yang dibuang pemenggal kalimat — header/daftar pustaka) adalah
+    # SALINAN LANGSUNG (char-n-gram = verbatim), jadi tambahkan ke kategori itu.
+    extra_verbatim = max(0.0, round(similarity_index - sentence_sim, 1))
+    if extra_verbatim > 0:
+        group_percent["salinan_langsung"] = round(
+            group_percent["salinan_langsung"] + extra_verbatim, 1
+        )
     match_groups = [
-        {
-            "type": k,
-            "count": group_count[k],
-            "percent": round(group_chars[k] / total_chars * 100, 1),
-        }
+        {"type": k, "count": group_count[k], "percent": group_percent[k]}
         for k in _MATCH_GROUP_ORDER
     ]
-    # Kontribusi per-sumber dalam persen dokumen (porsi tersorot).
-    source_percent = {
-        key: round(chars / total_chars * 100, 1) for key, chars in source_contrib.items()
+    # Kontribusi per-sumber = cakupan char-n-gram tingkat-dokumen tiap sumber
+    # (selaras dengan headline), fallback ke kontribusi kalimat bila kosong.
+    sent_source_percent = {
+        key: round(words / total_words * 100, 1) for key, words in source_contrib.items()
     }
+    source_percent = dict(sent_source_percent)
+    for key, cov in source_coverage.items():
+        if cov > source_percent.get(key, 0.0):
+            source_percent[key] = cov
     return {
-        "similarity_index": integrity_index,
+        "similarity_index": similarity_index,
+        "sentence_similarity": sentence_sim,
+        "weighted_index": weighted_index,
         "matched_sentences": len(matched),
         "total_sentences": len(sentences),
         "matched_passages": matched[:50],

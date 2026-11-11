@@ -120,3 +120,33 @@ def test_fetch_fulltext_resilient_gives_up_when_all_fail(monkeypatch):
     out = asyncio.run(online_mod._fetch_fulltext_resilient(None, "https://x/y"))
 
     assert out == ""
+
+
+def test_clean_preserves_math_notation():
+    """`_clean` tak boleh membuang notasi matematis PDF (`p < 0.05`, `x > 3`).
+
+    Pola tag HTML lama (`<[^>]+>`) rakus: pada teks PDF, `<` dari sebuah
+    pertidaksamaan hingga `>` berikutnya yang jauh ikut terhapus, membuang
+    puluhan persen isi sehingga sumber IDENTIK pun tak pernah 100%. `_clean`
+    kini hanya membuang TAG HTML asli dan mempertahankan teks matematis.
+    """
+    pdf_text = (
+        "Hasil menunjukkan korelasi signifikan dengan p < 0.05 pada kluster "
+        "pertama, sementara komponen kedua memberi skor < -0.7 yang menandai "
+        "deviasi prosodik, dan ambang x > 3 dipakai untuk seleksi fitur."
+    )
+    out = online_mod._clean(pdf_text)
+    assert "p < 0.05" in out
+    assert "< -0.7" in out
+    assert "x > 3" in out
+    # Panjang isi tetap utuh (tak ada rentang antar `<...>` yang terhapus).
+    assert len(out) >= len(pdf_text) - 2
+
+
+def test_clean_still_strips_html_tags():
+    """Tag HTML/XML asli tetap dibuang (abstrak JATS, halaman penerbit)."""
+    html = "<jats:p>Kami mengkaji <b>PCA</b> dan <i>FCM</i>.</jats:p><br/>"
+    out = online_mod._clean(html)
+    assert "<jats:p>" not in out and "</jats:p>" not in out
+    assert "<b>" not in out and "<i>" not in out and "<br/>" not in out
+    assert "Kami mengkaji" in out and "PCA" in out and "FCM" in out

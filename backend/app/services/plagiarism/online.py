@@ -33,7 +33,12 @@ from . import _WORD_RE, _chunk_match, _extract_own_dois, _report_id, _sentences,
 settings = get_settings()
 
 
-_TAG_RE = re.compile(r"<[^>]+>")
+# Hanya cocok TAG HTML/XML asli (diawali huruf atau `/huruf`, tanpa baris-baru,
+# panjang terbatas). Pola lama `<[^>]+>` rakus: pada teks PDF akademik, sebuah
+# `<` dari notasi matematis (mis. `p < ε`) sampai `>` berikutnya ribuan karakter
+# jauhnya ikut terhapus — bisa membuang ~28% isi dokumen, sehingga sumber yang
+# IDENTIK pun hanya tercakup ~72%. Pola ini aman untuk teks matematis.
+_TAG_RE = re.compile(r"</?[a-zA-Z][^<>\n]{0,200}?>")
 _WS_RE = re.compile(r"\s+")
 _DOI_RE = re.compile(r"10\.\d{4,9}/[-._;()/:A-Za-z0-9]+", re.UNICODE)
 _WORD_RE = re.compile(r"[A-Za-z\u00C0-\u024F]{2,}", re.UNICODE)
