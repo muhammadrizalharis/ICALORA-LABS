@@ -134,6 +134,14 @@ class Settings(BaseSettings):
     crawl4ai_enabled: bool = Field(default=True)
     crawl4ai_url: str = Field(default="http://127.0.0.1:1004")
     crawl4ai_token: str = Field(default="")
+    # Crawl4AI merender JS → lambat (~5-15 dtk/halaman). Agar tetap dalam
+    # anggaran waktu cek (5-10 mnt), hanya dipakai sebagai PENYELAMAT untuk
+    # halaman tipis/JS-wall (saat penjungkiran tag murah tak memadai), dengan
+    # timeout pendek & konkurensi terbatas.
+    crawl4ai_timeout: int = Field(default=18)
+    crawl4ai_concurrency: int = Field(default=3)
+    # Ambang teks hasil tag-strip murah yang dianggap "cukup" → lewati Crawl4AI.
+    crawl4ai_min_strip_chars: int = Field(default=1500)
     tika_enabled: bool = Field(default=True)
     tika_url: str = Field(default="http://127.0.0.1:1007")
     # Ambang: bila ekstraksi pypdf menghasilkan teks lebih pendek dari ini,
