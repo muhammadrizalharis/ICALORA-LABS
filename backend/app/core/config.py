@@ -105,6 +105,13 @@ class Settings(BaseSettings):
     # mencakup seluruh isi sumber, bukan hanya abstrak. Tetap ephemeral
     # (di memori, tak disimpan) → nol tambahan disk.
     online_fulltext_similar_docs: int = Field(default=16)
+    # Cache teks-penuh OA yang BERHASIL diunduh (disimpan sebagai TEKS di DB,
+    # bukan berkas PDF → tetap hemat disk). Tujuannya determinisme: sekali teks
+    # penuh sebuah sumber terunduh, pemeriksaan berikutnya MEMAKAI ULANG teks
+    # itu alih-alih mengunduh ulang. Tanpa ini, skor berayun liar (mis.
+    # 94%→7%) hanya karena server penerbit kebetulan lambat/putus saat cek.
+    online_fulltext_cache_enabled: bool = Field(default=True)
+    online_fulltext_cache_ttl_days: int = Field(default=45)
     # Penyedia Open Access tambahan (gratis, legal — hanya metadata/abstrak OA).
     # DOAJ: Directory of Open Access Journals (banyak jurnal Indonesia).
     # Unpaywall: resolver DOI → URL PDF OA legal (memperluas cakupan teks-penuh).

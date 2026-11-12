@@ -150,3 +150,53 @@ def test_clean_still_strips_html_tags():
     assert "<jats:p>" not in out and "</jats:p>" not in out
     assert "<b>" not in out and "<i>" not in out and "<br/>" not in out
     assert "Kami mengkaji" in out and "PCA" in out and "FCM" in out
+
+
+def test_cache_restores_fulltext_when_publisher_down(monkeypatch):
+    """DETERMINISME: bila teks penuh sumber sudah ter-cache, pemeriksaan
+    berikutnya memakai ulang teks itu walau server penerbit sedang mati —
+    sehingga skor tidak berayun (mis. 94%→7%) karena kegagalan unduh sesaat.
+    """
+    from app.services.plagiarism import online_cache
+
+    paper_title = "Leveraging a Hybrid Fuzzy C-Means-PCA Model for Identifying Speech"
+    doc = (paper_title + " in Children. ") * 30
+    full_body = (paper_title + " full published body sentence. ") * 80
+    key = online_cache.cache_key(None, "https://ojs.example.com/article/download/9/9")
+
+    store: dict = {}
+    monkeypatch.setattr(online_cache, "get", lambda k: store.get(k))
+    monkeypatch.setattr(
+        online_cache, "put", lambda k, t: store.__setitem__(k, t) if k else None
+    )
+    # Prasyarat: teks penuh sudah tersimpan dari pemeriksaan sebelumnya.
+    store[key] = full_body
+
+    # Server penerbit MATI: semua unduhan mengembalikan kosong.
+    async def dead_fetch(_client, _url):
+        return ""
+
+    monkeypatch.setattr(online_mod, "_fetch_fulltext", dead_fetch)
+
+    cands = [
+        {
+            "title": paper_title,
+            "doi": None,
+            "source": "Web",
+            "_oa_url": None,
+            "url": "https://ojs.example.com/article/download/9/9",
+            "_fulltext": "abstrak pendek " * 25,
+        }
+    ]
+    asyncio.run(online_mod._enrich_fulltext(None, cands, doc, title_hint=paper_title))
+
+    # Teks penuh pulih dari cache meski semua unduhan gagal.
+    assert cands[0]["_fulltext"] == full_body
+
+
+def test_cache_key_prefers_doi():
+    from app.services.plagiarism import online_cache
+
+    assert online_cache.cache_key("10.1/AbC", "https://x") == "doi:10.1/abc"
+    assert online_cache.cache_key(None, "https://x").startswith("url:")
+    assert online_cache.cache_key("", "") is None

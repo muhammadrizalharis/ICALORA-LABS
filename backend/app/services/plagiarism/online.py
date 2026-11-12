@@ -29,6 +29,7 @@ from app.ingest.common import text_metrics
 from app.services.file_extract import extract_text
 
 from . import _WORD_RE, _chunk_match, _extract_own_dois, _report_id, _sentences, _shingles
+from . import online_cache
 
 settings = get_settings()
 
@@ -388,11 +389,21 @@ async def _enrich_fulltext(
             if isinstance(oa, str) and oa:
                 c["_oa_url"] = oa
 
-    targets = [c for c in promising if c.get("_oa_url") or c.get("url")]
+    # Sertakan juga kandidat ber-DOI tanpa URL: teks penuhnya mungkin sudah
+    # tersimpan di cache dari pemeriksaan sebelumnya.
+    targets = [
+        c for c in promising
+        if c.get("_oa_url") or c.get("url") or c.get("doi")
+    ]
     if not targets:
         return
 
     async def _best_fulltext(c: dict) -> str:
+        # DETERMINISME: jika teks penuh sumber ini sudah pernah berhasil
+        # diunduh, pakai ulang dari cache (per-DOI/URL) alih-alih mengunduh
+        # ulang. Mencegah skor berayun saat server penerbit lambat/putus.
+        ckey = online_cache.cache_key(c.get("doi"), c.get("_oa_url") or c.get("url"))
+        cached = await asyncio.to_thread(online_cache.get, ckey)
         # Coba SEMUA URL yang tersedia untuk kandidat ini — URL PDF OA
         # (`_oa_url`) DAN URL hasil/unduh (`url`, mis. tautan unduh OJS yang
         # kerap menyajikan PDF langsung) — lalu ambil teks TERPANJANG. Ini
@@ -403,7 +414,7 @@ async def _enrich_fulltext(
             if u and u not in urls:
                 urls.append(u)
         if not urls:
-            return ""
+            return cached or ""
         fetched = await asyncio.gather(
             *(_fetch_fulltext_resilient(client, u) for u in urls),
             return_exceptions=True,
@@ -412,6 +423,12 @@ async def _enrich_fulltext(
         for t in fetched:
             if isinstance(t, str) and len(t) > len(best):
                 best = t
+        # Simpan hasil unduhan yang lebih baik ke cache; bila unduhan kali ini
+        # lebih pendek dari yang tersimpan, pakai yang tersimpan (lebih lengkap).
+        if best:
+            await asyncio.to_thread(online_cache.put, ckey, best)
+        if cached and len(cached) > len(best):
+            return cached
         return best
 
     results = await asyncio.gather(
