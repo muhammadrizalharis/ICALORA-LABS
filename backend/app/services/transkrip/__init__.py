@@ -17,6 +17,8 @@ _MODEL_SIZE = os.environ.get("WHISPER_MODEL", "base")
 _DEVICE = os.environ.get("WHISPER_DEVICE", "cpu")
 _COMPUTE = os.environ.get("WHISPER_COMPUTE", "int8")
 _CACHE_DIR = os.environ.get("WHISPER_CACHE", os.path.expanduser("~/.cache/icalora-whisper"))
+# Beam search (>1) lebih akurat daripada greedy; default 5 seimbang akurasi/latensi.
+_BEAM_SIZE = int(os.environ.get("WHISPER_BEAM", "5"))
 
 # Batas aman ukuran unggahan audio (MB).
 MAX_AUDIO_BYTES = 50 * 1024 * 1024
@@ -62,7 +64,7 @@ def transcribe_audio(filename: str, data: bytes, language: str | None = None) ->
             tmp_path,
             language=language or None,
             vad_filter=True,
-            beam_size=1,
+            beam_size=_BEAM_SIZE,
         )
         seg_list: list[dict] = []
         parts: list[str] = []
