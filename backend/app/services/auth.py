@@ -95,6 +95,7 @@ def _row_to_user(r) -> dict:
         "token_balance": r.token_balance,
         "is_demo": r.is_demo,
         "is_admin": bool(getattr(r, "is_admin", False)),
+        "is_active": bool(getattr(r, "is_active", True)),
     }
 
 
@@ -108,13 +109,22 @@ def ensure_user_schema() -> None:
         return
     with engine.begin() as c:
         c.execute(
-            text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE")
+            text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS "
+                "is_admin BOOLEAN NOT NULL DEFAULT FALSE"
+            )
         )
         c.execute(
             text("ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_password_hash TEXT")
         )
         c.execute(
             text("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT")
+        )
+        c.execute(
+            text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS "
+                "is_active BOOLEAN NOT NULL DEFAULT TRUE"
+            )
         )
     _user_schema_ready = True
 
@@ -147,12 +157,15 @@ def verify_user_login(email: str, password: str) -> dict | None:
         r = c.execute(
             text(
                 "SELECT id, email, name, picture, token_balance, is_demo, is_admin, "
+                "COALESCE(is_active, TRUE) AS is_active, "
                 "password_hash FROM users WHERE lower(email) = lower(:email) "
                 "ORDER BY id LIMIT 1"
             ),
             {"email": email},
         ).first()
     if r is None or not r.password_hash:
+        return None
+    if not bool(getattr(r, "is_active", True)):
         return None
     if not _verify_password_hash(password, r.password_hash):
         return None
@@ -226,7 +239,8 @@ def get_user(user_id: int) -> dict | None:
     with engine.connect() as c:
         r = c.execute(
             text(
-                "SELECT id, email, name, picture, token_balance, is_demo, is_admin "
+                "SELECT id, email, name, picture, token_balance, is_demo, is_admin, "
+                "COALESCE(is_active, TRUE) AS is_active "
                 "FROM users WHERE id = :id"
             ),
             {"id": user_id},
@@ -241,21 +255,39 @@ def optional_user_from_request(request) -> dict | None:
     return get_user(uid) if uid else None
 
 
+class RegistrationClosed(Exception):
+    """Pendaftaran pengguna baru sedang ditutup oleh Super Admin."""
+
+
 def upsert_google_user(sub: str, email: str, name: str, picture: str) -> dict:
     ensure_user_schema()
+    # Lazy import untuk menghindari circular import (admin -> auth).
+    from app.services import admin as admin_svc
+
+    with engine.connect() as c:
+        existing = c.execute(
+            text("SELECT id FROM users WHERE google_sub = :sub"), {"sub": sub}
+        ).first()
+
+    if existing is None and not admin_svc.is_registration_open():
+        raise RegistrationClosed()
+
+    grant = admin_svc.default_token_grant() if existing is None else None
     with engine.begin() as c:
         r = c.execute(
             text(
                 """
-                INSERT INTO users (google_sub, email, name, picture, last_login_at)
-                VALUES (:sub, :email, :name, :picture, now())
+                INSERT INTO users (google_sub, email, name, picture,
+                                   token_balance, last_login_at)
+                VALUES (:sub, :email, :name, :picture,
+                        COALESCE(:grant, 0), now())
                 ON CONFLICT (google_sub) DO UPDATE
                    SET email = EXCLUDED.email, name = EXCLUDED.name,
                        picture = EXCLUDED.picture, last_login_at = now()
                 RETURNING id, email, name, picture, token_balance, is_demo, is_admin
                 """
             ),
-            {"sub": sub, "email": email, "name": name, "picture": picture},
+            {"sub": sub, "email": email, "name": name, "picture": picture, "grant": grant},
         ).first()
     return _row_to_user(r)
 

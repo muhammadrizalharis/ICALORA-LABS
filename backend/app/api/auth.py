@@ -9,10 +9,10 @@ import httpx
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import RedirectResponse
-
 from pydantic import BaseModel
 
 from app.core.config import get_settings
+from app.services import admin as admin_svc
 from app.services import auth as svc
 from app.services import email as email_svc
 
@@ -32,6 +32,20 @@ class AdminPasswordIn(BaseModel):
 class PasswordLoginIn(BaseModel):
     email: str
     password: str
+
+
+class AdminUserPatchIn(BaseModel):
+    token_balance: int | None = None
+    is_admin: bool | None = None
+    is_active: bool | None = None
+    name: str | None = None
+
+
+class AdminSettingsIn(BaseModel):
+    maintenance_mode: bool | None = None
+    registration_open: bool | None = None
+    default_token_grant: int | None = None
+    feature_flags: dict[str, bool] | None = None
 
 GOOGLE_AUTH = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN = "https://oauth2.googleapis.com/token"  # noqa: S105
@@ -57,13 +71,25 @@ def current_user(request: Request) -> dict:
     user = svc.get_user(uid)
     if not user:
         raise HTTPException(status_code=401, detail="Sesi tidak valid.")
+    if not user.get("is_active", True) and not user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Akun Anda dinonaktifkan.")
     return user
 
 
 def optional_user(request: Request) -> dict | None:
     token = request.cookies.get(settings.session_cookie)
     uid = svc.verify_session_token(token)
-    return svc.get_user(uid) if uid else None
+    user = svc.get_user(uid) if uid else None
+    if user and not user.get("is_active", True) and not user.get("is_admin"):
+        return None
+    return user
+
+
+def require_admin(request: Request) -> dict:
+    user = current_user(request)
+    if not user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Hanya Super Admin.")
+    return user
 
 
 @router.get("/me")
@@ -77,6 +103,8 @@ def me(request: Request) -> dict:
         "password_login_enabled": True,
         "email_enabled": email_svc.smtp_configured(),
         "history_retention_days": settings.history_retention_days,
+        "maintenance_mode": admin_svc.is_maintenance(),
+        "registration_open": admin_svc.is_registration_open(),
     }
 
 
@@ -203,12 +231,17 @@ def google_callback(
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Gagal login Google: {exc}") from exc
 
-    user = svc.upsert_google_user(
-        sub=data["sub"],
-        email=data.get("email", ""),
-        name=data.get("name", ""),
-        picture=data.get("picture", ""),
-    )
+    try:
+        user = svc.upsert_google_user(
+            sub=data["sub"],
+            email=data.get("email", ""),
+            name=data.get("name", ""),
+            picture=data.get("picture", ""),
+        )
+    except svc.RegistrationClosed:
+        resp = RedirectResponse(f"{settings.frontend_base_url}/login?error=registration_closed")
+        resp.delete_cookie("oauth_state", path="/")
+        return resp
     resp = RedirectResponse(f"{settings.frontend_base_url}/dashboard")
     _set_session(resp, user["id"])
     resp.delete_cookie("oauth_state", path="/")
@@ -235,3 +268,77 @@ def history_delete(item_id: int, user: dict = Depends(current_user)) -> dict:  #
     if not ok:
         raise HTTPException(status_code=404, detail="Riwayat tidak ditemukan.")
     return {"ok": True}
+
+
+# ====================== SUPER ADMIN: KELOLA PENGGUNA & PENGATURAN ======================
+
+
+@router.get("/admin/users")
+def admin_list_users(
+    request: Request, q: str | None = None, limit: int = 200
+) -> dict:
+    require_admin(request)
+    return {
+        "users": admin_svc.list_users(q, limit),
+        "stats": admin_svc.count_users(),
+    }
+
+
+@router.patch("/admin/users/{user_id}")
+def admin_patch_user(user_id: int, body: AdminUserPatchIn, request: Request) -> dict:
+    admin = require_admin(request)
+    target = admin_svc.get_admin_user(user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Pengguna tidak ditemukan.")
+    # Jangan biarkan admin mencabut hak admin / menonaktifkan dirinya sendiri.
+    if user_id == admin["id"]:
+        if body.is_admin is False:
+            raise HTTPException(status_code=400, detail="Tidak bisa mencabut admin diri sendiri.")
+        if body.is_active is False:
+            raise HTTPException(status_code=400, detail="Tidak bisa menonaktifkan diri sendiri.")
+    updated = admin_svc.update_user(user_id, body.model_dump(exclude_none=True))
+    return {"ok": True, "user": updated}
+
+
+@router.delete("/admin/users/{user_id}")
+def admin_delete_user(user_id: int, request: Request) -> dict:
+    admin = require_admin(request)
+    if user_id == admin["id"]:
+        raise HTTPException(status_code=400, detail="Tidak bisa menghapus diri sendiri.")
+    if not admin_svc.delete_user(user_id):
+        raise HTTPException(status_code=404, detail="Pengguna tidak ditemukan.")
+    return {"ok": True}
+
+
+@router.get("/admin/users/{user_id}/history")
+def admin_user_history(
+    user_id: int, request: Request, tool: str | None = None, limit: int = 50
+) -> dict:
+    require_admin(request)
+    if not admin_svc.get_admin_user(user_id):
+        raise HTTPException(status_code=404, detail="Pengguna tidak ditemukan.")
+    return {"items": svc.list_history(user_id, tool, min(limit, 100))}
+
+
+@router.post("/admin/users/{user_id}/reset-password")
+def admin_reset_user_password(user_id: int, request: Request) -> dict:
+    require_admin(request)
+    target = admin_svc.get_admin_user(user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Pengguna tidak ditemukan.")
+    new_pw = svc.generate_password(12)
+    svc.set_user_password(user_id, new_pw)
+    return {"ok": True, "password": new_pw, "email": target.get("email")}
+
+
+@router.get("/admin/settings")
+def admin_get_settings(request: Request) -> dict:
+    require_admin(request)
+    return admin_svc.get_all_settings()
+
+
+@router.put("/admin/settings")
+def admin_put_settings(body: AdminSettingsIn, request: Request) -> dict:
+    require_admin(request)
+    patch = body.model_dump(exclude_none=True)
+    return {"ok": True, "settings": admin_svc.update_settings(patch)}

@@ -2,12 +2,13 @@
 
 import asyncio
 
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from app.core.config import get_settings
+from app.services import admin as admin_svc
 from app.services.ai_detector import detect_ai
 from app.services.auth import (
     get_history_item,
@@ -54,6 +55,63 @@ router = APIRouter(prefix="/tools", tags=["tools"])
 # memakai embedding per-jendela, jadi seluruh isi dokumen tetap diperiksa.
 MAX_CHARS = 2_000_000
 settings = get_settings()
+
+
+# Peta endpoint /tools/<suffix> -> slug fitur (untuk on/off oleh Super Admin).
+_FEATURE_BY_PATH: dict[str, str] = {
+    "word-count": "word-count",
+    "extract-text": "extract-text",
+    "grammar-check": "grammar-checker",
+    "paraphrase": "paraphraser",
+    "humanize": "humanizer",
+    "rewrite": "ai-rewriter",
+    "plagiarism": "plagiarism-checker",
+    "plagiarism-online": "plagiarism-checker",
+    "plagiarism-file": "plagiarism-checker",
+    "plagiarism-async": "plagiarism-checker",
+    "plagiarism-file-async": "plagiarism-checker",
+    "chat": "ai-chat",
+    "grade": "ai-grader",
+    "reader-reactions": "reader-reactions",
+    "resume": "resume-builder",
+    "citations": "citation-finder",
+    "ai-detect": "ai-detector",
+    "authorship": "authorship",
+    "toc": "toc-generator",
+    "improve": "document-improver",
+    "hidden-text": "hidden-text",
+    "doc-chat": "doc-chat",
+    "publikasi": "publikasi",
+    "transcribe": "transcribe",
+    "report-pdf": "report-pdf",
+}
+
+
+def _access_guard(request: Request) -> None:
+    """Dependency router: tegakkan maintenance, blokir akun, dan on/off fitur.
+
+    Super Admin dikecualikan dari semua pembatasan agar tetap bisa menguji.
+    """
+    user = optional_user_from_request(request)
+    is_admin = bool(user and user.get("is_admin"))
+    if is_admin:
+        return
+    if admin_svc.is_maintenance():
+        raise HTTPException(
+            status_code=503,
+            detail="Situs sedang dalam pemeliharaan. Silakan coba lagi nanti.",
+        )
+    if user and not user.get("is_active", True):
+        raise HTTPException(status_code=403, detail="Akun Anda dinonaktifkan.")
+    suffix = request.url.path.rsplit("/", 1)[-1]
+    slug = _FEATURE_BY_PATH.get(suffix)
+    if slug and not admin_svc.feature_enabled(slug):
+        raise HTTPException(
+            status_code=403, detail="Fitur ini sedang dinonaktifkan oleh admin."
+        )
+
+
+router.dependencies.append(Depends(_access_guard))
 
 
 class TextIn(BaseModel):

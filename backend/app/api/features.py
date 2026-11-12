@@ -77,4 +77,10 @@ FEATURES: list[dict] = [
 
 @router.get("/features")
 def list_features() -> dict:
-    return {"count": len(FEATURES), "features": FEATURES}
+    from app.services import admin as admin_svc
+
+    feats = []
+    for f in FEATURES:
+        enabled = admin_svc.feature_enabled(f["slug"])
+        feats.append({**f, "enabled": enabled})
+    return {"count": len(feats), "features": feats}
