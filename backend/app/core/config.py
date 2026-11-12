@@ -37,8 +37,15 @@ class Settings(BaseSettings):
     # LLM (Ollama bersama di server: 127.0.0.1:11434)
     llm_provider: str = Field(default="ollama")
     ollama_base_url: str = Field(default="http://127.0.0.1:11434")
+    # URL khusus embedding (bge-m3). Bila kosong, memakai ollama_base_url. Dipisah
+    # agar chat bisa diarahkan ke instance model besar (mis. qwen3.6 di :11438)
+    # sementara embedding tetap ke instance bge-m3 ter-pin (:11434) tanpa nyasar.
+    ollama_embed_base_url: str = Field(default="")
     ollama_model: str = Field(default="qwen2.5:7b-instruct")
     ollama_embed_model: str = Field(default="bge-m3")
+    # Model "thinking" (mis. qwen3.x) mengeluarkan token nalar; tanpa think=false
+    # balasan `content` bisa kosong. None = tidak kirim parameter (model non-think).
+    ollama_think: bool | None = Field(default=None)
     llm_timeout: int = Field(default=120)
     # Durasi model tetap dimuat di VRAM setelah panggilan terakhir. "5m" = 5 menit
     # (default Ollama), "0" = langsung dilepas setelah tiap panggilan (hemat VRAM
