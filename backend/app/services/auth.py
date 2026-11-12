@@ -404,6 +404,44 @@ def ensure_file_schema() -> None:
     _FILE_SCHEMA_READY = True
 
 
+def _bounded_json(result: dict, max_chars: int = 1_500_000) -> str:
+    """Serialisasi hasil ke JSON yang DIJAMIN valid dan terbatas ukurannya.
+
+    Memotong *string* JSON akan merusaknya (menyebabkan error jsonb). Maka bila
+    hasil terlalu besar, kita pangkas di level **data** — memotong string panjang
+    dan membatasi jumlah elemen list secara rekursif — lalu serialisasi ulang,
+    sehingga hasil akhir tetap JSON yang sah.
+    """
+    dumped = json.dumps(result, ensure_ascii=False)
+    if len(dumped) <= max_chars:
+        return dumped
+
+    def _trim(obj, str_cap: int, list_cap: int):
+        if isinstance(obj, str):
+            return obj[:str_cap] + "…[dipangkas]" if len(obj) > str_cap else obj
+        if isinstance(obj, list):
+            trimmed = [_trim(x, str_cap, list_cap) for x in obj[:list_cap]]
+            if len(obj) > list_cap:
+                trimmed.append(f"…[{len(obj) - list_cap} item lain dipangkas]")
+            return trimmed
+        if isinstance(obj, dict):
+            return {k: _trim(v, str_cap, list_cap) for k, v in obj.items()}
+        return obj
+
+    # Pangkas makin agresif sampai muat.
+    for str_cap, list_cap in ((2000, 200), (800, 80), (300, 30), (120, 10)):
+        candidate = json.dumps(
+            _trim(result, str_cap, list_cap), ensure_ascii=False
+        )
+        if len(candidate) <= max_chars:
+            return candidate
+    # Cadangan terakhir: tetap JSON valid.
+    return json.dumps(
+        {"_truncated": True, "note": "Hasil terlalu besar untuk disimpan penuh."},
+        ensure_ascii=False,
+    )
+
+
 def record_history(
     user_id: int, tool: str, title: str, input_preview: str, result: dict
 ) -> int | None:
@@ -421,7 +459,7 @@ def record_history(
                 "tool": tool,
                 "title": title[:200] if title else None,
                 "prev": input_preview[:500] if input_preview else None,
-                "res": json.dumps(result)[:200000],
+                "res": _bounded_json(result),
             },
         ).first()
     try:
