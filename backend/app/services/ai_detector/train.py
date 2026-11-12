@@ -217,6 +217,7 @@ def _generate_id(client: httpx.Client, endpoint: str, model: str, title: str, rn
         ],
         "stream": False,
         "keep_alive": "10m",
+        "think": False,
         "options": {"temperature": temp, "num_predict": _NUM_PREDICT, "num_ctx": _NUM_CTX},
     }
     try:
@@ -329,6 +330,7 @@ def _generate(client: httpx.Client, endpoint: str, model: str, title: str, rng: 
         ],
         "stream": False,
         "keep_alive": "10m",
+        "think": False,
         "options": {"temperature": temp, "num_predict": _NUM_PREDICT, "num_ctx": _NUM_CTX},
     }
     try:
@@ -723,6 +725,233 @@ def cmd_finalize_emb(args) -> None:
     print(f"[fin-emb] selesai → {EMB_MODEL_PATH.name}", flush=True)
 
 
+# ─────────────────────────── STREAMING (tanpa cache disk) ───────────────────────────
+
+def _unload_models(lanes: list[tuple[str, str]], timeout: int = 20) -> None:
+    """Lepaskan model generator dari VRAM (keep_alive=0). bge-m3 TIDAK disentuh."""
+    seen: set[tuple[str, str]] = set()
+    with httpx.Client() as client:
+        for endpoint, model in lanes:
+            if (endpoint, model) in seen:
+                continue
+            seen.add((endpoint, model))
+            try:
+                client.post(
+                    f"{endpoint}/api/chat",
+                    json={
+                        "model": model,
+                        "messages": [{"role": "user", "content": "ok"}],
+                        "stream": False, "keep_alive": 0, "think": False,
+                        "options": {"num_predict": 1},
+                    },
+                    timeout=timeout,
+                )
+                print(f"[stream] VRAM dilepas: {model} @ {endpoint}", flush=True)
+            except Exception:  # noqa: BLE001
+                pass
+
+
+def _collect_humans_stream(target_en: int, target_id: int, client: httpx.Client,
+                           X: list[list[float]], y: list[int], used: set[int]) -> None:
+    """Embed sampel manusia korpus (EN + ID) langsung ke RAM; tanpa tulis disk."""
+    n = 0
+    if target_en > 0:
+        for doc_id, _title, body in _human_samples(target_en, used):
+            emb = embed_text(body, client, EMB_ENDPOINT)
+            if emb is None:
+                continue
+            used.add(doc_id)
+            X.append(feature_vector(_statistical_signals(body)) + emb)
+            y.append(0)
+            n += 1
+            if n % 100 == 0:
+                print(f"[stream] manusia EN: {n}/{target_en}", flush=True)
+        print(f"[stream] manusia EN terkumpul={n}", flush=True)
+    if target_id > 0:
+        m = 0
+        for doc_id, _title, body in _indonesian_human_samples(target_id, used):
+            emb = embed_text(body, client, EMB_ENDPOINT)
+            if emb is None:
+                continue
+            used.add(doc_id)
+            X.append(feature_vector(_statistical_signals(body)) + emb)
+            y.append(0)
+            m += 1
+            if m % 50 == 0:
+                print(f"[stream] manusia ID: {m}/{target_id}", flush=True)
+        print(f"[stream] manusia ID terkumpul={m}", flush=True)
+
+
+def _generate_ai_stream(lanes: list[tuple[str, str]], target_ai: int,
+                        titles_en: list[str], titles_id: list[str], id_frac: float,
+                        X: list[list[float]], y: list[int], lock: threading.Lock,
+                        max_seconds: int, concurrency: int) -> int:
+    """Generate teks AI (EN + ID) via model modern, embed, simpan ke RAM. Tanpa disk."""
+    state = {"ai": 0, "ei": 0, "ii": 0}
+    deadline = time.time() + max_seconds
+
+    def next_task() -> tuple[str, str] | None:
+        with lock:
+            want_id = (random.random() < id_frac) and state["ii"] < len(titles_id)
+            if want_id:
+                t = titles_id[state["ii"]]
+                state["ii"] += 1
+                return ("id", t)
+            if state["ei"] < len(titles_en):
+                t = titles_en[state["ei"]]
+                state["ei"] += 1
+                return ("en", t)
+            if state["ii"] < len(titles_id):
+                t = titles_id[state["ii"]]
+                state["ii"] += 1
+                return ("id", t)
+            return None
+
+    def worker(wid: int) -> None:
+        rng = random.Random(30_000 + wid + int(time.time()) % 1000)
+        fails = 0
+        with httpx.Client() as client:
+            while True:
+                with lock:
+                    if state["ai"] >= target_ai:
+                        return
+                if time.time() > deadline:
+                    return
+                task = next_task()
+                if task is None:
+                    return
+                kind, title = task
+                endpoint, model = rng.choice(lanes)
+                txt = (_generate_id(client, endpoint, model, title, rng) if kind == "id"
+                       else _generate(client, endpoint, model, title, rng))
+                if not txt:
+                    fails += 1
+                    if fails >= 30:
+                        print(f"[stream]   worker {wid} berhenti (30 gagal beruntun)", flush=True)
+                        return
+                    continue
+                emb = embed_text(txt, client, EMB_ENDPOINT)
+                if emb is None:
+                    fails += 1
+                    continue
+                fails = 0
+                vec = feature_vector(_statistical_signals(txt)) + emb
+                with lock:
+                    if state["ai"] >= target_ai:
+                        return
+                    X.append(vec)
+                    y.append(1)
+                    state["ai"] += 1
+                    c = state["ai"]
+                if c % 25 == 0:
+                    print(f"[stream]   sampel AI: {c}/{target_ai}", flush=True)
+
+    threads = []
+    for wid in range(max(1, concurrency)):
+        t = threading.Thread(target=worker, args=(wid,), daemon=True)
+        t.start()
+        threads.append(t)
+    for t in threads:
+        t.join()
+    return state["ai"]
+
+
+def cmd_stream_emb(args) -> None:
+    """Retrain model_emb TANPA menyimpan korpus: embed di RAM lalu latih.
+
+    Opsional memuat cache lama (--seed-cache) agar keragaman generator lama tetap
+    terjaga, lalu MENAMBAH positif AI dari model modern. Hanya model_emb.json (94K)
+    yang ditulis; tidak ada file embedding besar yang dibuat."""
+    random.seed(args.seed)
+    rng = random.Random(args.seed)
+    lanes = _lanes_from_args(args.local_models, args.shared_models)
+    if not lanes:
+        raise SystemExit("[stream] tidak ada model; beri --shared-models/--local-models")
+
+    X: list[list[float]] = []
+    y: list[int] = []
+    used: set[int] = set()
+
+    if args.seed_cache:
+        Xc, yc, uc = _load_emb_cache()
+        X.extend(Xc)
+        y.extend(yc)
+        used |= uc
+        print(f"[stream] seed cache lama: {len(Xc)} sampel "
+              f"(AI={sum(yc)}, manusia={len(yc) - sum(yc)})", flush=True)
+
+    target_id_h = int(args.extra_humans * args.id_frac)
+    target_en_h = args.extra_humans - target_id_h
+    with httpx.Client() as client:
+        if args.extra_humans > 0:
+            print(f"[stream] kumpulkan manusia baru: EN={target_en_h} ID={target_id_h}", flush=True)
+            _collect_humans_stream(target_en_h, target_id_h, client, X, y, used)
+
+    titles_en = [t for _id, t, _b in _human_samples(args.target_ai + 1000, set())]
+    titles_id: list[str] = []
+    if args.id_frac > 0:
+        n_id = int(args.target_ai * args.id_frac) + 200
+        titles_id = [t for _id, t, _b in _indonesian_human_samples(n_id, set())]
+
+    lock = threading.Lock()
+    print(f"[stream] generate AI modern target={args.target_ai} lanes={[m for _e, m in lanes]} "
+          f"id_frac={args.id_frac}", flush=True)
+    final = _generate_ai_stream(lanes, args.target_ai, titles_en, titles_id, args.id_frac,
+                                X, y, lock, args.max_seconds, args.concurrency)
+    print(f"[stream] AI modern terkumpul={final}", flush=True)
+
+    if not args.keep_vram:
+        _unload_models(lanes)
+
+    pos = sum(y)
+    print(f"[stream] total {len(X)} sampel (AI={pos}, manusia={len(y) - pos}), "
+          f"dim={len(X[0]) if X else 0}", flush=True)
+    if pos < 10 or (len(y) - pos) < 10:
+        raise SystemExit("[stream] sampel terlalu sedikit untuk melatih + validasi.")
+
+    idx0 = [i for i, v in enumerate(y) if v == 0]
+    idx1 = [i for i, v in enumerate(y) if v == 1]
+    rng.shuffle(idx0)
+    rng.shuffle(idx1)
+    n_test0 = max(1, int(len(idx0) * args.test_frac))
+    n_test1 = max(1, int(len(idx1) * args.test_frac))
+    test_idx = set(idx0[:n_test0] + idx1[:n_test1])
+    Xtr = [X[i] for i in range(len(X)) if i not in test_idx]
+    ytr = [y[i] for i in range(len(y)) if i not in test_idx]
+    Xte = [X[i] for i in sorted(test_idx)]
+    yte = [y[i] for i in sorted(test_idx)]
+    print(f"[stream] split: latih={len(Xtr)} held-out={len(Xte)}; melatih (1030-dim)…", flush=True)
+
+    names = list(FEATURES) + [f"emb_{i}" for i in range(EMB_DIM)]
+    model = train(Xtr, ytr, epochs=args.epochs, lr=args.lr, l2=args.l2, feature_names=names)
+    metrics = _evaluate(model, Xte, yte)
+    model.meta["validation"] = metrics
+    model.meta["n_human"] = len(y) - pos
+    model.meta["n_ai"] = pos
+    model.meta["kind"] = "stat+emb"
+    model.meta["emb_dim"] = EMB_DIM
+    model.meta["source"] = "stream"
+    model.meta["ai_modern"] = final
+    model.meta["generators"] = sorted({m for _e, m in lanes})
+
+    if args.dry_run:
+        print("[stream] DRY-RUN: model TIDAK disimpan.", flush=True)
+    else:
+        if EMB_MODEL_PATH.exists():
+            bak = EMB_MODEL_PATH.with_suffix(".json.bak")
+            bak.write_text(EMB_MODEL_PATH.read_text(encoding="utf-8"), encoding="utf-8")
+            print(f"[stream] cadangan model lama → {bak.name}", flush=True)
+        save(model, EMB_MODEL_PATH)
+        print(f"[stream] tersimpan → {EMB_MODEL_PATH.name}", flush=True)
+
+    print("[stream] === VALIDASI (held-out) ===", flush=True)
+    print(f"  akurasi            : {metrics['accuracy']}")
+    print(f"  false-positive rate: {metrics['false_positive_rate']}  (manusia dituduh AI)")
+    print(f"  false-negative rate: {metrics['false_negative_rate']}  (AI lolos)")
+    print(f"  precision / recall : {metrics['precision']} / {metrics['recall']}")
+    print(f"  confusion          : {metrics['confusion']}")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="mode")
@@ -756,6 +985,28 @@ def main() -> None:
     fe.add_argument("--lr", type=float, default=0.2)
     fe.add_argument("--l2", type=float, default=1e-2)
 
+    se = sub.add_parser("stream-emb", help="retrain model_emb TANPA simpan korpus (embed di RAM)")
+    se.add_argument("--local-models", default="", help="model instance user (koma)")
+    se.add_argument("--shared-models", default="", help="model Ollama bersama (koma)")
+    se.add_argument("--target-ai", type=int, required=True, help="jumlah positif AI modern baru")
+    se.add_argument("--extra-humans", type=int, default=0,
+                    help="sampel manusia baru (di luar seed-cache)")
+    se.add_argument("--id-frac", type=float, default=0.3, help="porsi sampel berbahasa Indonesia")
+    se.add_argument("--seed-cache", dest="seed_cache", action="store_true", default=True,
+                    help="muat cache lama agar keragaman generator lama terjaga (default)")
+    se.add_argument("--no-seed-cache", dest="seed_cache", action="store_false",
+                    help="abaikan cache lama; latih hanya dari sampel streaming")
+    se.add_argument("--keep-vram", action="store_true",
+                    help="jangan lepas VRAM generator usai latih")
+    se.add_argument("--dry-run", action="store_true", help="jangan simpan model (uji saja)")
+    se.add_argument("--max-seconds", type=int, default=7200)
+    se.add_argument("--concurrency", type=int, default=4)
+    se.add_argument("--test-frac", type=float, default=0.2)
+    se.add_argument("--seed", type=int, default=42)
+    se.add_argument("--epochs", type=int, default=1200)
+    se.add_argument("--lr", type=float, default=0.2)
+    se.add_argument("--l2", type=float, default=1e-2)
+
     hi = sub.add_parser("harvest-id", help="panen sampel manusia Indonesia → kedua cache")
     hi.add_argument("--target", type=int, required=True)
     hi.add_argument("--seed", type=int, default=42)
@@ -777,12 +1028,17 @@ def main() -> None:
         cmd_build_emb(args)
     elif args.mode == "finalize-emb":
         cmd_finalize_emb(args)
+    elif args.mode == "stream-emb":
+        cmd_stream_emb(args)
     elif args.mode == "harvest-id":
         cmd_harvest_id(args)
     elif args.mode == "gen-id":
         cmd_gen_id(args)
     else:
-        ap.error("pilih mode: generate | finalize | build-emb | finalize-emb | harvest-id | gen-id")
+        ap.error(
+            "pilih mode: generate | finalize | build-emb | finalize-emb | "
+            "stream-emb | harvest-id | gen-id"
+        )
 
 
 if __name__ == "__main__":
