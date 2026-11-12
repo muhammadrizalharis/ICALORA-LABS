@@ -26,6 +26,7 @@ import argparse
 import json
 import os
 import random
+import re
 import threading
 import time
 from pathlib import Path
@@ -67,6 +68,32 @@ _AI_STYLES = [
 ]
 _AI_TEMPS = [0.5, 0.7, 0.85, 1.0]
 
+# Gaya akademik Indonesia saja — dipakai mode `--lang id` untuk menambah
+# keseimbangan bahasa (kelas AI punya prosa Indonesia; kelas manusia dulu nyaris
+# tak punya sehingga teks akademik Indonesia manusia salah dituduh AI).
+_AI_STYLES_ID = [
+    "Tulis satu abstrak akademik (120-200 kata) gaya formal baku bahasa Indonesia.",
+    "Tulis satu paragraf tinjauan pustaka akademik (120-200 kata) bahasa Indonesia.",
+    "Tulis satu paragraf metodologi penelitian (120-200 kata) gaya ilmiah bahasa Indonesia.",
+    "Tulis satu paragraf hasil dan pembahasan (120-200 kata) gaya ilmiah bahasa Indonesia.",
+    "Tulis satu paragraf pendahuluan artikel jurnal (120-200 kata) bahasa Indonesia.",
+    "Tulis satu paragraf simpulan penelitian (120-200 kata) gaya ilmiah bahasa Indonesia.",
+    "Tulis satu paragraf kerangka teori (120-200 kata) gaya akademik bahasa Indonesia.",
+]
+
+# Deteksi teks berbahasa Indonesia via densitas kata fungsi khas ID.
+_ID_RE = re.compile(
+    r"\b(yang|dengan|dari|untuk|pada|adalah|dan|ini|penelitian|dalam|tidak|dapat|"
+    r"akan|telah|secara|terhadap|berdasarkan|menggunakan|hasil|metode|tujuan|atau|"
+    r"juga|sebagai|oleh|karena|serta|antara|lebih|sangat|bahwa|sehingga|merupakan|"
+    r"adanya|dilakukan|diperoleh|penelitian|pembelajaran|data)\b",
+    re.I,
+)
+
+
+def _looks_indonesian(text: str, min_hits: int = 6) -> bool:
+    return len(_ID_RE.findall(text[:1000])) >= min_hits
+
 
 def _human_samples(n: int, exclude_ids: set[int]) -> list[tuple[int, str, str]]:
     with engine.connect() as conn:
@@ -99,6 +126,195 @@ def _human_samples(n: int, exclude_ids: set[int]) -> list[tuple[int, str, str]]:
             if body and len(body.split()) >= 60:
                 out.append((row.id, row.title or "", body))
         return out
+
+
+def _indonesian_human_samples(need: int, exclude_ids: set[int], scan_cap: int = 2_000_000):
+    """Yield (id, title, body) dokumen korpus berbahasa Indonesia (manusia).
+
+    Korpus didominasi Inggris (~0.14% Indonesia), jadi kita pindai blok id acak
+    dan saring dengan heuristik kata fungsi Indonesia sampai `need` terpenuhi
+    atau `scan_cap` dokumen terlampaui.
+    """
+    with engine.connect() as conn:
+        max_id = conn.execute(text("SELECT max(id) FROM corpus_documents")).scalar() or 0
+        seen: set[int] = set(exclude_ids)
+        found = scanned = 0
+        while found < need and scanned < scan_cap:
+            start = random.randint(1, max(1, max_id - 200))
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT id, title, text_zstd
+                    FROM corpus_documents
+                    WHERE id >= :start AND text_zstd IS NOT NULL
+                      AND word_count BETWEEN :lo AND :hi
+                    ORDER BY id LIMIT 60
+                    """
+                ),
+                {"start": start, "lo": _WORD_MIN, "hi": _WORD_MAX},
+            ).fetchall()
+            for row in rows:
+                scanned += 1
+                if row.id in seen:
+                    continue
+                try:
+                    body = decompress_text(row.text_zstd)
+                except Exception:  # noqa: BLE001
+                    continue
+                if not body or len(body.split()) < 60:
+                    continue
+                if not _looks_indonesian(body):
+                    continue
+                seen.add(row.id)
+                found += 1
+                yield row.id, row.title or "", body
+                if found >= need:
+                    break
+            if scanned % 50_000 < 60:
+                print(f"[id] dipindai={scanned} ditemukan={found}/{need}", flush=True)
+
+
+def _harvest_id_humans(target: int) -> int:
+    """Tambah sampel manusia Indonesia ke KEDUA cache (feat + feat/emb)."""
+    _Xe, ye, used_emb = _load_emb_cache()
+    _Xf, yf, used_feat = _load_cache()
+    used = used_emb | used_feat
+    print(f"[id] memanen {target} sampel manusia Indonesia…", flush=True)
+    fe = _EMB_CACHE_PATH.open("a", encoding="utf-8")
+    ff = _CACHE_PATH.open("a", encoding="utf-8")
+    n = 0
+    try:
+        with httpx.Client() as client:
+            for doc_id, _title, body in _indonesian_human_samples(target, used):
+                emb = embed_text(body, client, EMB_ENDPOINT)
+                if emb is None:
+                    continue
+                feat = feature_vector(_statistical_signals(body))
+                fe.write(json.dumps({"label": 0, "feat": feat, "emb": emb, "src_id": doc_id, "lang": "id"}) + "\n")
+                ff.write(json.dumps({"label": 0, "feat": feat, "src_id": doc_id, "lang": "id"}) + "\n")
+                fe.flush()
+                ff.flush()
+                n += 1
+                if n % 100 == 0:
+                    print(f"[id]   manusia-id: {n}/{target}", flush=True)
+    finally:
+        fe.close()
+        ff.close()
+    print(f"[id] selesai; manusia Indonesia ditambah={n}", flush=True)
+    return n
+
+
+def _generate_id(client: httpx.Client, endpoint: str, model: str, title: str, rng: random.Random) -> str | None:
+    """Seperti _generate tetapi khusus prompt akademik Indonesia."""
+    topic = title.strip() or "sebuah topik penelitian umum"
+    style = rng.choice(_AI_STYLES_ID)
+    temp = rng.choice(_AI_TEMPS)
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": f"{style} Jangan menyebut bahwa teks ini dibuat AI. Keluarkan HANYA teksnya dalam bahasa Indonesia."},
+            {"role": "user", "content": f"Topik/judul: {topic}"},
+        ],
+        "stream": False,
+        "keep_alive": "10m",
+        "options": {"temperature": temp, "num_predict": _NUM_PREDICT, "num_ctx": _NUM_CTX},
+    }
+    try:
+        resp = client.post(f"{endpoint}/api/chat", json=payload, timeout=240)
+        resp.raise_for_status()
+        out = (resp.json()["message"]["content"] or "").strip()
+        if len(out.split()) < 60 or not _looks_indonesian(out, min_hits=5):
+            return None
+        return out
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _gen_id_ai(target: int, lanes: list[tuple[str, str]], titles: list[str],
+               max_seconds: int, concurrency: int) -> int:
+    """Generate sampel AI Indonesia ke KEDUA cache (feat + feat/emb)."""
+    _Xe, ye, _ = _load_emb_cache()
+    start_ai = sum(1 for v in ye if v == 1)
+    fe = _EMB_CACHE_PATH.open("a", encoding="utf-8")
+    ff = _CACHE_PATH.open("a", encoding="utf-8")
+    lock = threading.Lock()
+    state = {"n": 0, "ti": 0}
+    deadline = time.time() + max_seconds
+
+    def next_title() -> str | None:
+        with lock:
+            if state["ti"] >= len(titles):
+                return None
+            t = titles[state["ti"]]
+            state["ti"] += 1
+            return t
+
+    def worker(wid: int) -> None:
+        rng = random.Random(30_000 + wid + int(time.time()) % 1000)
+        fails = 0
+        with httpx.Client() as client:
+            while True:
+                with lock:
+                    if state["n"] >= target:
+                        return
+                if time.time() > deadline:
+                    return
+                title = next_title()
+                if title is None:
+                    return
+                endpoint, model = rng.choice(lanes)
+                txt = _generate_id(client, endpoint, model, title, rng)
+                if not txt:
+                    fails += 1
+                    if fails >= 40:
+                        print(f"[id-ai]   worker {wid} berhenti (40 gagal)", flush=True)
+                        return
+                    continue
+                emb = embed_text(txt, client, EMB_ENDPOINT)
+                if emb is None:
+                    fails += 1
+                    continue
+                fails = 0
+                feat = feature_vector(_statistical_signals(txt))
+                with lock:
+                    if state["n"] >= target:
+                        return
+                    fe.write(json.dumps({"label": 1, "feat": feat, "emb": emb, "src_id": None, "gen": model, "lang": "id"}) + "\n")
+                    ff.write(json.dumps({"label": 1, "feat": feat, "src_id": None, "gen": model, "lang": "id"}) + "\n")
+                    fe.flush()
+                    ff.flush()
+                    state["n"] += 1
+                    c = state["n"]
+                if c % 25 == 0:
+                    print(f"[id-ai]   AI-id: {c}/{target}", flush=True)
+
+    threads = [threading.Thread(target=worker, args=(w,), daemon=True) for w in range(max(1, concurrency))]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    fe.close()
+    ff.close()
+    print(f"[id-ai] selesai; AI Indonesia ditambah={state['n']} (AI emb-cache awal={start_ai})", flush=True)
+    return state["n"]
+
+
+def cmd_harvest_id(args) -> None:
+    random.seed(args.seed)
+    _harvest_id_humans(args.target)
+
+
+def cmd_gen_id(args) -> None:
+    random.seed(args.seed)
+    lanes = _lanes_from_args(args.local_models, args.shared_models)
+    if not lanes:
+        print("[id-ai] tidak ada model; batal.", flush=True)
+        return
+    print(f"[id-ai] lanes={[m for _e, m in lanes]} target={args.target}", flush=True)
+    # Judul topik dari dokumen Indonesia agar tema relevan.
+    titles = [t for _id, t, _b in _indonesian_human_samples(args.target + 400, set())]
+    random.shuffle(titles)
+    _gen_id_ai(args.target, lanes, titles, args.max_seconds, args.concurrency)
 
 
 def _generate(client: httpx.Client, endpoint: str, model: str, title: str, rng: random.Random) -> str | None:
@@ -540,6 +756,18 @@ def main() -> None:
     fe.add_argument("--lr", type=float, default=0.2)
     fe.add_argument("--l2", type=float, default=1e-2)
 
+    hi = sub.add_parser("harvest-id", help="panen sampel manusia Indonesia → kedua cache")
+    hi.add_argument("--target", type=int, required=True)
+    hi.add_argument("--seed", type=int, default=42)
+
+    gi = sub.add_parser("gen-id", help="generate sampel AI Indonesia → kedua cache")
+    gi.add_argument("--local-models", default="")
+    gi.add_argument("--shared-models", default="")
+    gi.add_argument("--target", type=int, required=True)
+    gi.add_argument("--max-seconds", type=int, default=7200)
+    gi.add_argument("--concurrency", type=int, default=4)
+    gi.add_argument("--seed", type=int, default=42)
+
     args = ap.parse_args()
     if args.mode == "generate":
         cmd_generate(args)
@@ -549,8 +777,12 @@ def main() -> None:
         cmd_build_emb(args)
     elif args.mode == "finalize-emb":
         cmd_finalize_emb(args)
+    elif args.mode == "harvest-id":
+        cmd_harvest_id(args)
+    elif args.mode == "gen-id":
+        cmd_gen_id(args)
     else:
-        ap.error("pilih mode: generate | finalize | build-emb | finalize-emb")
+        ap.error("pilih mode: generate | finalize | build-emb | finalize-emb | harvest-id | gen-id")
 
 
 if __name__ == "__main__":
