@@ -20,19 +20,37 @@ _INVISIBLE = {
     "\u200c": "ZERO WIDTH NON-JOINER",
     "\u200d": "ZERO WIDTH JOINER",
     "\u2060": "WORD JOINER",
+    "\u2061": "FUNCTION APPLICATION",
+    "\u2062": "INVISIBLE TIMES",
+    "\u2063": "INVISIBLE SEPARATOR",
+    "\u2064": "INVISIBLE PLUS",
     "\ufeff": "ZERO WIDTH NO-BREAK SPACE (BOM)",
     "\u00ad": "SOFT HYPHEN",
+    "\u034f": "COMBINING GRAPHEME JOINER",
     "\u180e": "MONGOLIAN VOWEL SEPARATOR",
+    "\u115f": "HANGUL CHOSEONG FILLER",
+    "\u1160": "HANGUL JUNGSEONG FILLER",
+    "\u3164": "HANGUL FILLER",
+    "\uffa0": "HALFWIDTH HANGUL FILLER",
+    "\u17b4": "KHMER VOWEL INHERENT AQ",
+    "\u17b5": "KHMER VOWEL INHERENT AA",
 }
 
-# Kontrol arah teks (bidi) yang bisa menyamarkan isi.
+# Kontrol arah teks (bidi) yang bisa menyamarkan isi — termasuk penanda &
+# penutup serangan "Trojan Source" (mark/override/isolate + pop).
 _BIDI = {
+    "\u200e": "LEFT-TO-RIGHT MARK",
+    "\u200f": "RIGHT-TO-LEFT MARK",
+    "\u061c": "ARABIC LETTER MARK",
     "\u202a": "LEFT-TO-RIGHT EMBEDDING",
     "\u202b": "RIGHT-TO-LEFT EMBEDDING",
+    "\u202c": "POP DIRECTIONAL FORMATTING",
     "\u202d": "LEFT-TO-RIGHT OVERRIDE",
     "\u202e": "RIGHT-TO-LEFT OVERRIDE",
     "\u2066": "LEFT-TO-RIGHT ISOLATE",
     "\u2067": "RIGHT-TO-LEFT ISOLATE",
+    "\u2068": "FIRST STRONG ISOLATE",
+    "\u2069": "POP DIRECTIONAL ISOLATE",
 }
 
 # Spasi non-standar.
@@ -103,7 +121,11 @@ def check_hidden_text(text: str, check_typos: bool = True) -> dict:
     odd_spaces = _find(text, _ODD_SPACES, "odd_space")
     homoglyphs = _find(text, _HOMOGLYPHS, "homoglyph")
 
-    # Karakter kontrol lain (selain newline/tab).
+    # Karakter kontrol/format/pemisah baris lain yang tak tertangani tabel di
+    # atas: kategori Unicode Cc (kontrol), Cf (format tak terlihat), Zl/Zp
+    # (pemisah baris/paragraf U+2028/U+2029). Dulu hanya Cc yang terdeteksi,
+    # sehingga banyak karakter format tersembunyi lolos sebagai "bersih".
+    _known = set(_INVISIBLE) | set(_BIDI) | set(_ODD_SPACES)
     control = [
         {
             "category": "control",
@@ -112,7 +134,9 @@ def check_hidden_text(text: str, check_typos: bool = True) -> dict:
             "position": idx,
         }
         for idx, ch in enumerate(text)
-        if unicodedata.category(ch) == "Cc" and ch not in "\n\r\t"
+        if ch not in _known
+        and ch not in "\n\r\t"
+        and unicodedata.category(ch) in {"Cc", "Cf", "Zl", "Zp"}
     ]
 
     findings = invisible + bidi + odd_spaces + homoglyphs + control
@@ -123,11 +147,24 @@ def check_hidden_text(text: str, check_typos: bool = True) -> dict:
         except Exception:  # noqa: BLE001, S110
             typos = []
 
-    # Teks bersih (karakter tersembunyi dihapus).
+    # Teks bersih: buang karakter tersembunyi, PETAKAN homoglyph → Latin, dan
+    # buang kontrol/format lain (Cc/Cf/Zl/Zp) agar hasil benar-benar bersih
+    # untuk analisis ulang (dulu homoglyph & kontrol masih tersisa).
     drop = set(_INVISIBLE) | set(_BIDI)
-    cleaned = "".join(c for c in text if c not in drop)
-    for src in _ODD_SPACES:
-        cleaned = cleaned.replace(src, " ")
+    out_chars: list[str] = []
+    for c in text:
+        if c in drop:
+            continue
+        if c in _HOMOGLYPHS:
+            out_chars.append(_HOMOGLYPHS[c])
+            continue
+        if c in _ODD_SPACES:
+            out_chars.append(" ")
+            continue
+        if c not in "\n\r\t" and unicodedata.category(c) in {"Cc", "Cf", "Zl", "Zp"}:
+            continue
+        out_chars.append(c)
+    cleaned = "".join(out_chars)
 
     risk = "bersih"
     if invisible or bidi or homoglyphs:

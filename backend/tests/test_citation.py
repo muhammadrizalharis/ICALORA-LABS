@@ -23,7 +23,7 @@ def test_bibtex_key():
 
 def test_format_apa():
     out = _format_apa("Deep Learning", 2021, "10.1/abc", "arxiv")
-    assert out == "(2021). Deep Learning. ARXIV. https://doi.org/10.1/abc"
+    assert out == "(2021). Deep Learning. arXiv. https://doi.org/10.1/abc"
     assert _format_apa(None, None, None, "oa") == "(n.d.). [Judul tidak tersedia]. OA."
 
 
@@ -39,26 +39,32 @@ def test_format_bibtex():
 def test_format_ieee():
     assert (
         _format_ieee("Deep Learning", 2021, "10.1/abc", "arxiv")
-        == '"Deep Learning," ARXIV, 2021, doi: 10.1/abc.'
+        == '"Deep Learning," arXiv, 2021, doi: 10.1/abc.'
     )
 
 
 def test_format_mla():
     assert (
         _format_mla("Deep Learning", 2021, "10.1/abc", "arxiv")
-        == '"Deep Learning." ARXIV, 2021, https://doi.org/10.1/abc.'
+        == '"Deep Learning." arXiv, 2021, https://doi.org/10.1/abc.'
     )
 
 
 def test_format_harvard():
     out = _format_harvard("Deep Learning", 2021, "10.1/abc", "arxiv")
-    assert out == "2021. 'Deep Learning', ARXIV. Available at: https://doi.org/10.1/abc"
+    assert out == "2021. 'Deep Learning', arXiv. Available at: https://doi.org/10.1/abc"
     assert _format_harvard(None, None, None, "oa") == "n.d. '[Judul tidak tersedia]', OA."
 
 
 def test_format_vancouver():
     out = _format_vancouver("Deep Learning", 2021, "10.1/abc", "arxiv")
-    assert out == "Deep Learning. ARXIV. 2021. Available from: https://doi.org/10.1/abc"
+    assert out == "Deep Learning. arXiv. 2021. Available from: https://doi.org/10.1/abc"
+
+
+def test_format_vancouver_no_year_no_double_period():
+    out = _format_vancouver("Deep Learning", None, "10.1/abc", "arxiv")
+    assert ".." not in out
+    assert out == "Deep Learning. arXiv. Available from: https://doi.org/10.1/abc"
 
 
 def test_format_ris():

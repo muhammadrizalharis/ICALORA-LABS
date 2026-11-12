@@ -7,8 +7,23 @@ kemiripan gaya (indikasi penulis sama) via cosine pada vektor ciri.
 
 from __future__ import annotations
 
+import json
 import math
 import re
+from pathlib import Path
+
+# Referensi distribusi kata fungsi (mean & std per kata) dari sampel korpus
+# nyata, dipakai untuk Burrows's Delta: tiap frekuensi distandarkan jadi z-score
+# agar kata amat-sering (the/of) tak mendominasi & tiap kata berkontribusi
+# setara terhadap "sidik jari" gaya penulis.
+_REF_PATH = Path(__file__).with_name("fw_reference.json")
+try:
+    _FW_REF = json.loads(_REF_PATH.read_text())
+    _FW_REF_MEAN = _FW_REF["mean"]
+    _FW_REF_STD = [s if s and s > 1e-6 else 0.01 for s in _FW_REF["std"]]
+except Exception:
+    _FW_REF_MEAN = None
+    _FW_REF_STD = None
 
 _WORD_RE = re.compile(r"\b[\w'-]+\b", re.UNICODE)
 _SENT_RE = re.compile(r"[^.!?]+[.!?]*")
@@ -124,13 +139,31 @@ def _fw_vector(text: str) -> list[float]:
 
 
 def _fw_similarity(a: str, b: str) -> float:
-    """Kemiripan distribusi kata fungsi via cosine vektor frekuensi (0..1).
+    """Kemiripan distribusi kata fungsi via Burrows's Delta (0..1).
 
-    Cosine stabil pada daftar kata fungsi yang kaya (kata ganti, kata bantu,
-    preposisi, konjungsi): penulis berbeda memakai kata fungsi dengan proporsi
-    berbeda sehingga sudut antar-vektor melebar.
+    Tiap frekuensi kata fungsi distandarkan jadi z-score terhadap referensi
+    korpus (mean/std per kata), lalu Delta = rata-rata selisih absolut z-score.
+    Standardisasi mencegah kata amat-sering (the/of/yang) mendominasi dan
+    membuat tiap kata fungsi berkontribusi setara — inilah metode baku
+    stilometri (Burrows 2002). Delta kecil → gaya mirip.
+
+    Bila referensi tak tersedia, jatuh ke cosine frekuensi mentah.
     """
-    return _cosine(_fw_vector(a), _fw_vector(b))
+    va, vb = _fw_vector(a), _fw_vector(b)
+    if not _FW_REF_MEAN:
+        return _cosine(va, vb)
+    za = [(x - m) / s for x, m, s in zip(va, _FW_REF_MEAN, _FW_REF_STD, strict=False)]
+    zb = [(x - m) / s for x, m, s in zip(vb, _FW_REF_MEAN, _FW_REF_STD, strict=False)]
+    n = len(za) or 1
+    delta = sum(abs(x - y) for x, y in zip(za, zb, strict=False)) / n
+    # Petakan Delta (jarak, ~0..3+) ke kemiripan 0..1. Delta<=0.6 dianggap
+    # sangat mirip; Delta>=2.2 praktis tak mirip. Kurva linear di antaranya.
+    lo, hi = 0.6, 2.2
+    if delta <= lo:
+        return 1.0
+    if delta >= hi:
+        return 0.0
+    return 1.0 - (delta - lo) / (hi - lo)
 
 
 def _cosine(a: list[float], b: list[float]) -> float:
@@ -153,7 +186,7 @@ def analyze_authorship(text: str, compare: str | None = None) -> dict:
         # fungsi karena paling diskriminatif & tak bergantung topik.
         fw_sim = _fw_similarity(text, comp)
         struct_sim = _cosine(_struct_vector_norm(result["profile"]), _struct_vector_norm(prof_b))
-        sim = 0.5 * fw_sim + 0.5 * struct_sim
+        sim = 0.65 * fw_sim + 0.35 * struct_sim
         sim_pct = round(sim * 100, 1)
         # Kepercayaan bergantung panjang sampel: di bawah ~300 kata, frekuensi
         # kata fungsi belum stabil -> hasil hanya indikatif.
