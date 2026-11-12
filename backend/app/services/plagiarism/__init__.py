@@ -111,8 +111,14 @@ _GROUP_WEIGHT = {
 }
 
 # Batas teks dokumen yang disimpan untuk tampilan "Dokumen dengan Sorotan".
-# Cukup untuk naskah panjang, tanpa membengkakkan riwayat (jsonb).
-_MAX_DOC_DISPLAY = 60_000
+# Cukup untuk naskah panjang (sampai ~40 halaman) agar SELURUH halaman — bukan
+# hanya halaman awal — ikut tersorot, tanpa membengkakkan riwayat (jsonb).
+_MAX_DOC_DISPLAY = 300_000
+# Batas jumlah passage yang dikembalikan. Harus mencakup SEMUA kalimat yang
+# cocok (bukan hanya ~50 teratas), jika tidak sorotan berhenti di halaman awal
+# karena passage sisanya terpotong. Dokumen akademik jarang > beberapa ribu
+# kalimat, jadi batas ini praktis tak pernah menyunat kecocokan nyata.
+_MAX_PASSAGES = 5_000
 
 
 def _classify_match(
@@ -486,7 +492,7 @@ def _chunk_match(
         "weighted_index": weighted_index,
         "matched_sentences": len(matched),
         "total_sentences": len(sentences),
-        "matched_passages": matched[:50],
+        "matched_passages": matched[:_MAX_PASSAGES],
         "match_groups": match_groups,
         "source_percent": source_percent,
         "excluded_sources": excluded_sources,
