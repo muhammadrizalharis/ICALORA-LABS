@@ -11,11 +11,18 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (!loading && user) router.replace("/dashboard");
   }, [loading, user, router]);
+
+  useEffect(() => {
+    const err = new URLSearchParams(window.location.search).get("error");
+    if (err === "registration_closed")
+      setNotice("Pendaftaran akun baru sedang ditutup oleh admin. Hubungi admin untuk akses.");
+  }, []);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -46,6 +53,12 @@ export default function LoginPage() {
         <p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">
           Kelola saldo, gunakan semua layanan, dan tinjau riwayat pengecekan dari satu tempat.
         </p>
+
+        {notice && (
+          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
+            {notice}
+          </div>
+        )}
 
         <div className="mt-6 space-y-3">
           {googleEnabled ? (
