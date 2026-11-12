@@ -5,10 +5,99 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 
 from app.services.llm.provider import get_llm
 
 _JSON_RE = re.compile(r"\{.*\}|\[.*\]", re.DOTALL)
+
+# --- Role "Profesor / evaluator ilmiah" untuk AI Chat topik akademik ---
+# Dimuat dari berkas (dibundel bersama paket) agar mudah disunting tanpa ubah kode.
+_ROLE_PROF_PATH = Path(__file__).with_name("role_prof.md")
+try:
+    _ROLE_PROF = _ROLE_PROF_PATH.read_text(encoding="utf-8").strip()
+except Exception:
+    _ROLE_PROF = ""
+
+# Kata kunci penanda topik akademik/riset (ID + EN). Jika salah satu muncul pada
+# pesan pengguna, AI Chat beralih ke role Profesor (advisor & reviewer ilmiah).
+_ACADEMIC_KEYWORDS = {
+    # Indonesia
+    "penelitian", "riset", "jurnal", "naskah", "makalah", "paper", "abstrak",
+    "metodologi", "metode penelitian", "hipotesis", "kebaruan", "sitasi",
+    "kutipan", "variabel", "dataset", "data set", "revisi", "reviewer",
+    "publikasi", "literatur", "pustaka", "tinjauan pustaka", "kerangka teori",
+    "rumusan masalah", "tujuan penelitian", "kontribusi", "skripsi", "tesis",
+    "disertasi", "eksperimen", "statistik", "signifikansi", "baseline",
+    "ablation", "ablasi", "temuan", "simpulan", "kesimpulan", "diskusi",
+    "metode", "analisis data", "pembahasan", "latar belakang", "state of the art",
+    # Inggris
+    "research", "journal", "manuscript", "abstract", "methodology", "method",
+    "hypothesis", "novelty", "citation", "literature", "related work",
+    "experiment", "benchmark", "statistical", "significance",
+    "contribution", "thesis", "dissertation", "peer review", "publication",
+    "scopus", "sota", "ablation study", "validity", "robustness",
+    "methods", "results", "discussion", "introduction", "conclusion",
+    "research gap", "research question", "findings", "framework", "doi",
+    "p-value", "confusion matrix", "cross-validation", "overfitting",
+}
+
+
+def _is_academic(text: str) -> bool:
+    """Deteksi apakah teks pengguna menyangkut topik akademik/riset."""
+    low = (text or "").lower()
+    # Frasa multi-kata dicek via substring; kata tunggal via batas kata.
+    for kw in _ACADEMIC_KEYWORDS:
+        if " " in kw or "-" in kw:
+            if kw in low:
+                return True
+        elif re.search(rf"\b{re.escape(kw)}\b", low):
+            return True
+    return False
+
+
+def _academic_chat_prompt() -> str:
+    """System prompt role Profesor + aturan operasional AI Chat."""
+    guard = (
+        "Anda bertindak sebagai dosen/profesor & evaluator ilmiah pada AI Chat "
+        "ICALORA-LABS. Terapkan peran-peran di bawah SESUAI kebutuhan topik "
+        "(tidak semua sekaligus). Jawab dalam bahasa yang sama dengan pengguna, "
+        "kritis, ringkas, terstruktur, dan berbasis bukti. Jangan mengarang DOI, "
+        "data, hasil, atau sitasi, dan jangan membuat klaim kebaruan/SOTA tanpa "
+        "dukungan bukti.\n\n"
+    )
+    return guard + _ROLE_PROF if _ROLE_PROF else guard
+
+
+def chat(messages: list[dict], system: str | None = None) -> dict:
+    """AI Chat: asisten tulis akademik multi-giliran berbasis LLM lokal.
+
+    Bila pengguna membahas topik akademik/riset, aktifkan role "Profesor /
+    evaluator ilmiah" (docs/ROLE-PROFF.md) secara otomatis; selain itu gunakan
+    asisten umum. `system` eksplisit (bila diberikan) selalu diprioritaskan.
+    """
+    llm = get_llm()
+    user_text = " ".join(
+        (m.get("content") or "") for m in messages if m.get("role") == "user"
+    )
+    if system:
+        sys_prompt = system
+    elif _is_academic(user_text):
+        sys_prompt = _academic_chat_prompt()
+    else:
+        sys_prompt = (
+            "Anda adalah asisten penulisan akademik ICALORA-LABS. Jawab dengan jelas, "
+            "akurat, dan dalam bahasa yang sama dengan pengguna. Bantu menulis, merangkum, "
+            "menjelaskan, dan menyusun argumen secara ilmiah."
+        )
+    convo = [{"role": "system", "content": sys_prompt}]
+    for m in messages[-20:]:
+        role = m.get("role")
+        content = (m.get("content") or "").strip()
+        if role in ("user", "assistant") and content:
+            convo.append({"role": role, "content": content})
+    reply = llm.chat(convo, temperature=0.5, max_tokens=1024)
+    return {"reply": reply}
 
 
 def _extract_json(raw: str):
@@ -201,24 +290,6 @@ def rewrite(text: str, tone: str = "formal") -> dict:
     ]
     result = llm.chat(messages, temperature=0.7)
     return {"result": result, "tone": tone}
-
-
-def chat(messages: list[dict], system: str | None = None) -> dict:
-    """AI Chat: asisten tulis akademik multi-giliran berbasis LLM lokal."""
-    llm = get_llm()
-    sys_prompt = system or (
-        "Anda adalah asisten penulisan akademik ICALORA-LABS. Jawab dengan jelas, "
-        "akurat, dan dalam bahasa yang sama dengan pengguna. Bantu menulis, merangkum, "
-        "menjelaskan, dan menyusun argumen secara ilmiah."
-    )
-    convo = [{"role": "system", "content": sys_prompt}]
-    for m in messages[-20:]:
-        role = m.get("role")
-        content = (m.get("content") or "").strip()
-        if role in ("user", "assistant") and content:
-            convo.append({"role": role, "content": content})
-    reply = llm.chat(convo, temperature=0.5, max_tokens=1024)
-    return {"reply": reply}
 
 
 def grade_essay(text: str, rubric: str | None = None) -> dict:
