@@ -15,13 +15,8 @@ import fitz  # PyMuPDF
 
 from app.services.report import render_pdf
 
-# Warna sorotan per kategori temuan (RGB 0..1) — skema orisinal.
-_GROUP_COLOR = {
-    "salinan_langsung": (0.98, 0.45, 0.45),
-    "kemiripan_kuat": (0.98, 0.65, 0.30),
-    "indikasi_parafrase": (0.98, 0.86, 0.35),
-    "sumber_terkredit": (0.45, 0.80, 0.55),
-}
+# Warna sorotan di PDF kini mengikuti SUMBER (lihat `_SOURCE_COLORS` di bawah),
+# bukan kategori. Warna kategori hanya dipakai untuk swatch di sampul.
 _GROUP_HEX = {
     "salinan_langsung": "#e11d48",
     "kemiripan_kuat": "#f97316",
@@ -40,6 +35,51 @@ _GROUP_DESC = {
     "indikasi_parafrase": "Kemiripan makna dengan sebagian kata diubah.",
     "sumber_terkredit": "Dikutip dan disitasi dengan benar — bukan risiko.",
 }
+
+# Palet warna PER-SUMBER (selaras dengan HILITE di frontend). Setiap sumber
+# yang cocok mendapat satu warna berbeda, sehingga tiap teks tersorot di
+# dokumen bisa ditelusuri ke sumber mana ia cocok (bukan sekadar kategori).
+# `fill` = RGB 0..1 untuk sorotan PDF; `hex` = warna solid untuk swatch cover.
+_SOURCE_COLORS = [
+    {"fill": (0.992, 0.902, 0.541), "hex": "#d97706"},  # amber
+    {"fill": (0.749, 0.859, 0.996), "hex": "#2563eb"},  # biru
+    {"fill": (0.733, 0.969, 0.816), "hex": "#16a34a"},  # hijau
+    {"fill": (0.984, 0.812, 0.906), "hex": "#db2777"},  # merah muda
+    {"fill": (0.867, 0.839, 0.996), "hex": "#7c3aed"},  # ungu
+    {"fill": (0.996, 0.843, 0.667), "hex": "#ea580c"},  # oranye
+    {"fill": (0.647, 0.953, 0.988), "hex": "#0891b2"},  # sian
+    {"fill": (0.914, 0.835, 1.000), "hex": "#9333ea"},  # violet
+]
+
+
+def _src_key(title: object, doi: object, doc_id: object) -> str:
+    """Kunci identitas sumber yang konsisten antara daftar sumber & passage."""
+    t = str(title or "").strip().lower()
+    if t:
+        return t
+    d = str(doi or "").strip().lower()
+    if d:
+        return d
+    return f"doc-{doc_id}" if doc_id is not None else "src"
+
+
+def _source_color_map(report: dict) -> dict[str, int]:
+    """Petakan tiap sumber → indeks warna palet, urut sesuai daftar sumber.
+
+    Urutan mengikuti `report["sources"]` agar warna swatch di "Sumber Teratas"
+    sama dengan warna sorotan di halaman dokumen. Passage yang sumbernya tak
+    ada di daftar (peringkat bawah) ikut ditambahkan agar tetap berwarna.
+    """
+    cmap: dict[str, int] = {}
+    for s in report.get("sources", []) or []:
+        key = _src_key(s.get("title"), s.get("doi"), s.get("doc_id"))
+        if key not in cmap:
+            cmap[key] = len(cmap) % len(_SOURCE_COLORS)
+    for p in report.get("matched_passages", []) or []:
+        key = _src_key(p.get("source_title"), p.get("source_doi"), p.get("doc_id"))
+        if key not in cmap:
+            cmap[key] = len(cmap) % len(_SOURCE_COLORS)
+    return cmap
 
 
 def _esc(s: str) -> str:
@@ -85,8 +125,9 @@ def _cover_html(report: dict) -> str:
         )
 
     srcs = report.get("sources", [])[:10]
+    cmap = _source_color_map(report)
     src_rows = ""
-    for i, s in enumerate(srcs, 1):
+    for s in srcs:
         sim = float(s.get("similarity", 0) or 0)
         title = _esc(str(s.get("title") or "Tanpa judul"))
         meta = _esc(str(s.get("source") or ""))
@@ -101,19 +142,17 @@ def _cover_html(report: dict) -> str:
         contain_txt = (
             f" · abstrak {contain:.0f}% termuat" if s.get("online") and contain else ""
         )
-        src_rows += (
-            f'<tr><td style="font-weight:700;width:60px">{sim:.1f}%</td>'
-            f'<td><b>{i}. {title}</b>{badge}<div style="color:#64748b;font-size:11px">'
-            f'{meta}{(" · " + str(yr)) if yr else ""}{contain_txt}</div></td></tr>'
+        ckey = _src_key(s.get("title"), s.get("doi"), s.get("doc_id"))
+        chex = _SOURCE_COLORS[cmap.get(ckey, 0)]["hex"]
+        swatch = (
+            f'<span style="display:inline-block;width:11px;height:11px;'
+            f'border-radius:50%;background:{chex};vertical-align:middle"></span>'
         )
-
-    online_note = ""
-    providers = report.get("online_providers") or []
-    if report.get("online_merged") and providers:
-        names = _esc(", ".join(str(p.get("name")) for p in providers))
-        online_note = (
-            '<div class="note" style="margin-top:6px">🌐 Indeks ini juga mencakup '
-            f"pencocokan real-time tanpa-unduh ke sumber daring: {names}.</div>"
+        src_rows += (
+            f'<tr><td style="width:14px">{swatch}</td>'
+            f'<td style="font-weight:700;width:60px">{sim:.1f}%</td>'
+            f'<td><b>{title}</b>{badge}<div style="color:#64748b;font-size:11px">'
+            f'{meta}{(" · " + str(yr)) if yr else ""}{contain_txt}</div></td></tr>'
         )
 
     exclude_note = ""
@@ -131,6 +170,9 @@ def _cover_html(report: dict) -> str:
             f"pemeriksaan): {_esc(', '.join(ex_labels))}.</div>"
         )
 
+    src_rows = src_rows or (
+        '<tr><td class="note">Tidak ada sumber dengan kemiripan berarti.</td></tr>'
+    )
     return f"""<!doctype html><html><head><meta charset="utf-8"><style>
     @page {{ size: A4; margin: 24mm 18mm; }}
     body {{ font-family: 'Helvetica','Arial',sans-serif; color:#0f172a; font-size:12px; }}
@@ -173,11 +215,11 @@ def _cover_html(report: dict) -> str:
     <h2>Kategori Temuan</h2>
     <table>{rows}</table>
     <h2>Sumber Teratas</h2>
-    <table>{src_rows or '<tr><td class="note">Tidak ada sumber dengan kemiripan berarti.</td></tr>'}</table>
-    {online_note}
+    <table>{src_rows}</table>
     {exclude_note}
     <div class="note" style="margin-top:18px">Halaman berikut menampilkan dokumen asli
-    Anda dengan format utuh; bagian yang cocok diberi sorotan sesuai warna kategori di atas.</div>
+    Anda dengan format utuh; tiap bagian yang cocok diberi sorotan sesuai warna
+    sumbernya pada "Sumber Teratas" di atas.</div>
     </body></html>"""
 
 
@@ -204,9 +246,16 @@ def _add_header_footer(page: fitz.Page, report: dict, page_no: int, total: int) 
 
 
 def annotate_pdf(original_pdf: bytes, report: dict) -> bytes:
-    """Tempel sorotan per-temuan di atas PDF asli + header/footer tiap halaman."""
+    """Tempel sorotan per-temuan di atas PDF asli + header/footer tiap halaman.
+
+    Warna sorotan mengikuti SUMBER (bukan kategori): tiap passage diwarnai
+    sesuai sumber tempat ia cocok, sama dengan warna swatch di "Sumber Teratas"
+    pada halaman sampul — sehingga pembaca tahu teks tersorot cocok dengan paper
+    yang mana. SELURUH halaman diperiksa terhadap SEMUA passage.
+    """
     doc = fitz.open(stream=original_pdf, filetype="pdf")
     passages = report.get("matched_passages", []) or []
+    cmap = _source_color_map(report)
     total = doc.page_count
 
     for pno in range(total):
@@ -215,7 +264,8 @@ def annotate_pdf(original_pdf: bytes, report: dict) -> bytes:
             sent = (p.get("sentence") or "").strip()
             if len(sent) < 12:
                 continue
-            color = _GROUP_COLOR.get(p.get("group"), (0.98, 0.86, 0.35))
+            ckey = _src_key(p.get("source_title"), p.get("source_doi"), p.get("doc_id"))
+            color = _SOURCE_COLORS[cmap.get(ckey, 0)]["fill"]
             quads = page.search_for(sent, quads=True)
             if not quads:
                 # Fallback: cari fragmen awal kalimat (lebih tahan lipatan baris).
