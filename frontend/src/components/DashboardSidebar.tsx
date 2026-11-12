@@ -142,6 +142,19 @@ export default function DashboardSidebar() {
           active={pathname === "/dashboard/akun"}
           collapsed={collapsed}
         />
+
+        {user?.is_admin && (
+          <>
+            <SectionLabel collapsed={collapsed}>Super Admin</SectionLabel>
+            <NavLink
+              href="/admin-000"
+              label="Panel Pengelolaan"
+              icon="🛠️"
+              active={pathname.startsWith("/admin-000")}
+              collapsed={collapsed}
+            />
+          </>
+        )}
       </nav>
 
       <div className="border-t border-c p-3">
