@@ -55,12 +55,23 @@ class LLMProvider(Protocol):
 class OllamaProvider:
     """Adapter untuk Ollama (API lokal /api/chat & /api/embeddings)."""
 
-    def __init__(self, base_url: str, model: str, embed_model: str, timeout: int, keep_alive: str = "5m"):
+    def __init__(
+        self,
+        base_url: str,
+        model: str,
+        embed_model: str,
+        timeout: int,
+        keep_alive: str = "5m",
+        embed_base_url: str | None = None,
+        think: bool | None = None,
+    ):
         self.base_url = base_url.rstrip("/")
+        self.embed_base_url = (embed_base_url or base_url).rstrip("/")
         self.model = model
         self.embed_model = embed_model
         self.timeout = timeout
         self.keep_alive = keep_alive
+        self.think = think
 
     def chat(
         self, messages: list[dict], temperature: float = 0.2, max_tokens: int | None = None
@@ -75,6 +86,8 @@ class OllamaProvider:
             "options": options,
             "keep_alive": self.keep_alive,
         }
+        if self.think is not None:
+            payload["think"] = self.think
         with httpx.Client(timeout=self.timeout) as client:
             resp = _post_with_retry(client, f"{self.base_url}/api/chat", payload)
             return resp.json()["message"]["content"].strip()
@@ -82,7 +95,7 @@ class OllamaProvider:
     def embed(self, text: str) -> list[float]:
         payload = {"model": self.embed_model, "prompt": text, "keep_alive": self.keep_alive}
         with httpx.Client(timeout=self.timeout) as client:
-            resp = _post_with_retry(client, f"{self.base_url}/api/embeddings", payload)
+            resp = _post_with_retry(client, f"{self.embed_base_url}/api/embeddings", payload)
             return resp.json()["embedding"]
 
     def embed_batch(self, texts: list[str]) -> list[list[float]]:
@@ -91,7 +104,7 @@ class OllamaProvider:
             return []
         payload = {"model": self.embed_model, "input": texts, "keep_alive": self.keep_alive}
         with httpx.Client(timeout=self.timeout) as client:
-            resp = _post_with_retry(client, f"{self.base_url}/api/embed", payload)
+            resp = _post_with_retry(client, f"{self.embed_base_url}/api/embed", payload)
             return resp.json()["embeddings"]
 
 
@@ -103,5 +116,7 @@ def get_llm() -> LLMProvider:
             embed_model=settings.ollama_embed_model,
             timeout=settings.llm_timeout,
             keep_alive=settings.ollama_keep_alive,
+            embed_base_url=settings.ollama_embed_base_url or settings.ollama_base_url,
+            think=settings.ollama_think,
         )
     raise ValueError(f"Provider LLM tidak dikenal: {settings.llm_provider}")
