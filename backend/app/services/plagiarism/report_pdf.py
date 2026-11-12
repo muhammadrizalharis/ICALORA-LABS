@@ -258,14 +258,32 @@ def annotate_pdf(original_pdf: bytes, report: dict) -> bytes:
     cmap = _source_color_map(report)
     total = doc.page_count
 
+    # Dedup passage berdasarkan (kalimat, sumber) agar tidak memproses kalimat
+    # identik berulang kali pada dokumen besar.
+    seen: set[tuple[str, int]] = set()
+    items: list[tuple[str, str, tuple]] = []  # (sentence, probe_lower, fill_color)
+    for p in passages:
+        sent = (p.get("sentence") or "").strip()
+        if len(sent) < 12:
+            continue
+        ckey = _src_key(p.get("source_title"), p.get("source_doi"), p.get("doc_id"))
+        cidx = cmap.get(ckey, 0)
+        dedup = (sent, cidx)
+        if dedup in seen:
+            continue
+        seen.add(dedup)
+        color = _SOURCE_COLORS[cidx]["fill"]
+        items.append((sent, sent[:60].lower(), color))
+
     for pno in range(total):
         page = doc[pno]
-        for p in passages:
-            sent = (p.get("sentence") or "").strip()
-            if len(sent) < 12:
+        # Pra-filter murah: ambil teks halaman sekali, lewati search_for untuk
+        # kalimat yang jelas tidak ada di halaman ini. Ini membuat anotasi tetap
+        # cepat walau dokumen ratusan halaman dengan puluhan ribu passage.
+        page_text = page.get_text("text").lower()
+        for sent, probe, color in items:
+            if probe and probe not in page_text:
                 continue
-            ckey = _src_key(p.get("source_title"), p.get("source_doi"), p.get("doc_id"))
-            color = _SOURCE_COLORS[cmap.get(ckey, 0)]["fill"]
             quads = page.search_for(sent, quads=True)
             if not quads:
                 # Fallback: cari fragmen awal kalimat (lebih tahan lipatan baris).

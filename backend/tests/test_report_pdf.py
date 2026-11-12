@@ -54,6 +54,35 @@ def test_annotate_highlights_every_page_not_just_first():
     assert per_page[2] > 0
 
 
+def test_annotate_no_passage_cap_large_document():
+    """Dokumen besar: TIAP halaman dengan kecocokan harus tersorot, walau
+    jumlah passage jauh melebihi batas lama (regresi: cap 50/5000 membuat
+    halaman akhir luput pada naskah puluhan/ratusan halaman)."""
+    n_pages = 80
+    sentences = [
+        f"Unique analytical passage number {i} describing a distinct finding here."
+        for i in range(n_pages)
+    ]
+    pdf = _make_pdf([f"Page {i}. {sentences[i]}" for i in range(n_pages)])
+    report = {
+        "sources": [{"title": "Src", "doi": "10.1/s", "doc_id": None, "similarity": 90}],
+        "matched_passages": [
+            {"sentence": s, "source_title": "Src", "source_doi": "10.1/s", "doc_id": None}
+            for s in sentences
+        ],
+        "report_id": "BIG",
+    }
+    out = annotate_pdf(pdf, report)
+    doc = fitz.open(stream=out, filetype="pdf")
+    highlighted_pages = sum(
+        1 for pno in range(doc.page_count)
+        if any(a.type[0] == 8 for a in doc[pno].annots())
+    )
+    doc.close()
+    # Setiap halaman memuat satu passage unik → semua halaman tersorot.
+    assert highlighted_pages == n_pages
+
+
 def test_annotate_colors_by_source():
     """Tiap sumber memakai warna berbeda, bukan warna kategori seragam."""
     s_a = "The analytical design follows a structured step by step workflow."

@@ -110,15 +110,10 @@ _GROUP_WEIGHT = {
     "sumber_terkredit": 0.0,
 }
 
-# Batas teks dokumen yang disimpan untuk tampilan "Dokumen dengan Sorotan".
-# Cukup untuk naskah panjang (sampai ~40 halaman) agar SELURUH halaman — bukan
-# hanya halaman awal — ikut tersorot, tanpa membengkakkan riwayat (jsonb).
-_MAX_DOC_DISPLAY = 300_000
-# Batas jumlah passage yang dikembalikan. Harus mencakup SEMUA kalimat yang
-# cocok (bukan hanya ~50 teratas), jika tidak sorotan berhenti di halaman awal
-# karena passage sisanya terpotong. Dokumen akademik jarang > beberapa ribu
-# kalimat, jadi batas ini praktis tak pernah menyunat kecocokan nyata.
-_MAX_PASSAGES = 5_000
+# TANPA BATAS: seluruh teks dokumen disimpan dan SEMUA passage yang cocok
+# dikembalikan, berapa pun panjang dokumennya (puluhan/ratusan halaman).
+# Membatasi akan membuat sorotan berhenti di halaman awal pada dokumen panjang,
+# jadi tidak ada cap — setiap halaman yang benar-benar mirip wajib tersorot.
 
 
 def _classify_match(
@@ -492,7 +487,7 @@ def _chunk_match(
         "weighted_index": weighted_index,
         "matched_sentences": len(matched),
         "total_sentences": len(sentences),
-        "matched_passages": matched[:_MAX_PASSAGES],
+        "matched_passages": matched,
         "match_groups": match_groups,
         "source_percent": source_percent,
         "excluded_sources": excluded_sources,
@@ -924,8 +919,8 @@ def check_plagiarism(
         "total_sentences": chunk["total_sentences"],
         "matched_passages": chunk["matched_passages"],
         "match_groups": chunk["match_groups"],
-        "document_text": doc[:_MAX_DOC_DISPLAY],
-        "document_truncated": len(doc) > _MAX_DOC_DISPLAY,
+        "document_text": doc,
+        "document_truncated": False,
         "word_count": wc,
         "char_count": cc,
         "sources": sources,
