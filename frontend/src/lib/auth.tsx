@@ -27,6 +27,7 @@ interface AuthState {
   adminEnabled: boolean;
   emailEnabled: boolean;
   historyRetentionDays: number;
+  maintenanceMode: boolean;
   refresh: () => Promise<void>;
   adminLogin: (password: string) => Promise<boolean>;
   changeAdminPassword: (currentPassword: string, newPassword: string) => Promise<string | null>;
@@ -44,6 +45,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [adminEnabled, setAdminEnabled] = useState(false);
   const [emailEnabled, setEmailEnabled] = useState(false);
   const [historyRetentionDays, setHistoryRetentionDays] = useState(3);
+  const [maintenanceMode, setMaintenanceMode] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -55,6 +57,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setEmailEnabled(Boolean(d.email_enabled));
       if (typeof d.history_retention_days === "number")
         setHistoryRetentionDays(d.history_retention_days);
+      setMaintenanceMode(Boolean(d.maintenance_mode));
     } catch {
       setUser(null);
     } finally {
@@ -144,7 +147,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthCtx.Provider
-      value={{ loading, user, googleEnabled, adminEnabled, emailEnabled, historyRetentionDays, refresh, adminLogin, changeAdminPassword, passwordLogin, resetPassword, logout }}
+      value={{ loading, user, googleEnabled, adminEnabled, emailEnabled, historyRetentionDays, maintenanceMode, refresh, adminLogin, changeAdminPassword, passwordLogin, resetPassword, logout }}
     >
       {children}
     </AuthCtx.Provider>
