@@ -4,6 +4,7 @@ import { useState } from "react";
 import { apiPost } from "@/lib/api";
 import { useJobLauncher } from "@/lib/useJobs";
 import { jobTitle } from "@/lib/jobs";
+import TextInput from "@/components/TextInput";
 
 export default function ResumeTool() {
   const [info, setInfo] = useState("");
@@ -21,12 +22,11 @@ export default function ResumeTool() {
 
   return (
     <div className="space-y-4">
-      <textarea
+      <TextInput
         value={info}
-        onChange={(e) => setInfo(e.target.value)}
+        onChange={setInfo}
         rows={8}
         placeholder="Masukkan data Anda: nama, kontak, pendidikan, pengalaman, keahlian, dsb. (bebas, satu per baris)"
-        className="w-full rounded-lg border border-c surface px-3 py-2 text-sm focus:border-[color:var(--brand)] focus:outline-none"
       />
       <input
         value={role}

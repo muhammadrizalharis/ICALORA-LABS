@@ -48,11 +48,35 @@ def _bibtex_key(title: str | None, year: int | None, doc_id: int) -> str:
     return f"{base or 'ref'}{year or ''}_{doc_id}"
 
 
+# Nama tampilan sumber korpus (alih-alih `.upper()` yang menghasilkan "ARXIV."
+# sebagai nama jurnal/kontainer — tidak baku untuk gaya sitasi apa pun).
+_SOURCE_DISPLAY = {
+    "arxiv": "arXiv",
+    "oa": "OA",
+    "pubmed": "PubMed",
+    "pmc": "PubMed Central",
+    "europepmc": "Europe PMC",
+    "crossref": "Crossref",
+    "core": "CORE",
+    "doaj": "DOAJ",
+    "openalex": "OpenAlex",
+    "semanticscholar": "Semantic Scholar",
+    "unpaywall": "Unpaywall",
+}
+
+
+def _source_display(source: str | None) -> str:
+    s = (source or "").strip()
+    if not s:
+        return "Sumber korpus"
+    return _SOURCE_DISPLAY.get(s.lower(), s.replace("_", " ").title())
+
+
 def _format_apa(title: str | None, year: int | None, doi: str | None, source: str) -> str:
     y = f"({year})" if year else "(n.d.)"
     t = (title or "[Judul tidak tersedia]").rstrip(".")
     doi_part = f" https://doi.org/{doi}" if doi else ""
-    return f"{y}. {t}. {source.upper()}.{doi_part}".strip()
+    return f"{y}. {t}. {_source_display(source)}.{doi_part}".strip()
 
 
 def _format_bibtex(
@@ -75,28 +99,28 @@ def _format_ieee(title: str | None, year: int | None, doi: str | None, source: s
     t = (title or "[Judul tidak tersedia]").rstrip(".")
     y = f", {year}" if year else ""
     doi_part = f", doi: {doi}" if doi else ""
-    return f'"{t}," {source.upper()}{y}{doi_part}.'
+    return f'"{t}," {_source_display(source)}{y}{doi_part}.'
 
 
 def _format_mla(title: str | None, year: int | None, doi: str | None, source: str) -> str:
     t = (title or "[Judul tidak tersedia]").rstrip(".")
     y = f", {year}" if year else ""
     doi_part = f", https://doi.org/{doi}" if doi else ""
-    return f'"{t}." {source.upper()}{y}{doi_part}.'
+    return f'"{t}." {_source_display(source)}{y}{doi_part}.'
 
 
 def _format_harvard(title: str | None, year: int | None, doi: str | None, source: str) -> str:
     head = f"{year}." if year else "n.d."
     t = (title or "[Judul tidak tersedia]").rstrip(".")
     doi_part = f" Available at: https://doi.org/{doi}" if doi else ""
-    return f"{head} '{t}', {source.upper()}.{doi_part}".strip()
+    return f"{head} '{t}', {_source_display(source)}.{doi_part}".strip()
 
 
 def _format_vancouver(title: str | None, year: int | None, doi: str | None, source: str) -> str:
     t = (title or "[Judul tidak tersedia]").rstrip(".")
-    y = f" {year}" if year else ""
+    y = f" {year}." if year else ""
     doi_part = f" Available from: https://doi.org/{doi}" if doi else ""
-    return f"{t}. {source.upper()}.{y}.{doi_part}".strip()
+    return f"{t}. {_source_display(source)}.{y}{doi_part}".strip()
 
 
 def _format_ris(
