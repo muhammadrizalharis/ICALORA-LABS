@@ -64,6 +64,7 @@ class OllamaProvider:
         keep_alive: str = "5m",
         embed_base_url: str | None = None,
         think: bool | None = None,
+        embed_keep_alive: str | None = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.embed_base_url = (embed_base_url or base_url).rstrip("/")
@@ -71,7 +72,14 @@ class OllamaProvider:
         self.embed_model = embed_model
         self.timeout = timeout
         self.keep_alive = keep_alive
+        self.embed_keep_alive = embed_keep_alive or keep_alive
         self.think = think
+
+    def _embed_payload(self, **fields) -> dict:
+        payload = {"model": self.embed_model, **fields}
+        if self.embed_keep_alive.strip().lower() != "server":
+            payload["keep_alive"] = self.embed_keep_alive
+        return payload
 
     def chat(
         self, messages: list[dict], temperature: float = 0.2, max_tokens: int | None = None
@@ -93,7 +101,7 @@ class OllamaProvider:
             return resp.json()["message"]["content"].strip()
 
     def embed(self, text: str) -> list[float]:
-        payload = {"model": self.embed_model, "prompt": text, "keep_alive": self.keep_alive}
+        payload = self._embed_payload(prompt=text)
         with httpx.Client(timeout=self.timeout) as client:
             resp = _post_with_retry(client, f"{self.embed_base_url}/api/embeddings", payload)
             return resp.json()["embedding"]
@@ -102,7 +110,7 @@ class OllamaProvider:
         """Embed banyak teks dalam satu panggilan (GPU) via /api/embed."""
         if not texts:
             return []
-        payload = {"model": self.embed_model, "input": texts, "keep_alive": self.keep_alive}
+        payload = self._embed_payload(input=texts)
         with httpx.Client(timeout=self.timeout) as client:
             resp = _post_with_retry(client, f"{self.embed_base_url}/api/embed", payload)
             return resp.json()["embeddings"]
@@ -118,5 +126,6 @@ def get_llm() -> LLMProvider:
             keep_alive=settings.ollama_keep_alive,
             embed_base_url=settings.ollama_embed_base_url or settings.ollama_base_url,
             think=settings.ollama_think,
+            embed_keep_alive=settings.ollama_embed_keep_alive,
         )
     raise ValueError(f"Provider LLM tidak dikenal: {settings.llm_provider}")
