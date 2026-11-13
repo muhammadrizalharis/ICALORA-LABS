@@ -1,3 +1,5 @@
+import pytest
+
 from app.services.ai_detector import (
     _bigram_repetition,
     _blend,
@@ -8,6 +10,14 @@ from app.services.ai_detector import (
     _statistical_signals,
     _type_token_ratio,
 )
+
+
+@pytest.fixture(autouse=True)
+def _no_calibration(monkeypatch):
+    # Uji logika blend dengan skor mentah, terlepas dari kalibrasi di model terpasang.
+    import app.services.ai_detector as det
+
+    monkeypatch.setattr(det, "_CALIB", False)
 
 
 def test_sentences_splits_on_terminators():
@@ -249,3 +259,52 @@ def test_segments_prefer_paragraph_boundaries():
     assert len(spans) == 3
     for a, b in spans:
         assert text[a:b].strip() == para
+
+
+def test_short_text_warns_and_low_reliability(monkeypatch):
+    import app.services.ai_detector as det
+
+    monkeypatch.setattr(det, "_trained_probability", lambda sig: 90.0)
+    monkeypatch.setattr(det, "_emb_trained_probability", lambda sig, txt: 95.0)
+    monkeypatch.setattr(det, "_llm_analysis_timed", lambda txt: {"prob": 90.0, "sentences": []})
+    text = (
+        "Furthermore, it is important to note that the rapid development of technology "
+        "has transformed the way we live, and this study is a comprehensive analysis "
+        "of these changes in the modern world."
+    )
+    r = det.detect_ai(text)
+    assert r["reliability"] == "rendah"
+    assert r["needs_review"] is True
+    assert any("pendek" in w for w in r["warnings"])
+    assert r["report"]["words_analyzed"] < 80
+    assert "model_embedding" in r["report"]["components"]
+
+
+def test_detect_language():
+    import app.services.ai_detector as det
+
+    id_text = "Penelitian ini dilakukan dengan metode yang tepat untuk data."
+    assert det._detect_language(id_text) == "id"
+    assert det._detect_language("This is a study of the effect of the method on data.") == "en"
+    assert det._detect_language("Dies ist eine Studie über die Wirkung der Methode.") == "other"
+
+
+def test_report_has_model_info(monkeypatch):
+    import app.services.ai_detector as det
+
+    monkeypatch.setattr(det, "_trained_probability", lambda sig: 10.0)
+    monkeypatch.setattr(det, "_emb_trained_probability", lambda sig, txt: 5.0)
+    r = det.detect_ai(_long_doc(15))
+    assert r["reliability"] == "normal"
+    assert "score_definition" in r["report"]
+    assert isinstance(r["report"]["model"], dict)
+
+
+def test_calibration_applied_monotonic(monkeypatch):
+    import app.services.ai_detector as det
+
+    monkeypatch.setattr(det, "_CALIB", (2.0, -0.5))
+    lo, hi = det._calibrate(40.0), det._calibrate(80.0)
+    assert lo < 40.0 < 80.0 < hi
+    monkeypatch.setattr(det, "_CALIB", False)
+    assert det._calibrate(55.0) == 55.0

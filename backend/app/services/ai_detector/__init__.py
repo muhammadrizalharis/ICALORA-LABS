@@ -260,12 +260,61 @@ _ID_MARKERS = re.compile(
 )
 
 
-def _is_indonesian(text: str) -> bool:
+_EN_MARKERS = re.compile(
+    r"\b(the|of|and|to|in|is|that|for|with|as|on|are|this|by|be|from|which|"
+    r"it|an|or|was|were|has|have)\b",
+    re.IGNORECASE,
+)
+
+
+def _marker_ratio(pattern: re.Pattern, text: str) -> float:
     sample = text[:3000]
     n = len(_WORD_RE.findall(sample))
-    return n > 0 and len(_ID_MARKERS.findall(sample)) / n >= 0.06
+    return len(pattern.findall(sample)) / n if n else 0.0
+
+
+def _is_indonesian(text: str) -> bool:
+    return _marker_ratio(_ID_MARKERS, text) >= 0.06
+
+
+def _detect_language(text: str) -> str:
+    """'id', 'en', atau 'other' (bahasa di luar data latih → hasil kurang andal)."""
+    if _is_indonesian(text):
+        return "id"
+    if _marker_ratio(_EN_MARKERS, text) >= 0.06:
+        return "en"
+    return "other"
 _HIGH = 70.0
 _LOW = 30.0
+_CALIB = None  # None=belum dimuat, False=tidak ada, else (a, b, ambang_ai, ambang_campuran)
+
+
+def _load_calib():
+    global _CALIB
+    if _CALIB is None:
+        try:
+            c = json.loads(_model.EMB_MODEL_PATH.read_text(encoding="utf-8"))["meta"]["calibration"]
+            _CALIB = (float(c["a"]), float(c["b"]),
+                      float(c.get("threshold_ai", _HIGH)), float(c.get("threshold_mixed", 45.0)))
+        except Exception:  # noqa: BLE001
+            _CALIB = False
+    return _CALIB
+
+
+def _thresholds() -> tuple[float, float]:
+    """Ambang verdict (AI, campuran); dipilih di set validasi dengan batas FPR."""
+    c = _load_calib()
+    return (c[2], c[3]) if c and len(c) > 2 else (_HIGH, 45.0)
+
+
+def _calibrate(score: float) -> float:
+    """Kalibrasi Platt seimbang (dipasang evaluate.py di meta model)."""
+    c = _load_calib()
+    if not c:
+        return score
+    a, b = c[0], c[1]
+    p = min(max(score / 100.0, 1e-4), 1 - 1e-4)
+    return 100.0 / (1.0 + math.exp(-(a * math.log(p / (1 - p)) + b)))
 
 
 def _blend(
@@ -290,7 +339,7 @@ def _blend(
     if emb_pct is not None:
         components.append((emb_pct, _W_EMB))
     total_w = sum(w for _v, w in components)
-    final = sum(v * w for v, w in components) / total_w
+    final = _calibrate(sum(v * w for v, w in components) / total_w)
     final = round(max(0.0, min(100.0, final)), 1)
 
     needs_review = (
@@ -302,11 +351,12 @@ def _blend(
         )
     )
 
+    thr_ai, thr_mix = _thresholds()
     if needs_review:
         verdict = "campuran / perlu tinjauan manual"
-    elif final >= 70:
+    elif final >= thr_ai:
         verdict = "kemungkinan besar AI"
-    elif final >= 45:
+    elif final >= thr_mix:
         verdict = "campuran / tidak pasti"
     else:
         verdict = "kemungkinan besar manusia"
@@ -325,11 +375,97 @@ _SHARE_MIN = 15.0
 _SEG_TEXT_CAP = 1500
 
 _NOTE = (
-    "Analisis ini menggabungkan sinyal statistik linguistik dan model bahasa "
-    "untuk menilai kemungkinan teks dihasilkan AI. Sesuai standar alat deteksi "
-    "akademik profesional, laporan ini merupakan bukti pendukung yang kuat dan "
-    "ditinjau bersama konteks karya — bukan satu-satunya dasar keputusan akhir."
+    "Skor adalah estimasi statistik dari pola teks, bukan bukti kepengarangan. "
+    "Tulisan manusia yang sangat formal atau generik dapat ditandai, dan teks AI "
+    "yang disunting dapat lolos. Gunakan sebagai sinyal awal yang ditinjau bersama "
+    "konteks (draf, riwayat revisi, rujukan, wawancara penulis) — bukan satu-satunya "
+    "dasar keputusan."
 )
+
+
+def _score_definition() -> str:
+    thr_ai, thr_mix = _thresholds()
+    cal = (
+        "dikalibrasi (Platt, prior AI:manusia 50:50) pada set validasi terpisah"
+        if _load_calib() else "belum dikalibrasi"
+    )
+    return (
+        f"ai_probability: skor gabungan 0-100 (model embedding dominan), {cal}. "
+        f"Verdict AI bila ≥ {thr_ai:g}, campuran bila ≥ {thr_mix:g} — ambang dipilih "
+        "pada data validasi dengan batas false-positive rate. ai_share: persentase "
+        f"kata pada segmen dengan skor ≥ {thr_ai:g}."
+    )
+_SHORT_WORDS = 80
+_MODEL_INFO: dict | None = None
+
+
+def _model_info() -> dict:
+    """Ringkasan versi & validasi model embedding (untuk transparansi laporan)."""
+    global _MODEL_INFO
+    if _MODEL_INFO is None:
+        info: dict = {}
+        try:
+            meta = json.loads(_model.EMB_MODEL_PATH.read_text(encoding="utf-8")).get("meta", {})
+            val = meta.get("validation") or {}
+            info = {
+                "kind": meta.get("kind"),
+                "trained_at": meta.get("trained_at"),
+                "training_samples": meta.get("n_human", 0) + meta.get("n_ai", 0) or None,
+                "generators": meta.get("generators"),
+                "validation_accuracy": val.get("accuracy"),
+                "validation_fpr": val.get("false_positive_rate"),
+                "calibrated": bool(meta.get("calibration")),
+                "calibration_test": (meta.get("calibration") or {}).get("test"),
+            }
+        except Exception:  # noqa: BLE001
+            info = {}
+        _MODEL_INFO = info
+    return _MODEL_INFO
+
+
+def _annotate(res: dict, n_words: int, language: str) -> dict:
+    """Tambahkan peringatan, tingkat keandalan, dan metadata laporan."""
+    warnings: list[str] = []
+    if n_words < _SHORT_WORDS:
+        warnings.append(
+            f"Teks pendek ({n_words} kata < {_SHORT_WORDS}): pola statistik belum stabil, "
+            "hasil kurang andal."
+        )
+    if language == "other":
+        warnings.append(
+            "Bahasa teks tidak terdeteksi sebagai Indonesia/Inggris; model hanya "
+            "dilatih untuk dua bahasa tersebut."
+        )
+    if res.get("llm_probability") is None and language == "en":
+        warnings.append("Penilaian LLM tidak tersedia (timeout/nonaktif); skor dari model lain.")
+    low = n_words < _SHORT_WORDS or language == "other"
+    reliability = "rendah" if low else "normal"
+    if reliability == "rendah" and res.get("verdict") == "kemungkinan besar AI":
+        res["needs_review"] = True
+    components = [
+        name for key, name in (
+            ("stat_probability", "statistik"),
+            ("llm_probability", "llm"),
+            ("model_probability", "model_6_fitur"),
+            ("emb_model_probability", "model_embedding"),
+        ) if res.get(key) is not None
+    ]
+    res["warnings"] = warnings
+    res["reliability"] = reliability
+    res["report"] = {
+        "words_analyzed": n_words,
+        "segments": len(res.get("segments") or []) or 1,
+        "language": language,
+        "supported_languages": ["id", "en"],
+        "components": components,
+        "llm_skipped_reason": (
+            "LLM tidak dipakai untuk teks Indonesia (terukur sering salah menuduh tulisan "
+            "akademik manusia)." if language == "id" else None
+        ),
+        "score_definition": _score_definition(),
+        "model": _model_info(),
+    }
+    return res
 
 
 def _segment_spans(text: str) -> list[tuple[int, int]]:
@@ -408,9 +544,10 @@ def _flagged(sentences: list[str], text: str) -> list[str]:
 
 
 def _seg_label(score: float) -> str:
-    if score >= _HIGH:
+    thr_ai, thr_mix = _thresholds()
+    if score >= thr_ai:
         return "ai"
-    if score >= 45:
+    if score >= thr_mix:
         return "mixed"
     return "human"
 
@@ -430,10 +567,10 @@ def detect_ai(text: str) -> dict:
     signals = _statistical_signals(text)
     stat_pct = signals["stat_score"] * 100
     spans = _segment_spans(text)
-    language = "id" if _is_indonesian(text) else "en"
+    language = _detect_language(text)
 
     def judge(sample: str) -> dict:
-        if language == "id":
+        if language != "en":
             return {"prob": None, "sentences": []}
         return _llm_analysis_timed(sample)
 
@@ -443,7 +580,7 @@ def detect_ai(text: str) -> dict:
         analysis = judge(text)
         llm_pct = analysis["prob"]
         final, verdict, needs_review = _blend(stat_pct, llm_pct, model_pct, emb_pct)
-        return {
+        return _annotate({
             "ai_probability": final,
             "verdict": verdict,
             "needs_review": needs_review,
@@ -457,7 +594,7 @@ def detect_ai(text: str) -> dict:
             "signals": signals,
             "flagged_sentences": _flagged(analysis["sentences"], text),
             "note": _NOTE,
-        }
+        }, len(words), language)
 
     seg_texts = [text[a:b].strip() for a, b in spans]
     seg_sigs = [_statistical_signals(t) for t in seg_texts]
@@ -476,7 +613,7 @@ def detect_ai(text: str) -> dict:
     final, verdict, needs_review = _blend(stat_pct, llm_pct, model_pct, emb_pct)
 
     total_w = sum(seg_words)
-    ai_w = sum(w for w, sc in zip(seg_words, seg_scores, strict=True) if sc >= _HIGH)
+    ai_w = sum(w for w, sc in zip(seg_words, seg_scores, strict=True) if sc >= _thresholds()[0])
     ai_share = round(100.0 * ai_w / total_w, 1) if total_w else 0.0
     if verdict == "kemungkinan besar manusia" and ai_share >= _SHARE_MIN:
         verdict = "sebagian terindikasi AI"
@@ -498,7 +635,7 @@ def detect_ai(text: str) -> dict:
             "text": t[:_SEG_TEXT_CAP] if label != "human" else None,
         })
 
-    return {
+    return _annotate({
         "ai_probability": final,
         "verdict": verdict,
         "needs_review": needs_review,
@@ -512,4 +649,4 @@ def detect_ai(text: str) -> dict:
         "signals": signals,
         "flagged_sentences": _flagged(analysis["sentences"], text),
         "note": _NOTE,
-    }
+    }, len(words), language)
