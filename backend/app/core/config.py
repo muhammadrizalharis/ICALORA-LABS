@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     # (default Ollama), "0" = langsung dilepas setelah tiap panggilan (hemat VRAM
     # saat server dibagi 24/7), "-1" = selalu residen. Dapat diubah via .env.
     ollama_keep_alive: str = Field(default="5m")
+    # keep_alive khusus embedding. Kosong = ikut ollama_keep_alive. "server" = tidak
+    # dikirim, sehingga mengikuti OLLAMA_KEEP_ALIVE instance embedding (mis. bge-m3
+    # yang sudah di-pin -1 oleh pemiliknya, agar tidak ikut terlepas).
+    ollama_embed_keep_alive: str = Field(default="")
 
     # Ingest korpus
     contact_email: str = Field(default="")  # mailto polite-pool OpenAlex/Crossref
