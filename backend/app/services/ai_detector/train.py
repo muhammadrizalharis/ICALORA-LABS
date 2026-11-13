@@ -50,6 +50,7 @@ from app.services.ai_detector.model import (
 _WORD_MIN, _WORD_MAX = 80, 400
 _CACHE_PATH = Path(__file__).resolve().parent / "train_features.jsonl"
 _EMB_CACHE_PATH = Path(__file__).resolve().parent / "train_emb.jsonl"
+_USED_IDS_PATH = Path(__file__).resolve().parent / "train_used_ids.json"
 _NUM_CTX = 4096
 _NUM_PREDICT = int(os.environ.get("ICALORA_NUM_PREDICT", "300"))
 
@@ -1000,6 +1001,7 @@ def cmd_stream_emb(args) -> None:
     model.meta["generators"] = sorted({m for _e, m in lanes})
     model.meta["ai_per_generator"] = per_lane
     model.meta["humanize_frac"] = args.humanize_frac
+    model.meta["trained_at"] = time.strftime("%Y-%m-%d", time.gmtime())
 
     if args.dry_run:
         print("[stream] DRY-RUN: model TIDAK disimpan.", flush=True)
@@ -1010,6 +1012,8 @@ def cmd_stream_emb(args) -> None:
             print(f"[stream] cadangan model lama → {bak.name}", flush=True)
         save(model, EMB_MODEL_PATH)
         print(f"[stream] tersimpan → {EMB_MODEL_PATH.name}", flush=True)
+        # Simpan id dokumen manusia yang dipakai agar test set evaluasi bebas kebocoran.
+        _USED_IDS_PATH.write_text(json.dumps(sorted(used)), encoding="utf-8")
 
     print("[stream] === VALIDASI (held-out) ===", flush=True)
     print(f"  akurasi            : {metrics['accuracy']}")

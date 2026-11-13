@@ -7,3 +7,4 @@ __pycache__/
 *.egg-info/
 app/services/ai_detector/train_features.jsonl
 app/services/ai_detector/train_emb.jsonl
+app/services/ai_detector/train_used_ids.json

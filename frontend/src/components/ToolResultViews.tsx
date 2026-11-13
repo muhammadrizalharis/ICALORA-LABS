@@ -197,6 +197,8 @@ function AiDetectorView({ result }: { result: Record<string, unknown> }) {
     ? (result.flagged_sentences as string[])
     : [];
   const signals = (result.signals as Record<string, number>) ?? {};
+  const warnings = Array.isArray(result.warnings) ? (result.warnings as string[]) : [];
+  const report = (result.report as AiReport | undefined) ?? null;
   const components: [string, unknown][] = [
     ["Statistik", result.stat_probability],
     ["Model Bahasa", result.llm_probability],
@@ -236,6 +238,14 @@ function AiDetectorView({ result }: { result: Record<string, unknown> }) {
         </div>
       </div>
 
+      {warnings.length > 0 && (
+        <ul className="space-y-1 rounded-lg border border-amber-400/40 bg-amber-400/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+          {warnings.map((w, i) => (
+            <li key={i}>⚠ {w}</li>
+          ))}
+        </ul>
+      )}
+
       {segments.length > 1 && <AiSegmentMap segments={segments} />}
 
       {Object.keys(signals).length > 0 && (
@@ -270,10 +280,74 @@ function AiDetectorView({ result }: { result: Record<string, unknown> }) {
         </Section>
       )}
 
+      {report && <AiReportDetails report={report} />}
+
       {typeof result.note === "string" && (
         <p className="text-xs leading-relaxed text-neutral-400">{result.note}</p>
       )}
     </div>
+  );
+}
+
+type AiReport = {
+  words_analyzed?: number;
+  segments?: number;
+  language?: string;
+  components?: string[];
+  llm_skipped_reason?: string | null;
+  score_definition?: string;
+  model?: {
+    trained_at?: string | null;
+    training_samples?: number | null;
+    generators?: string[] | null;
+    validation_accuracy?: number | null;
+    validation_fpr?: number | null;
+    calibrated?: boolean;
+  };
+};
+
+const LANG_LABEL: Record<string, string> = {
+  id: "Indonesia",
+  en: "Inggris",
+  other: "Lainnya (tidak didukung)",
+};
+
+function AiReportDetails({ report }: { report: AiReport }) {
+  const m = report.model ?? {};
+  const rows: [string, React.ReactNode][] = [
+    ["Bahasa", LANG_LABEL[report.language ?? ""] ?? report.language],
+    ["Kata dianalisis", report.words_analyzed?.toLocaleString("id-ID")],
+    ["Jumlah segmen", report.segments],
+    ["Komponen", report.components?.join(", ")],
+    ["Tanggal model", m.trained_at],
+    ["Data latih", m.training_samples?.toLocaleString("id-ID")],
+    ["Generator data latih", m.generators?.join(", ")],
+    [
+      "Validasi model",
+      m.validation_accuracy != null
+        ? `akurasi ${(m.validation_accuracy * 100).toFixed(1)}%, FPR ${((m.validation_fpr ?? 0) * 100).toFixed(1)}%`
+        : null,
+    ],
+    ["Skor terkalibrasi", m.calibrated === undefined ? null : m.calibrated ? "ya" : "belum"],
+  ];
+  return (
+    <details className="rounded-lg border border-c surface px-3 py-2 text-xs text-neutral-500">
+      <summary className="cursor-pointer select-none font-medium text-neutral-700 dark:text-neutral-300">
+        Detail laporan &amp; metode
+      </summary>
+      <dl className="mt-2 grid gap-x-4 gap-y-1 sm:grid-cols-[auto_1fr]">
+        {rows
+          .filter(([, v]) => v !== null && v !== undefined && v !== "")
+          .map(([k, v]) => (
+            <div key={k} className="contents">
+              <dt className="text-neutral-400">{k}</dt>
+              <dd className="text-neutral-700 dark:text-neutral-300">{v}</dd>
+            </div>
+          ))}
+      </dl>
+      {report.llm_skipped_reason && <p className="mt-2">{report.llm_skipped_reason}</p>}
+      {report.score_definition && <p className="mt-2">{report.score_definition}</p>}
+    </details>
   );
 }
 
