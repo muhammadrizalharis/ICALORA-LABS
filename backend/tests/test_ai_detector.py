@@ -147,3 +147,105 @@ def test_llm_timeout_does_not_block(monkeypatch):
     r = det._llm_analysis_timed("x")
     assert r["prob"] is None
     assert time.monotonic() - t0 < 1.0
+
+
+def _long_doc(n_sent: int) -> str:
+    sent = "Kalimat nomor {} membahas topik penelitian ini secara ringkas."
+    return " ".join(sent.format(i) for i in range(n_sent))
+
+
+def test_segment_spans_cover_text_and_merge_tail():
+    import app.services.ai_detector as det
+
+    text = _long_doc(130)  # ~1040 kata
+    spans = det._segment_spans(text)
+    assert len(spans) >= 3
+    assert spans[0][0] == 0
+    assert spans[-1][1] == len(text)
+    for (_a, b), (c, _d) in zip(spans, spans[1:], strict=False):
+        assert b <= c
+    words = [len(det._WORD_RE.findall(text[a:b])) for a, b in spans]
+    assert min(words) >= det._SEG_MIN_WORDS
+
+
+def test_short_text_single_segment():
+    import app.services.ai_detector as det
+
+    assert len(det._segment_spans(_long_doc(10))) == 1
+
+
+def test_long_doc_reports_segments_and_share(monkeypatch):
+    import app.services.ai_detector as det
+
+    text = _long_doc(130)
+    n = len(det._segment_spans(text))
+    # Segmen pertama AI kuat, sisanya manusia.
+    monkeypatch.setattr(det, "_trained_probability", lambda sig: 20.0)
+    monkeypatch.setattr(
+        det, "_emb_probabilities", lambda sigs, txts: [99.0] + [2.0] * (len(txts) - 1)
+    )
+    monkeypatch.setattr(det, "_llm_analysis_timed", lambda txt: {"prob": None, "sentences": []})
+    r = det.detect_ai(text)
+    assert len(r["segments"]) == n
+    assert r["segments"][0]["label"] == "ai"
+    assert r["segments"][0]["text"]
+    assert r["segments"][-1]["text"] is None
+    assert 0 < r["ai_share"] < 100
+    assert r["segments"][-1]["end"] == len(text)
+
+
+def test_llm_sample_is_bounded():
+    import app.services.ai_detector as det
+
+    segs = ["x" * 2000] * 50
+    sample = det._llm_sample(segs)
+    assert 0 < len(sample) <= det._LLM_SAMPLE_CHARS
+
+
+def test_is_indonesian():
+    import app.services.ai_detector as det
+
+    assert det._is_indonesian(
+        "Penelitian ini bertujuan untuk menganalisis pengaruh media sosial terhadap "
+        "prestasi belajar mahasiswa yang dilakukan dengan metode survei."
+    )
+    assert not det._is_indonesian(
+        "This study analyzes the effect of social media on the academic performance "
+        "of university students using a survey method."
+    )
+
+
+def test_llm_disagreement_alone_does_not_trigger_review():
+    # LLM 95 vs embedding 3: LLM sering menuduh teks manusia formal → bukan pemicu.
+    _final, verdict, review = _blend(30.0, 95.0, 20.0, 3.0)
+    assert review is False
+    assert verdict == "kemungkinan besar manusia"
+
+
+def test_indonesian_text_skips_llm(monkeypatch):
+    import app.services.ai_detector as det
+
+    called = []
+    monkeypatch.setattr(det, "_llm_analysis_timed", lambda txt: called.append(1) or {})
+    monkeypatch.setattr(det, "_trained_probability", lambda sig: 10.0)
+    monkeypatch.setattr(det, "_emb_trained_probability", lambda sig, txt: 5.0)
+    text = (
+        "Penelitian ini bertujuan untuk menganalisis pengaruh media sosial terhadap "
+        "prestasi belajar mahasiswa. Data dikumpulkan dengan kuesioner yang disebarkan "
+        "kepada responden dan dianalisis dengan regresi linear berganda."
+    )
+    r = det.detect_ai(text)
+    assert called == []
+    assert r["language"] == "id"
+    assert r["llm_probability"] is None
+
+
+def test_segments_prefer_paragraph_boundaries():
+    import app.services.ai_detector as det
+
+    para = _long_doc(22)  # ~176 kata (≥ 60% target)
+    text = "\n\n".join([para, para, para])
+    spans = det._segment_spans(text)
+    assert len(spans) == 3
+    for a, b in spans:
+        assert text[a:b].strip() == para

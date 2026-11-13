@@ -121,8 +121,77 @@ function num(v: unknown): number | null {
 
 /* ───────────────────────────── AI Detector ─────────────────────────────── */
 
+type AiSegment = {
+  index: number;
+  words: number;
+  ai_probability: number;
+  label: "ai" | "mixed" | "human";
+  preview: string;
+  text: string | null;
+};
+
+function AiSegmentMap({ segments }: { segments: AiSegment[] }) {
+  const [open, setOpen] = useState<number | null>(null);
+  const suspicious = segments.filter((s) => s.label !== "human");
+  return (
+    <Section
+      title={`Peta Segmen Dokumen (${segments.length} bagian)`}
+      right={
+        <span className="text-[11px] text-neutral-400">
+          merah = AI, kuning = campuran, hijau = manusia
+        </span>
+      }
+    >
+      <div className="flex h-5 w-full overflow-hidden rounded-md">
+        {segments.map((s) => (
+          <button
+            key={s.index}
+            title={`Bagian ${s.index + 1}: ${fmtPct(s.ai_probability)}% AI`}
+            onClick={() => setOpen(s.index)}
+            className="h-full border-r border-white/40 last:border-r-0"
+            style={{ flexGrow: s.words, background: toneFor(s.ai_probability) }}
+          />
+        ))}
+      </div>
+      {suspicious.length > 0 ? (
+        <ul className="mt-3 space-y-2">
+          {suspicious.map((s) => (
+            <li
+              key={s.index}
+              className="rounded-lg border-l-2 px-3 py-2 text-sm text-neutral-700 dark:text-neutral-300"
+              style={{
+                borderColor: toneFor(s.ai_probability),
+                background: `color-mix(in srgb, ${toneFor(s.ai_probability)} 6%, transparent)`,
+              }}
+            >
+              <button
+                onClick={() => setOpen(open === s.index ? null : s.index)}
+                className="mb-1 flex w-full items-center justify-between text-xs font-semibold"
+              >
+                <span>
+                  Bagian {s.index + 1} · {s.words} kata
+                </span>
+                <span style={{ color: toneFor(s.ai_probability) }}>
+                  {fmtPct(s.ai_probability)}% AI
+                </span>
+              </button>
+              <p className="whitespace-pre-line">
+                {open === s.index ? s.text ?? s.preview : `${s.preview}…`}
+              </p>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-3 text-xs text-neutral-500">Tidak ada bagian yang terindikasi AI.</p>
+      )}
+    </Section>
+  );
+}
+
 function AiDetectorView({ result }: { result: Record<string, unknown> }) {
   const prob = num(result.ai_probability);
+  const aiShare = num(result.ai_share);
+  const segments = Array.isArray(result.segments) ? (result.segments as AiSegment[]) : [];
   const verdict = (result.verdict as string) ?? "";
   const flagged = Array.isArray(result.flagged_sentences)
     ? (result.flagged_sentences as string[])
@@ -152,6 +221,9 @@ function AiDetectorView({ result }: { result: Record<string, unknown> }) {
         ) : (
           <div className="text-sm text-neutral-500">Tidak cukup teks untuk analisis.</div>
         )}
+        {aiShare !== null && (
+          <Gauge value={aiShare} label="Teks terindikasi AI" />
+        )}
         <div className="min-w-0 flex-1 space-y-3">
           {verdict && <Pill tone={tone}>{verdict}</Pill>}
           <div className="grid gap-2 sm:grid-cols-2">
@@ -163,6 +235,8 @@ function AiDetectorView({ result }: { result: Record<string, unknown> }) {
           </div>
         </div>
       </div>
+
+      {segments.length > 1 && <AiSegmentMap segments={segments} />}
 
       {Object.keys(signals).length > 0 && (
         <Section title="Sinyal Linguistik">

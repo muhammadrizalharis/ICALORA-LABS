@@ -52,3 +52,31 @@ def embed_text(
     finally:
         if own:
             client.close()
+
+
+def embed_texts(
+    texts: list[str],
+    endpoint: str | None = None,
+    batch_size: int = 16,
+) -> list[list[float] | None]:
+    """Embed banyak teks via /api/embed berbatch. Elemen None bila gagal."""
+    endpoint = endpoint or EMB_ENDPOINT
+    out: list[list[float] | None] = []
+    with httpx.Client() as client:
+        for i in range(0, len(texts), batch_size):
+            chunk = [t[:_MAX_CHARS] for t in texts[i : i + batch_size]]
+            try:
+                resp = client.post(
+                    f"{endpoint}/api/embed",
+                    json={"model": EMB_MODEL, "input": chunk},
+                    timeout=120,
+                )
+                resp.raise_for_status()
+                embs = resp.json().get("embeddings") or []
+            except Exception:  # noqa: BLE001
+                embs = []
+            for j in range(len(chunk)):
+                vec = embs[j] if j < len(embs) else None
+                ok = vec is not None and len(vec) == EMB_DIM
+                out.append([float(v) for v in vec] if ok else None)
+    return out
