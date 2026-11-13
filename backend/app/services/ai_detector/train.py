@@ -782,12 +782,56 @@ def _collect_humans_stream(target_en: int, target_id: int, client: httpx.Client,
         print(f"[stream] manusia ID terkumpul={m}", flush=True)
 
 
+_HUMANIZE_PROMPT = {
+    "en": ("Paraphrase the following text the way a student would edit AI output to "
+           "avoid detection, while keeping it suitable for an academic paper: vary "
+           "sentence length, restructure sentences, replace stock transitions and "
+           "cliches with plainer wording, and reorder some points. Keep a formal "
+           "academic register (no slang), the same meaning and the same language. "
+           "Output ONLY the rewritten text."),
+    "id": ("Parafrasekan teks berikut seperti mahasiswa menyunting tulisan AI agar "
+           "tidak terdeteksi, namun tetap layak untuk karya ilmiah: variasikan panjang "
+           "kalimat, ubah struktur kalimat, ganti frasa transisi dan klise dengan kata "
+           "yang lebih sederhana, dan ubah urutan beberapa poin. Tetap gunakan bahasa "
+           "Indonesia baku/akademik (tanpa bahasa gaul), isi dan bahasa yang sama. "
+           "Keluarkan HANYA teks hasil parafrase."),
+}
+
+
+def _humanize(client: httpx.Client, endpoint: str, model: str, text: str, lang: str,
+              rng: random.Random) -> str | None:
+    """Parafrase teks AI agar 'terdengar manusia' — tetap berlabel AI saat latih."""
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": _HUMANIZE_PROMPT[lang]},
+            {"role": "user", "content": text},
+        ],
+        "stream": False,
+        "keep_alive": "10m",
+        "think": False,
+        "options": {"temperature": rng.choice((0.8, 0.9, 1.0)),
+                    "num_predict": _NUM_PREDICT + 100, "num_ctx": _NUM_CTX},
+    }
+    try:
+        resp = client.post(f"{endpoint}/api/chat", json=payload, timeout=240)
+        resp.raise_for_status()
+        out = (resp.json()["message"]["content"] or "").strip()
+        return out if len(out.split()) >= 60 else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _generate_ai_stream(lanes: list[tuple[str, str]], target_ai: int,
                         titles_en: list[str], titles_id: list[str], id_frac: float,
                         X: list[list[float]], y: list[int], lock: threading.Lock,
-                        max_seconds: int, concurrency: int) -> int:
-    """Generate teks AI (EN + ID) via model modern, embed, simpan ke RAM. Tanpa disk."""
-    state = {"ai": 0, "ei": 0, "ii": 0}
+                        max_seconds: int, concurrency: int,
+                        humanize_frac: float = 0.0) -> int:
+    """Generate teks AI (EN + ID) via model modern, embed, simpan ke RAM. Tanpa disk.
+
+    Sebagian (humanize_frac) diparafrase agar 'terdengar manusia' namun tetap
+    berlabel AI, supaya detektor tahan terhadap teks AI yang sudah disunting."""
+    state = {"ai": 0, "ei": 0, "ii": 0, "hum": 0}
     deadline = time.time() + max_seconds
 
     def next_task() -> tuple[str, str] | None:
@@ -830,6 +874,12 @@ def _generate_ai_stream(lanes: list[tuple[str, str]], target_ai: int,
                         print(f"[stream]   worker {wid} berhenti (30 gagal beruntun)", flush=True)
                         return
                     continue
+                if humanize_frac > 0 and rng.random() < humanize_frac:
+                    h = _humanize(client, endpoint, model, txt, kind, rng)
+                    if h and (kind == "en" or _looks_indonesian(h, min_hits=5)):
+                        txt = h
+                        with lock:
+                            state["hum"] += 1
                 emb = embed_text(txt, client, EMB_ENDPOINT)
                 if emb is None:
                     fails += 1
@@ -853,6 +903,8 @@ def _generate_ai_stream(lanes: list[tuple[str, str]], target_ai: int,
         threads.append(t)
     for t in threads:
         t.join()
+    if humanize_frac > 0:
+        print(f"[stream]   diparafrase (humanized): {state['hum']}", flush=True)
     return state["ai"]
 
 
@@ -896,12 +948,25 @@ def cmd_stream_emb(args) -> None:
     lock = threading.Lock()
     print(f"[stream] generate AI modern target={args.target_ai} lanes={[m for _e, m in lanes]} "
           f"id_frac={args.id_frac}", flush=True)
-    final = _generate_ai_stream(lanes, args.target_ai, titles_en, titles_id, args.id_frac,
-                                X, y, lock, args.max_seconds, args.concurrency)
-    print(f"[stream] AI modern terkumpul={final}", flush=True)
-
-    if not args.keep_vram:
-        _unload_models(lanes)
+    # Lane dijalankan BERURUTAN (bukan acak per sampel): instance Ollama bersama
+    # sering hanya memuat 1 model, jadi mencampur model memicu bongkar-muat VRAM.
+    final = 0
+    per_lane = {}
+    n_lanes = len(lanes)
+    for li, lane in enumerate(lanes):
+        quota = args.target_ai // n_lanes + (1 if li < args.target_ai % n_lanes else 0)
+        en_part = titles_en[li::n_lanes]
+        id_part = titles_id[li::n_lanes]
+        print(f"[stream] lane {li + 1}/{n_lanes}: {lane[1]} target={quota}", flush=True)
+        got = _generate_ai_stream([lane], quota, en_part, id_part, args.id_frac,
+                                  X, y, lock, args.max_seconds // n_lanes, args.concurrency,
+                                  humanize_frac=args.humanize_frac)
+        per_lane[lane[1]] = got
+        final += got
+        print(f"[stream] lane {lane[1]} terkumpul={got}", flush=True)
+        if not args.keep_vram:
+            _unload_models([lane])
+    print(f"[stream] AI modern terkumpul={final} per model={per_lane}", flush=True)
 
     pos = sum(y)
     print(f"[stream] total {len(X)} sampel (AI={pos}, manusia={len(y) - pos}), "
@@ -933,6 +998,8 @@ def cmd_stream_emb(args) -> None:
     model.meta["source"] = "stream"
     model.meta["ai_modern"] = final
     model.meta["generators"] = sorted({m for _e, m in lanes})
+    model.meta["ai_per_generator"] = per_lane
+    model.meta["humanize_frac"] = args.humanize_frac
 
     if args.dry_run:
         print("[stream] DRY-RUN: model TIDAK disimpan.", flush=True)
@@ -996,6 +1063,8 @@ def main() -> None:
                     help="muat cache lama agar keragaman generator lama terjaga (default)")
     se.add_argument("--no-seed-cache", dest="seed_cache", action="store_false",
                     help="abaikan cache lama; latih hanya dari sampel streaming")
+    se.add_argument("--humanize-frac", type=float, default=0.0,
+                    help="porsi sampel AI yang diparafrase 'agar terdengar manusia'")
     se.add_argument("--keep-vram", action="store_true",
                     help="jangan lepas VRAM generator usai latih")
     se.add_argument("--dry-run", action="store_true", help="jangan simpan model (uji saja)")

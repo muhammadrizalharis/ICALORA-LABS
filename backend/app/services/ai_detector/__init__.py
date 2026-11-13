@@ -17,7 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as _FutureTimeout
 
 from app.services.ai_detector import model as _model
-from app.services.ai_detector.embed import embed_text
+from app.services.ai_detector.embed import embed_text, embed_texts
 from app.services.llm.provider import get_llm
 
 _WORD_RE = re.compile(r"\b[\w'-]+\b", re.UNICODE)
@@ -174,6 +174,31 @@ def _statistical_signals(text: str) -> dict:
     }
 
 
+_PROB_RE = re.compile(r'"ai_probability"\s*:\s*(-?\d+(?:\.\d+)?)')
+_SENT_ITEM_RE = re.compile(r'"((?:[^"\\]|\\.){15,})"')
+
+
+def _parse_llm_json(raw: str) -> dict:
+    """Baca balasan JSON LLM; tahan terhadap JSON terpotong (batas token)."""
+    raw = re.sub(r"^```(?:json)?|```$", "", raw.strip()).strip()
+    m = re.search(r"\{.*\}", raw, re.DOTALL)
+    try:
+        data = json.loads(m.group(0) if m else raw)
+        prob = data.get("ai_probability")
+        sents = data.get("ai_sentences", [])
+    except Exception:  # noqa: BLE001
+        pm = _PROB_RE.search(raw)
+        prob = pm.group(1) if pm else None
+        tail = raw.split("ai_sentences", 1)[1] if "ai_sentences" in raw else ""
+        sents = [x.group(1) for x in _SENT_ITEM_RE.finditer(tail)]
+    try:
+        prob = max(0.0, min(100.0, float(prob))) if prob is not None else None
+    except (TypeError, ValueError):
+        prob = None
+    sents = [x.strip() for x in sents if isinstance(x, str) and x.strip()][:5]
+    return {"prob": prob, "sentences": sents}
+
+
 def _llm_analysis(text: str) -> dict:
     """Minta LLM menilai probabilitas AI + kalimat yang paling mirip AI."""
     llm = get_llm()
@@ -183,23 +208,17 @@ def _llm_analysis(text: str) -> dict:
             "content": (
                 "Nilai kemungkinan teks berikut ditulis oleh AI (model bahasa) "
                 "dibanding manusia. Pertimbangkan keseragaman, klise, pola generik, "
-                "dan kurangnya suara personal. Balas HANYA JSON: "
+                "dan kurangnya suara personal. Ingat: tulisan akademik manusia juga "
+                "formal; formalitas saja bukan bukti AI. Balas HANYA JSON: "
                 '{"ai_probability": <0-100>, '
-                '"ai_sentences": ["<kalimat yang paling mirip AI, verbatim>", ...]}'
+                '"ai_sentences": ["<maks 5 kalimat paling mirip AI, verbatim>"]}'
             ),
         },
         {"role": "user", "content": text[:6000]},
     ]
     try:
-        raw = llm.chat(messages, temperature=0.0, max_tokens=400).strip()
-        raw = re.sub(r"^```(?:json)?|```$", "", raw).strip()
-        m = re.search(r"\{.*\}", raw, re.DOTALL)
-        data = json.loads(m.group(0) if m else raw)
-        prob = data.get("ai_probability")
-        prob = max(0.0, min(100.0, float(prob))) if prob is not None else None
-        sents = data.get("ai_sentences", [])
-        sents = [s.strip() for s in sents if isinstance(s, str) and s.strip()][:10]
-        return {"prob": prob, "sentences": sents}
+        raw = llm.chat(messages, temperature=0.0, max_tokens=600)
+        return _parse_llm_json(raw)
     except Exception:  # noqa: BLE001
         return {"prob": None, "sentences": []}
 
@@ -227,9 +246,24 @@ def _llm_analysis_timed(text: str) -> dict:
 
 # Bobot berdasar akurasi terukur tiap komponen (lihat _blend).
 _W_STAT = 0.08
-_W_LLM = 0.30
+_W_LLM = 0.17
 _W_MODEL = 0.10
-_W_EMB = 0.45
+_W_EMB = 0.65
+
+# LLM judge (qwen3.6) terukur menuduh 12/15 teks akademik manusia berbahasa
+# Indonesia sebagai AI (median 85%), sementara model embedding hanya 1/15.
+# Untuk teks Indonesia LLM tidak dipanggil (hemat VRAM & waktu, tanpa salah tuduh).
+_ID_MARKERS = re.compile(
+    r"\b(yang|dengan|dari|untuk|pada|adalah|dan|ini|dalam|tidak|dapat|akan|telah|"
+    r"secara|terhadap|merupakan|bahwa|sehingga|oleh|serta|juga|sebagai|atau)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_indonesian(text: str) -> bool:
+    sample = text[:3000]
+    n = len(_WORD_RE.findall(sample))
+    return n > 0 and len(_ID_MARKERS.findall(sample)) / n >= 0.06
 _HIGH = 70.0
 _LOW = 30.0
 
@@ -242,11 +276,11 @@ def _blend(
 ) -> tuple[float, str, bool]:
     """Gabungkan skor komponen → (skor akhir, verdict, perlu_tinjauan).
 
-    Bobot dinormalisasi atas komponen yang tersedia. Model embedding tetap
-    terbesar (FPR rendah pada teks akademik manusia), tetapi tidak lagi mutlak
-    dominan karena dilatih pada keluaran generator lama dan bisa meleset pada
-    model baru. Bila embedding berbeda tajam (≥70 vs ≤30) dengan LLM atau model
-    6-fitur, verdict menjadi "perlu tinjauan manual" alih-alih memvonis.
+    Bobot dinormalisasi atas komponen yang tersedia; model embedding dominan
+    (akurasi & FPR terbaik pada evaluasi). Bila embedding dan model 6-fitur
+    berbeda tajam (≥70 vs ≤30), verdict menjadi "perlu tinjauan manual" —
+    menangkap teks AI yang diparafrase tanpa memvonis. LLM tidak ikut aturan ini
+    karena kerap menuduh tulisan akademik manusia yang formal.
     """
     components: list[tuple[float, float]] = [(stat_pct, _W_STAT)]
     if llm_pct is not None:
@@ -259,13 +293,14 @@ def _blend(
     final = sum(v * w for v, w in components) / total_w
     final = round(max(0.0, min(100.0, final)), 1)
 
-    needs_review = False
-    if emb_pct is not None:
-        others = [p for p in (llm_pct, model_pct) if p is not None]
-        needs_review = any(
-            (emb_pct <= _LOW and p >= _HIGH) or (emb_pct >= _HIGH and p <= _LOW)
-            for p in others
+    needs_review = (
+        emb_pct is not None
+        and model_pct is not None
+        and (
+            (emb_pct <= _LOW and model_pct >= _HIGH)
+            or (emb_pct >= _HIGH and model_pct <= _LOW)
         )
+    )
 
     if needs_review:
         verdict = "campuran / perlu tinjauan manual"
@@ -276,6 +311,108 @@ def _blend(
     else:
         verdict = "kemungkinan besar manusia"
     return final, verdict, needs_review
+
+
+# Dokumen panjang dinilai per segmen (~250 kata, mengikuti batas kalimat) agar
+# seluruh isi ikut dinilai — bukan hanya 8.000 karakter pertama — dan agar bagian
+# yang terindikasi AI bisa ditunjukkan. Ukuran segmen mengikuti distribusi data
+# latih (80-400 kata per sampel).
+_SEG_TARGET_WORDS = 250
+_SEG_MIN_WORDS = 80
+_MAX_SEGMENTS = 300
+_LLM_SAMPLE_CHARS = 6000
+_SHARE_MIN = 15.0
+_SEG_TEXT_CAP = 1500
+
+_NOTE = (
+    "Analisis ini menggabungkan sinyal statistik linguistik dan model bahasa "
+    "untuk menilai kemungkinan teks dihasilkan AI. Sesuai standar alat deteksi "
+    "akademik profesional, laporan ini merupakan bukti pendukung yang kuat dan "
+    "ditinjau bersama konteks karya — bukan satu-satunya dasar keputusan akhir."
+)
+
+
+def _segment_spans(text: str) -> list[tuple[int, int]]:
+    """Pecah teks menjadi rentang karakter ~_SEG_TARGET_WORDS kata per segmen."""
+    total = len(_WORD_RE.findall(text))
+    target = max(_SEG_TARGET_WORDS, math.ceil(total / _MAX_SEGMENTS))
+    spans: list[list[int]] = []
+    start: int | None = None
+    end = 0
+    count = 0
+    for m in _SENT_RE.finditer(text):
+        n = len(_WORD_RE.findall(m.group(0)))
+        if n == 0:
+            continue
+        if start is None:
+            start = m.start()
+        end = m.end()
+        count += n
+        gap = text[end : end + 8]
+        para_break = "\n\n" in gap or "\n \n" in gap or "\r\n\r\n" in gap
+        if count >= target or (para_break and count >= 0.6 * target):
+            spans.append([start, end])
+            start, count = None, 0
+    if start is not None:
+        if spans and count < _SEG_MIN_WORDS:
+            spans[-1][1] = end
+        else:
+            spans.append([start, end])
+    return [(a, b) for a, b in spans]
+
+
+def _emb_probabilities(sigs: list[dict], texts: list[str]) -> list[float | None]:
+    """Probabilitas model embedding untuk banyak teks (embedding berbatch)."""
+    global _EMB_TRAINED
+    if _EMB_TRAINED is None:
+        _EMB_TRAINED = _model.load(_model.EMB_MODEL_PATH) or False
+    if not _EMB_TRAINED:
+        return [None] * len(texts)
+    out: list[float | None] = []
+    for sig, emb in zip(sigs, embed_texts(texts), strict=True):
+        if emb is None:
+            out.append(None)
+            continue
+        try:
+            vec = _model.feature_vector(sig) + emb
+            out.append(round(_EMB_TRAINED.predict_proba(vec) * 100.0, 1))
+        except Exception:  # noqa: BLE001
+            out.append(None)
+    return out
+
+
+def _wmean(values: list[float | None], weights: list[int]) -> float | None:
+    pairs = [(v, w) for v, w in zip(values, weights, strict=True) if v is not None]
+    total = sum(w for _v, w in pairs)
+    if not pairs or total == 0:
+        return None
+    return round(sum(v * w for v, w in pairs) / total, 1)
+
+
+def _llm_sample(seg_texts: list[str]) -> str:
+    """Cuplikan merata dari seluruh dokumen (≤ _LLM_SAMPLE_CHARS) untuk LLM."""
+    if not seg_texts:
+        return ""
+    per = max(1, _LLM_SAMPLE_CHARS // max(1, len(seg_texts)))
+    if per >= 600:
+        return "\n\n".join(seg_texts)[:_LLM_SAMPLE_CHARS]
+    k = max(1, _LLM_SAMPLE_CHARS // 1200)
+    step = len(seg_texts) / k
+    picks = sorted({int(i * step) for i in range(k)})
+    return "\n\n".join(seg_texts[i][:1200] for i in picks)[:_LLM_SAMPLE_CHARS]
+
+
+def _flagged(sentences: list[str], text: str) -> list[str]:
+    low_text = text.lower()
+    return [s for s in sentences if (key := s.lower()[:40]) and key in low_text]
+
+
+def _seg_label(score: float) -> str:
+    if score >= _HIGH:
+        return "ai"
+    if score >= 45:
+        return "mixed"
+    return "human"
 
 
 def detect_ai(text: str) -> dict:
@@ -292,34 +429,87 @@ def detect_ai(text: str) -> dict:
 
     signals = _statistical_signals(text)
     stat_pct = signals["stat_score"] * 100
-    model_pct = _trained_probability(signals)
-    emb_pct = _emb_trained_probability(signals, text)
-    analysis = _llm_analysis_timed(text)
-    llm_pct = analysis["prob"]
+    spans = _segment_spans(text)
+    language = "id" if _is_indonesian(text) else "en"
 
+    def judge(sample: str) -> dict:
+        if language == "id":
+            return {"prob": None, "sentences": []}
+        return _llm_analysis_timed(sample)
+
+    if len(spans) <= 1:
+        model_pct = _trained_probability(signals)
+        emb_pct = _emb_trained_probability(signals, text)
+        analysis = judge(text)
+        llm_pct = analysis["prob"]
+        final, verdict, needs_review = _blend(stat_pct, llm_pct, model_pct, emb_pct)
+        return {
+            "ai_probability": final,
+            "verdict": verdict,
+            "needs_review": needs_review,
+            "ai_share": None,
+            "segments": [],
+            "language": language,
+            "stat_probability": round(stat_pct, 1),
+            "llm_probability": round(llm_pct, 1) if llm_pct is not None else None,
+            "model_probability": model_pct,
+            "emb_model_probability": emb_pct,
+            "signals": signals,
+            "flagged_sentences": _flagged(analysis["sentences"], text),
+            "note": _NOTE,
+        }
+
+    seg_texts = [text[a:b].strip() for a, b in spans]
+    seg_sigs = [_statistical_signals(t) for t in seg_texts]
+    seg_words = [max(1, int(sg["word_count"])) for sg in seg_sigs]
+    seg_model = [_trained_probability(sg) for sg in seg_sigs]
+    seg_emb = _emb_probabilities(seg_sigs, seg_texts)
+    seg_scores = [
+        _blend(sg["stat_score"] * 100, None, m, e)[0]
+        for sg, m, e in zip(seg_sigs, seg_model, seg_emb, strict=True)
+    ]
+
+    model_pct = _wmean(seg_model, seg_words)
+    emb_pct = _wmean(seg_emb, seg_words)
+    analysis = judge(_llm_sample(seg_texts))
+    llm_pct = analysis["prob"]
     final, verdict, needs_review = _blend(stat_pct, llm_pct, model_pct, emb_pct)
 
-    flagged: list[str] = []
-    low_text = text.lower()
-    for s in analysis["sentences"]:
-        key = s.lower()[:40]
-        if key and key in low_text:
-            flagged.append(s)
+    total_w = sum(seg_words)
+    ai_w = sum(w for w, sc in zip(seg_words, seg_scores, strict=True) if sc >= _HIGH)
+    ai_share = round(100.0 * ai_w / total_w, 1) if total_w else 0.0
+    if verdict == "kemungkinan besar manusia" and ai_share >= _SHARE_MIN:
+        verdict = "sebagian terindikasi AI"
+        needs_review = True
+
+    segments = []
+    for i, ((a, b), t, w, sc) in enumerate(
+        zip(spans, seg_texts, seg_words, seg_scores, strict=True)
+    ):
+        label = _seg_label(sc)
+        segments.append({
+            "index": i,
+            "start": a,
+            "end": b,
+            "words": w,
+            "ai_probability": sc,
+            "label": label,
+            "preview": t[:140],
+            "text": t[:_SEG_TEXT_CAP] if label != "human" else None,
+        })
 
     return {
         "ai_probability": final,
         "verdict": verdict,
         "needs_review": needs_review,
+        "ai_share": ai_share,
+        "segments": segments,
+        "language": language,
         "stat_probability": round(stat_pct, 1),
         "llm_probability": round(llm_pct, 1) if llm_pct is not None else None,
         "model_probability": model_pct,
         "emb_model_probability": emb_pct,
         "signals": signals,
-        "flagged_sentences": flagged,
-        "note": (
-            "Analisis ini menggabungkan sinyal statistik linguistik dan model bahasa "
-            "untuk menilai kemungkinan teks dihasilkan AI. Sesuai standar alat deteksi "
-            "akademik profesional, laporan ini merupakan bukti pendukung yang kuat dan "
-            "ditinjau bersama konteks karya — bukan satu-satunya dasar keputusan akhir."
-        ),
+        "flagged_sentences": _flagged(analysis["sentences"], text),
+        "note": _NOTE,
     }
