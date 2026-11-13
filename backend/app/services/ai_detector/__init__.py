@@ -33,9 +33,9 @@ _LLM_ENABLED = os.getenv("ICALORA_AIDETECT_LLM", "on").strip().lower() not in {
     "no",
 }
 try:
-    _LLM_TIMEOUT = float(os.getenv("ICALORA_AIDETECT_LLM_TIMEOUT", "6"))
+    _LLM_TIMEOUT = float(os.getenv("ICALORA_AIDETECT_LLM_TIMEOUT", "45"))
 except ValueError:
-    _LLM_TIMEOUT = 6.0
+    _LLM_TIMEOUT = 45.0
 
 _TRAINED = None  # cache; None=belum dicoba, False=tidak ada, else LogisticModel
 _EMB_TRAINED = None  # cache model embedding (stat+emb 1030-dim)
@@ -213,11 +213,69 @@ def _llm_analysis_timed(text: str) -> dict:
     """
     if not _LLM_ENABLED:
         return {"prob": None, "sentences": []}
+    # Jangan pakai `with`: __exit__ menunggu thread selesai sehingga batas waktu
+    # tidak berlaku. shutdown(wait=False) membiarkan panggilan lambat selesai
+    # di latar tanpa menahan respons.
+    ex = ThreadPoolExecutor(max_workers=1)
     try:
-        with ThreadPoolExecutor(max_workers=1) as ex:
-            return ex.submit(_llm_analysis, text).result(timeout=_LLM_TIMEOUT)
+        return ex.submit(_llm_analysis, text).result(timeout=_LLM_TIMEOUT)
     except (_FutureTimeout, Exception):  # noqa: BLE001
         return {"prob": None, "sentences": []}
+    finally:
+        ex.shutdown(wait=False)
+
+
+# Bobot berdasar akurasi terukur tiap komponen (lihat _blend).
+_W_STAT = 0.08
+_W_LLM = 0.30
+_W_MODEL = 0.10
+_W_EMB = 0.45
+_HIGH = 70.0
+_LOW = 30.0
+
+
+def _blend(
+    stat_pct: float,
+    llm_pct: float | None,
+    model_pct: float | None,
+    emb_pct: float | None,
+) -> tuple[float, str, bool]:
+    """Gabungkan skor komponen → (skor akhir, verdict, perlu_tinjauan).
+
+    Bobot dinormalisasi atas komponen yang tersedia. Model embedding tetap
+    terbesar (FPR rendah pada teks akademik manusia), tetapi tidak lagi mutlak
+    dominan karena dilatih pada keluaran generator lama dan bisa meleset pada
+    model baru. Bila embedding berbeda tajam (≥70 vs ≤30) dengan LLM atau model
+    6-fitur, verdict menjadi "perlu tinjauan manual" alih-alih memvonis.
+    """
+    components: list[tuple[float, float]] = [(stat_pct, _W_STAT)]
+    if llm_pct is not None:
+        components.append((llm_pct, _W_LLM))
+    if model_pct is not None:
+        components.append((model_pct, _W_MODEL))
+    if emb_pct is not None:
+        components.append((emb_pct, _W_EMB))
+    total_w = sum(w for _v, w in components)
+    final = sum(v * w for v, w in components) / total_w
+    final = round(max(0.0, min(100.0, final)), 1)
+
+    needs_review = False
+    if emb_pct is not None:
+        others = [p for p in (llm_pct, model_pct) if p is not None]
+        needs_review = any(
+            (emb_pct <= _LOW and p >= _HIGH) or (emb_pct >= _HIGH and p <= _LOW)
+            for p in others
+        )
+
+    if needs_review:
+        verdict = "campuran / perlu tinjauan manual"
+    elif final >= 70:
+        verdict = "kemungkinan besar AI"
+    elif final >= 45:
+        verdict = "campuran / tidak pasti"
+    else:
+        verdict = "kemungkinan besar manusia"
+    return final, verdict, needs_review
 
 
 def detect_ai(text: str) -> dict:
@@ -239,32 +297,7 @@ def detect_ai(text: str) -> dict:
     analysis = _llm_analysis_timed(text)
     llm_pct = analysis["prob"]
 
-    # Blending adaptif berbobot berdasar AKURASI TERUKUR tiap komponen pada
-    # 1.200 sampel held-out (seimbang manusia/AI):
-    #   - model embedding  : akurasi 0.970, false-positive 3.3%  → DOMINAN.
-    #   - LLM (bila sempat): sinyal independen bagus, tapi kerap timeout.
-    #   - model 6-fitur    : akurasi 0.850, false-positive 16.1% → BOBOT KECIL.
-    #   - heuristik stat    : lemah (fitur sama dgn model 6-fitur) → BOBOT KECIL.
-    # Bobot emb-dominan menekan false-positive pada teks akademik manusia yang
-    # formal (dulu ~62% "campuran" → kini condong benar ke "manusia").
-    # Bobot dinormalisasi atas sinyal yang tersedia → degradasi anggun bila kosong.
-    components: list[tuple[float, float]] = [(stat_pct, 0.08)]
-    if llm_pct is not None:
-        components.append((llm_pct, 0.17))
-    if model_pct is not None:
-        components.append((model_pct, 0.10))
-    if emb_pct is not None:
-        components.append((emb_pct, 0.65))
-    total_w = sum(w for _v, w in components)
-    final = sum(v * w for v, w in components) / total_w
-    final = round(max(0.0, min(100.0, final)), 1)
-
-    if final >= 70:
-        verdict = "kemungkinan besar AI"
-    elif final >= 45:
-        verdict = "campuran / tidak pasti"
-    else:
-        verdict = "kemungkinan besar manusia"
+    final, verdict, needs_review = _blend(stat_pct, llm_pct, model_pct, emb_pct)
 
     flagged: list[str] = []
     low_text = text.lower()
@@ -276,6 +309,7 @@ def detect_ai(text: str) -> dict:
     return {
         "ai_probability": final,
         "verdict": verdict,
+        "needs_review": needs_review,
         "stat_probability": round(stat_pct, 1),
         "llm_probability": round(llm_pct, 1) if llm_pct is not None else None,
         "model_probability": model_pct,
