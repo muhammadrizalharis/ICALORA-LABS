@@ -760,7 +760,6 @@ const GRAMMAR_METRIC_LABELS: Record<string, string> = {
 
 function GrammarCheckerView({ result }: { result: Record<string, unknown> }) {
   const score = num(result.score);
-  const better = num(result.better_than_percent);
   const metrics = (result.metrics as Record<string, number>) ?? {};
   const issues = Array.isArray(result.issues)
     ? (result.issues as Record<string, unknown>[])
@@ -773,7 +772,6 @@ function GrammarCheckerView({ result }: { result: Record<string, unknown> }) {
       <div className="flex flex-wrap items-center gap-6 rounded-xl border border-c surface-2 p-5">
         {score !== null && <Gauge value={score} label="Skor Penulisan" tone={tone} />}
         <div className="min-w-0 flex-1 space-y-3">
-          {better !== null && <Pill tone={tone}>Lebih baik dari {better}% dokumen</Pill>}
           <div className="flex flex-wrap gap-3 text-xs">
             {num(summary.critical) !== null && (
               <span className="rounded-lg border border-c surface px-3 py-1.5">

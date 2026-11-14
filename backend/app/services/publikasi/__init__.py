@@ -44,6 +44,11 @@ def _vec_literal(vec: list[float]) -> str:
 # luas sebelum memilih kandidat terbaik — recall mendekati pemindaian penuh.
 _EF_SEARCH = 500
 
+# Ambang kemiripan kosinus minimum agar kandidat dianggap relevan. Di bawah ini
+# paper dianggap terlalu jauh dari naskah pengguna dan disembunyikan agar tidak
+# memunculkan rekomendasi menyesatkan.
+_MIN_SIM = 0.35
+
 
 def _set_ef_search(conn) -> None:
     conn.execute(text(f"SET LOCAL hnsw.ef_search = {_EF_SEARCH}"))
@@ -56,6 +61,7 @@ def _readiness(text_in: str) -> dict:
             "role": "system",
             "content": (
                 "Anda reviewer jurnal. Nilai kesiapan naskah/abstrak untuk publikasi. "
+                "Jawab dalam bahasa yang sama dengan naskah pengguna. "
                 "Balas HANYA JSON: {\"readiness_score\": <0-100>, "
                 "\"strengths\": [\"...\"], \"gaps\": [\"...\"], "
                 "\"recommended_fields\": [\"...\"], \"advice\": \"<1-2 kalimat>\"}"
@@ -89,6 +95,11 @@ def recommend_journals(doc: str, top_k: int = 15) -> dict:
     field_counter: Counter[str] = Counter()
     source_counter: Counter[str] = Counter()
     for r in rows:
+        sim = float(r.cos_sim)
+        # Lewati kandidat di bawah ambang relevansi; rows terurut dari paling mirip,
+        # jadi begitu satu di bawah ambang, tetap periksa sisanya (fields bervariasi).
+        if sim < _MIN_SIM:
+            continue
         fields = list(r.fields) if r.fields else []
         for f in fields:
             field_counter[f] += 1
@@ -103,10 +114,12 @@ def recommend_journals(doc: str, top_k: int = 15) -> dict:
                 "pub_year": r.pub_year,
                 "source": r.source,
                 "fields": fields[:5],
-                "relevance": round(float(r.cos_sim) * 100, 1),
+                "relevance": round(sim * 100, 1),
                 "snippet": snippet,
             }
         )
+
+    low_relevance = not matches and bool(rows)
 
     top_fields = [{"field": f, "count": c} for f, c in field_counter.most_common(8)]
     sources = [
@@ -120,8 +133,12 @@ def recommend_journals(doc: str, top_k: int = 15) -> dict:
         "sources": sources,
         "readiness": _readiness(doc),
         "corpus_size": corpus_size(),
+        "low_relevance": low_relevance,
         "note": (
-            "Rekomendasi berbasis kemiripan dengan paper terbit akses-terbuka. "
+            "Tidak ada paper terbit yang cukup mirip dengan naskah ini di korpus. "
+            "Coba perjelas abstrak atau tambah kata kunci bidang."
+            if low_relevance
+            else "Rekomendasi berbasis kemiripan dengan paper terbit akses-terbuka. "
             "Bidang & contoh paper menjadi acuan untuk memilih jurnal tujuan."
         ),
     }
