@@ -7,6 +7,7 @@ import {
   AdminUser,
   AppSettings,
   FEATURE_LABELS,
+  HistoryItem,
   UserStats,
   deleteUser,
   getSettings,
@@ -14,6 +15,7 @@ import {
   patchUser,
   putSettings,
   resetUserPassword,
+  userHistory,
 } from "@/lib/admin";
 
 export default function AdminPage() {
@@ -169,6 +171,7 @@ function UsersTab({ adminId }: { adminId: number }) {
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState<string | null>(null);
+  const [historyUser, setHistoryUser] = useState<AdminUser | null>(null);
 
   const load = useCallback(async (query = "") => {
     setLoading(true);
@@ -321,6 +324,12 @@ function UsersTab({ adminId }: { adminId: number }) {
                   <td className="px-3 py-3">
                     <div className="flex gap-2">
                       <button
+                        onClick={() => setHistoryUser(u)}
+                        className="rounded-lg border border-c surface-2 px-2 py-1 text-xs hover:bg-neutral-50 dark:hover:bg-neutral-900"
+                      >
+                        Riwayat
+                      </button>
+                      <button
                         onClick={() => resetPw(u)}
                         className="rounded-lg border border-c surface-2 px-2 py-1 text-xs hover:bg-neutral-50 dark:hover:bg-neutral-900"
                       >
@@ -348,6 +357,83 @@ function UsersTab({ adminId }: { adminId: number }) {
           </table>
         </div>
       )}
+      {historyUser && (
+        <HistoryModal user={historyUser} onClose={() => setHistoryUser(null)} />
+      )}
+    </div>
+  );
+}
+
+function HistoryModal({ user, onClose }: { user: AdminUser; onClose: () => void }) {
+  const [items, setItems] = useState<HistoryItem[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    userHistory(user.id, 100)
+      .then((d) => alive && setItems(d.items))
+      .catch((e) => alive && setError(e instanceof Error ? e.message : "Gagal memuat riwayat."));
+    return () => {
+      alive = false;
+    };
+  }, [user.id]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="max-h-[80vh] w-full max-w-2xl overflow-hidden rounded-2xl border border-c surface shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-c px-5 py-4">
+          <div>
+            <div className="text-sm font-semibold text-neutral-900 dark:text-neutral-50">
+              Riwayat penggunaan
+            </div>
+            <div className="text-xs text-neutral-500">{user.email || user.name || `#${user.id}`}</div>
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded-lg border border-c surface-2 px-3 py-1 text-xs hover:bg-neutral-50 dark:hover:bg-neutral-900"
+          >
+            Tutup
+          </button>
+        </div>
+        <div className="max-h-[60vh] overflow-y-auto px-5 py-3">
+          {error ? (
+            <div className="py-8 text-center text-sm text-red-600">{error}</div>
+          ) : items === null ? (
+            <div className="py-8 text-center text-sm text-neutral-500">Memuat…</div>
+          ) : items.length === 0 ? (
+            <div className="py-8 text-center text-sm text-neutral-500">
+              Tidak ada riwayat dalam periode penyimpanan.
+            </div>
+          ) : (
+            <ul className="divide-y divide-[color:var(--border)]">
+              {items.map((it) => (
+                <li key={it.id} className="py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] font-medium text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
+                      {FEATURE_LABELS[it.tool] || it.tool}
+                    </span>
+                    <span className="shrink-0 text-xs text-neutral-400">
+                      {it.created_at ? new Date(it.created_at).toLocaleString("id-ID") : "-"}
+                    </span>
+                  </div>
+                  {it.title && (
+                    <div className="mt-1 text-sm text-neutral-800 dark:text-neutral-100">{it.title}</div>
+                  )}
+                  {it.input_preview && (
+                    <div className="mt-0.5 line-clamp-2 text-xs text-neutral-500">{it.input_preview}</div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
