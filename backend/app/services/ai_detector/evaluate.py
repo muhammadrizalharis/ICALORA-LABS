@@ -25,7 +25,7 @@ from pathlib import Path
 
 import httpx
 
-from app.services.ai_detector import _blend, detect_ai
+from app.services.ai_detector import _blend, _raw_blend, detect_ai
 from app.services.ai_detector import train as T
 from app.services.ai_detector.model import EMB_MODEL_PATH
 
@@ -219,10 +219,13 @@ def cmd_run(args) -> None:
 
     if args.no_llm:
         det._LLM_ENABLED = False
+    if args.binoculars:
+        det._BINOC_ALWAYS = True
     if args.model:
         det._model.EMB_MODEL_PATH = Path(args.model)
         det._EMB_TRAINED = None
         det._CALIB = None
+        det._STACK = None
         det._MODEL_INFO = None
     t0 = time.time()
     for i, r in enumerate(recs[done:], start=done):
@@ -231,7 +234,7 @@ def cmd_run(args) -> None:
         row.update({k: res.get(k) for k in (
             "ai_probability", "verdict", "needs_review", "ai_share", "language",
             "stat_probability", "llm_probability", "model_probability",
-            "emb_model_probability", "reliability")})
+            "emb_model_probability", "binoculars_score", "reliability")})
         row["words"] = len(r["text"].split())
         if r["label"] == -1:
             row["segments"] = [{"start": s["start"], "end": s["end"], "words": s["words"],
@@ -258,19 +261,35 @@ def _logit(p: float) -> float:
     return math.log(p / (1 - p))
 
 
-def fit_platt(scores: list[float], labels: list[int], iters: int = 500) -> tuple[float, float]:
-    """Platt scaling: p = sigmoid(a·logit(s) + b), dilatih dengan Newton/gradient."""
-    a, b = 1.0, 0.0
+def fit_platt(scores: list[float], labels: list[int], iters: int = 500,
+              l2: float = 1e-3) -> tuple[float, float]:
+    """Platt scaling: p = sigmoid(a·logit(s) + b), dilatih dengan Newton teredam.
+
+    Penalti L2 kecil (relatif terhadap ukuran data) ke arah identitas (a=1, b=0)
+    plus line search mencegah divergensi bila data validasi hampir terpisah.
+    """
     xs = [_logit(s) for s in scores]
     # Bobot kelas seimbang: skor hasil = peluang AI dengan prior 50:50, tidak
     # terpengaruh rasio AI:manusia di set validasi.
     n1 = max(1, sum(labels))
     n0 = max(1, len(labels) - n1)
     cw = {1: len(labels) / (2 * n1), 0: len(labels) / (2 * n0)}
+    lam = l2 * len(labels)
+
+    def loss(a: float, b: float) -> float:
+        tot = 0.0
+        for x, y in zip(xs, labels, strict=True):
+            z = a * x + b
+            # log(1+e^z) - y*z, stabil numerik
+            tot += cw[y] * ((max(z, 0.0) + math.log1p(math.exp(-abs(z)))) - y * z)
+        return tot + 0.5 * lam * ((a - 1.0) ** 2 + b * b)
+
+    a, b = 1.0, 0.0
+    cur = loss(a, b)
     for _ in range(iters):
         ga = gb = haa = hab = hbb = 0.0
         for x, y in zip(xs, labels, strict=True):
-            p = 1 / (1 + math.exp(-(a * x + b)))
+            p = 1 / (1 + math.exp(-max(-50.0, min(50.0, a * x + b))))
             d = (p - y) * cw[y]
             w = (p * (1 - p) + 1e-9) * cw[y]
             ga += d * x
@@ -278,13 +297,26 @@ def fit_platt(scores: list[float], labels: list[int], iters: int = 500) -> tuple
             haa += w * x * x
             hab += w * x
             hbb += w
+        ga += lam * (a - 1.0)
+        gb += lam * b
+        haa += lam
+        hbb += lam
         det = haa * hbb - hab * hab
         if abs(det) < 1e-12:
             break
         da = (hbb * ga - hab * gb) / det
         db = (haa * gb - hab * ga) / det
-        a, b = a - da, b - db
-        if abs(da) + abs(db) < 1e-7:
+        step = 1.0
+        while step > 1e-6:
+            na, nb = a - step * da, b - step * db
+            new = loss(na, nb)
+            if new <= cur:
+                break
+            step /= 2
+        else:
+            break
+        a, b, prev, cur = na, nb, cur, new
+        if abs(step * da) + abs(step * db) < 1e-7 or prev - cur < 1e-10:
             break
     return round(a, 4), round(b, 4)
 
@@ -304,6 +336,46 @@ def _brier_ece(probs: list[float], labels: list[int]) -> tuple[float, float]:
             acc = sum(labels[i] for i in idx) / len(idx)
             ece += len(idx) / len(ps) * abs(conf - acc)
     return round(brier, 4), round(ece, 4)
+
+
+def _tpr_at_fpr(scores: list[float], labels: list[int], fprs=(0.01, 0.05)) -> dict:
+    """TPR pada titik FPR tetap (ambang = kuantil skor manusia), standar benchmark detektor."""
+    hs = sorted((s for s, y in zip(scores, labels, strict=True) if y == 0), reverse=True)
+    ais = [s for s, y in zip(scores, labels, strict=True) if y == 1]
+    out = {}
+    for f in fprs:
+        if not hs or not ais:
+            out[f"tpr@fpr{f:g}"] = None
+            continue
+        k = int(math.floor(f * len(hs)))  # maksimal k manusia boleh ≥ ambang
+        thr = hs[k] if k < len(hs) else -math.inf
+        out[f"tpr@fpr{f:g}"] = round(sum(s > thr for s in ais) / len(ais), 3)
+    return out
+
+
+def _wilson(k: int, n: int, z: float = 1.96) -> list[float] | None:
+    if n == 0:
+        return None
+    p = k / n
+    d = 1 + z * z / n
+    c = (p + z * z / (2 * n)) / d
+    h = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / d
+    return [round(max(0.0, c - h), 3), round(min(1.0, c + h), 3)]
+
+
+def _nll(probs: list[float], labels: list[int]) -> float:
+    ps = [min(max(p / 100, 1e-6), 1 - 1e-6) for p in probs]
+    return round(-sum(math.log(p if y else 1 - p) for p, y in zip(ps, labels, strict=True))
+                 / len(ps), 4)
+
+
+def _rate_ci(scores_h: list[float], scores_ai: list[float], thr: float) -> dict:
+    kh = sum(v >= thr for v in scores_h)
+    ka = sum(v >= thr for v in scores_ai)
+    return {"threshold": thr,
+            "test_fpr": round(kh / len(scores_h), 3), "test_fpr_ci95": _wilson(kh, len(scores_h)),
+            "test_recall": round(ka / len(scores_ai), 3),
+            "test_recall_ci95": _wilson(ka, len(scores_ai))}
 
 
 def _rate(rows: list[dict], key: str, thr: float) -> str:
@@ -384,9 +456,14 @@ def cmd_report(args) -> None:
     cal = _brier_ece([apply_platt(r["ai_probability"], a, b) for r in test],
                      [r["label"] for r in test])
     out["calibration"] = {"a": a, "b": b, "test_brier_ece_raw": raw, "test_brier_ece_cal": cal}
+    t_lab = [r["label"] for r in test]
+    t_cal = [apply_platt(r["ai_probability"], a, b) for r in test]
+    out["calibration"]["test_nll_cal"] = _nll(t_cal, t_lab)
+    out["test_tpr_at_fpr"] = _tpr_at_fpr(t_cal, t_lab)
     print(f"\n=== Kalibrasi (Platt seimbang, fit di val) a={a} b={b} ===")
     print(f"  test Brier/ECE mentah    : {raw}")
-    print(f"  test Brier/ECE kalibrasi : {cal}")
+    print(f"  test Brier/ECE kalibrasi : {cal}  NLL {out['calibration']['test_nll_cal']}")
+    print(f"  test TPR @ FPR tetap     : {out['test_tpr_at_fpr']}")
     sweep = {}
     for thr in (45, 50, 60, 70, 80, 90):
         row = {}
@@ -412,9 +489,7 @@ def cmd_report(args) -> None:
     for name, thr in (("ai", thr_ai), ("mixed", thr_mix)):
         hs = [apply_platt(r["ai_probability"], a, b) for r in test if r["label"] == 0]
         ais = [apply_platt(r["ai_probability"], a, b) for r in test if r["label"] == 1]
-        res[name] = {"threshold": thr,
-                     "test_fpr": round(sum(v >= thr for v in hs) / len(hs), 3),
-                     "test_recall": round(sum(v >= thr for v in ais) / len(ais), 3)}
+        res[name] = _rate_ci(hs, ais, thr)
     out["thresholds"] = res
     print(f"  ambang dipilih di val (FPR≤{args.max_fpr_ai}/{args.max_fpr_mixed}) → test: {res}")
 
@@ -433,17 +508,135 @@ def cmd_report(args) -> None:
                         "segment_accuracy": round(seg_ok / seg_n, 3) if seg_n else None}
         print(f"\n=== Dokumen campuran === {out['mixed']}")
 
+    stack = _fit_stack(binary, args) if args.fit_stack else None
+    if stack:
+        out["stack"] = stack
+
     if args.json_out:
         Path(args.json_out).write_text(json.dumps(out, indent=2, ensure_ascii=False), "utf-8")
     if args.write_calibration:
-        d = json.loads(EMB_MODEL_PATH.read_text(encoding="utf-8"))
+        target = Path(args.model) if args.model else EMB_MODEL_PATH
+        d = json.loads(target.read_text(encoding="utf-8"))
         d.setdefault("meta", {})["calibration"] = {
             "method": "platt-balanced", "a": a, "b": b, "fitted_on": len(val),
             "threshold_ai": thr_ai, "threshold_mixed": thr_mix,
             "test": res, "date": time.strftime("%Y-%m-%d", time.gmtime()),
         }
-        EMB_MODEL_PATH.write_text(json.dumps(d), encoding="utf-8")
-        print(f"[report] kalibrasi ditulis ke {EMB_MODEL_PATH.name}")
+        if stack:
+            d["meta"]["stack"] = stack
+        elif "stack" in d["meta"]:
+            del d["meta"]["stack"]
+        target.write_text(json.dumps(d), encoding="utf-8")
+        print(f"[report] kalibrasi{' + stack' if stack else ''} ditulis ke {target}")
+
+
+def _fit_stack(binary: list[dict], args) -> dict | None:
+    """Penggabung logistic seimbang: z = w_s·logit(skor mentah) + w_b·(−(B−mu)/sd) + b.
+
+    Dilatih pada split val; ambang dipilih di val dengan batas FPR; dilaporkan di test.
+    """
+    rows = []
+    for r in binary:
+        if r.get("binoculars_score") is None or r.get("stat_probability") is None:
+            continue
+        raw = _raw_blend(r["stat_probability"], r.get("llm_probability"),
+                         r.get("model_probability"), r.get("emb_model_probability"))
+        rows.append((r, _logit(raw), r["binoculars_score"]))
+    val = [x for x in rows if x[0]["split"] == "val"]
+    test = [x for x in rows if x[0]["split"] == "test"]
+    if len(val) < 40 or not test:
+        print("[stack] skor Binoculars kurang; jalankan `run --binoculars` dulu")
+        return None
+    bs = [x[2] for x in val]
+    mu = sum(bs) / len(bs)
+    sd = (sum((v - mu) ** 2 for v in bs) / len(bs)) ** 0.5 or 1.0
+
+    def feats(x):
+        return (x[1], -(x[2] - mu) / sd)
+
+    ys = [x[0]["label"] for x in val]
+    n1 = max(1, sum(ys))
+    n0 = max(1, len(ys) - n1)
+    cw = {1: len(ys) / (2 * n1), 0: len(ys) / (2 * n0)}
+    w = [0.0, 0.0, 0.0]
+    for _ in range(200):  # Newton, sedikit L2 agar stabil
+        g = [0.0, 0.0, 0.0]
+        h = [[1e-3 if i == j else 0.0 for j in range(3)] for i in range(3)]
+        for x, yv in zip(val, ys, strict=True):
+            f = (*feats(x), 1.0)
+            z = max(-30.0, min(30.0, sum(wi * fi for wi, fi in zip(w, f, strict=True))))
+            p = 1 / (1 + math.exp(-z))
+            for i in range(3):
+                g[i] += cw[yv] * (p - yv) * f[i]
+                for j in range(3):
+                    h[i][j] += cw[yv] * p * (1 - p) * f[i] * f[j]
+        for i in range(3):
+            g[i] += 1e-3 * w[i]
+        step = _solve3(h, g)
+        w = [wi - si for wi, si in zip(w, step, strict=True)]
+        if sum(abs(si) for si in step) < 1e-8:
+            break
+
+    def prob(x):
+        f = (*feats(x), 1.0)
+        z = max(-30.0, min(30.0, sum(wi * fi for wi, fi in zip(w, f, strict=True))))
+        return 100 / (1 + math.exp(-z))
+
+    def pick(rs, max_fpr):
+        hs = [prob(x) for x in rs if x[0]["label"] == 0]
+        for thr in range(30, 100):
+            if sum(v >= thr for v in hs) / len(hs) <= max_fpr:
+                return float(thr)
+        return 99.0
+
+    thr_ai, thr_mix = pick(val, args.max_fpr_ai), pick(val, args.max_fpr_mixed)
+    thr_mix = min(thr_mix, thr_ai)
+    res = {}
+    for name, thr in (("ai", thr_ai), ("mixed", thr_mix)):
+        hs = [prob(x) for x in test if x[0]["label"] == 0]
+        ais = [prob(x) for x in test if x[0]["label"] == 1]
+        res[name] = _rate_ci(hs, ais, thr)
+    t_lab = [x[0]["label"] for x in test]
+    t_p = [prob(x) for x in test]
+    extra = {"test_nll": _nll(t_p, t_lab), "test_brier_ece": _brier_ece(t_p, t_lab),
+             **_tpr_at_fpr(t_p, t_lab)}
+    auc = {}
+    for sub, filt in (
+        ("semua", lambda r: True), ("EN", lambda r: r["lang"] == "en"),
+        ("ID", lambda r: r["lang"] == "id"),
+        ("unseen", lambda r: r["label"] == 0 or r.get("seen") == "unseen"),
+        ("parafrase", lambda r: r["label"] == 0 or r.get("humanized")),
+    ):
+        rs = [x for x in test if filt(x[0])]
+        labels = [x[0]["label"] for x in rs]
+        auc[sub] = {"model": _auc([x[1] for x in rs], labels),
+                    "binoculars": _auc([-x[2] for x in rs], labels),
+                    "gabungan": _auc([prob(x) for x in rs], labels)}
+    print(f"\n=== Stack model+Binoculars (fit val n={len(val)}, test n={len(test)}) ===")
+    print(f"  bobot: skor={w[0]:.3f} binoc={w[1]:.3f} b={w[2]:.3f} (mu={mu:.4f} sd={sd:.4f})")
+    for k, v in auc.items():
+        print(f"  AUC test {k:9}: {v}")
+    print(f"  ambang (val) → test: {res}")
+    print(f"  test kalibrasi/TPR@FPR: {extra}")
+    return {"method": "logistic-balanced", "w_score": round(w[0], 5), "w_binoc": round(w[1], 5),
+            "b": round(w[2], 5), "mu": round(mu, 5), "sd": round(sd, 5),
+            "threshold_ai": thr_ai, "threshold_mixed": thr_mix, "fitted_on": len(val),
+            "test": res, "test_auc": auc, "test_extra": extra,
+            "date": time.strftime("%Y-%m-%d", time.gmtime())}
+
+
+def _solve3(a: list[list[float]], b: list[float]) -> list[float]:
+    m = [row[:] + [bv] for row, bv in zip(a, b, strict=True)]
+    for c in range(3):
+        piv = max(range(c, 3), key=lambda r: abs(m[r][c]))
+        m[c], m[piv] = m[piv], m[c]
+        if abs(m[c][c]) < 1e-12:
+            return [0.0, 0.0, 0.0]
+        for r in range(3):
+            if r != c:
+                f = m[r][c] / m[c][c]
+                m[r] = [x - f * y for x, y in zip(m[r], m[c], strict=True)]
+    return [m[i][3] / m[i][i] for i in range(3)]
 
 
 def main() -> None:
@@ -464,10 +657,15 @@ def main() -> None:
     r.add_argument("--out", required=True)
     r.add_argument("--no-llm", action="store_true")
     r.add_argument("--model", help="jalur model_emb alternatif (mis. cadangan lama)")
+    r.add_argument("--binoculars", action="store_true",
+                   help="kumpulkan skor Binoculars (butuh layanan services/binoculars)")
     p = sub.add_parser("report")
     p.add_argument("--results", required=True)
     p.add_argument("--json-out")
     p.add_argument("--write-calibration", action="store_true")
+    p.add_argument("--model", help="model tujuan --write-calibration (default model aktif)")
+    p.add_argument("--fit-stack", action="store_true",
+                   help="latih penggabung skor model + Binoculars (butuh run --binoculars)")
     p.add_argument("--max-fpr-ai", type=float, default=0.05)
     p.add_argument("--max-fpr-mixed", type=float, default=0.15)
     args = ap.parse_args()

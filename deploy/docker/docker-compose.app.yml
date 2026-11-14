@@ -63,6 +63,48 @@ services:
       - no-new-privileges:true
     mem_limit: 1g
 
+  # Skor Binoculars (zero-shot, pelengkap model embedding AI Detector).
+  # Model Qwen2.5-1.5B (observer + instruct) dibaca dari ~/icalora-models
+  # (read-only, offline). Model hanya dimuat saat ada deteksi dan dilepas dari
+  # VRAM setelah BINOC_IDLE_SECONDS tanpa permintaan; VRAM dibatasi < 10 GB.
+  binoculars:
+    # Tag tetap dari ch-compute (torch 2.5.1 + transformers) agar pembaruan image
+    # ComputeHub tidak mengubah layanan ini; layer dibagi, tanpa disk tambahan.
+    image: icalora-binoculars:base
+    container_name: icalora-binoculars
+    restart: unless-stopped
+    network_mode: host
+    user: "1015:1015"
+    working_dir: /app
+    command: ["python", "-u", "server.py"]
+    environment:
+      HOME: /tmp
+      HF_HOME: /models
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      BINOC_PORT: "58050"
+      BINOC_IDLE_SECONDS: "300"
+      BINOC_MAX_VRAM_GB: "9"
+      BINOC_MIN_FREE_MB: "10240"
+    volumes:
+      - ../../services/binoculars:/app:ro
+      - ${HOME}/icalora-models/binoculars-hf:/models:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:58050/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    mem_limit: 8g
+
   frontend:
     build:
       context: ../../frontend

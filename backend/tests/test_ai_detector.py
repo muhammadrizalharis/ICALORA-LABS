@@ -18,6 +18,9 @@ def _no_calibration(monkeypatch):
     import app.services.ai_detector as det
 
     monkeypatch.setattr(det, "_CALIB", False)
+    monkeypatch.setattr(det, "_STACK", False)
+    monkeypatch.setattr(det, "_BLEND_W", False)
+    monkeypatch.setattr(det, "_BINOC_ALWAYS", False)
 
 
 def test_sentences_splits_on_terminators():
@@ -138,6 +141,40 @@ def test_blend_agreeing_human_signals():
     assert verdict == "kemungkinan besar manusia"
 
 
+def test_short_text_uses_stricter_thresholds(monkeypatch):
+    import app.services.ai_detector as det
+
+    # Platt identitas (a=1, b=0); ambang normal 60/30, teks < 300 kata 85/50.
+    monkeypatch.setattr(det, "_CALIB", (1.0, 0.0, 60.0, 30.0, 85.0, 50.0, 300))
+    assert det._thresholds(False, 1000) == (60.0, 30.0)
+    assert det._thresholds(False, 150) == (85.0, 50.0)
+    assert det._thresholds(False) == (60.0, 30.0)
+    _, verdict_long, _ = _blend(70.0, None, 70.0, 70.0, n_words=1000)
+    _, verdict_short, _ = _blend(70.0, None, 70.0, 70.0, n_words=150)
+    assert verdict_long == "kemungkinan besar AI"
+    assert verdict_short == "campuran / tidak pasti"
+
+
+def test_meta_blend_weights_embedding_only(monkeypatch):
+    import app.services.ai_detector as det
+
+    monkeypatch.setattr(det, "_BLEND_W", {"stat": 0.0, "llm": 0.0, "model": 0.0, "emb": 1.0})
+    final, verdict, review = _blend(20.0, None, 90.0, 95.0)
+    assert final == 95.0
+    assert review is False  # aturan tinjauan 6-fitur nonaktif bila bobotnya 0
+    assert verdict == "kemungkinan besar AI"
+    # Tanpa embedding, kembali ke bobot bawaan agar tetap ada skor.
+    assert _blend(55.0, None, None, None)[0] == 55.0
+
+
+def test_short_text_uses_own_platt(monkeypatch):
+    import app.services.ai_detector as det
+
+    monkeypatch.setattr(det, "_CALIB", (1.0, 0.0, 60.0, 30.0, 85.0, 50.0, 300, 0.5, 0.0))
+    assert det._calibrate(90.0, 1000) == pytest.approx(90.0)
+    assert det._calibrate(90.0, 100) == pytest.approx(75.0)
+
+
 def test_blend_only_stat_available():
     final, verdict, review = _blend(55.0, None, None, None)
     assert final == 55.0
@@ -201,6 +238,8 @@ def test_long_doc_reports_segments_and_share(monkeypatch):
     assert r["segments"][0]["text"]
     assert r["segments"][-1]["text"] is None
     assert 0 < r["ai_share"] < 100
+    assert r["ai_share"] + r["uncertain_share"] + r["human_share"] == pytest.approx(100, abs=0.2)
+    assert r["raw_score"] is not None
     assert r["segments"][-1]["end"] == len(text)
 
 
@@ -298,6 +337,8 @@ def test_report_has_model_info(monkeypatch):
     assert r["reliability"] == "normal"
     assert "score_definition" in r["report"]
     assert isinstance(r["report"]["model"], dict)
+    assert r["report"]["versions"]["pipeline"]
+    assert "raw_score" in r
 
 
 def test_calibration_applied_monotonic(monkeypatch):
@@ -308,3 +349,119 @@ def test_calibration_applied_monotonic(monkeypatch):
     assert lo < 40.0 < 80.0 < hi
     monkeypatch.setattr(det, "_CALIB", False)
     assert det._calibrate(55.0) == 55.0
+
+
+def test_mlp_roundtrip_and_learns(tmp_path):
+    import json
+
+    import numpy as np
+
+    from app.services.ai_detector import model as m
+    from app.services.ai_detector.mlp import fit
+
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(600, 12))
+    y = (X[:, 0] * X[:, 1] > 0).astype(float)  # non-linear (XOR-like)
+    mdl, info = fit(X[:400], y[:400], X[400:], y[400:], hidden=32, lr=5e-3, epochs=120)
+    assert info["val_auc"] > 0.85
+    p = tmp_path / "mlp.json"
+    p.write_text(json.dumps(mdl.to_dict()))
+    loaded = m.load(p)
+    assert abs(loaded.predict_proba(list(X[450])) - mdl.predict_proba(list(X[450]))) < 1e-4
+
+
+_STACK_META = {"w_score": 1.0, "w_binoc": 1.0, "b": 0.0, "mu": 0.9, "sd": 0.05,
+               "threshold_ai": 80.0, "threshold_mixed": 50.0}
+
+
+def test_stack_uses_binoculars_and_own_thresholds(monkeypatch):
+    import app.services.ai_detector as det
+
+    monkeypatch.setattr(det, "_STACK", dict(_STACK_META))
+    ai_like = det._blend(10.0, None, 50.0, 50.0, binoc=0.75)[0]
+    human_like = det._blend(10.0, None, 50.0, 50.0, binoc=1.0)[0]
+    no_binoc = det._blend(10.0, None, 50.0, 50.0)[0]
+    assert ai_like > no_binoc > human_like
+    assert det._thresholds(True) == (80.0, 50.0)
+    assert det._thresholds(False) == (70.0, 45.0)
+
+
+def test_binoculars_unavailable_falls_back(monkeypatch):
+    import app.services.ai_detector as det
+
+    monkeypatch.setattr(det, "_STACK", dict(_STACK_META))
+    monkeypatch.setattr(det, "binoculars_scores", lambda texts: None)
+    monkeypatch.setattr(det, "_trained_probability", lambda sig: 10.0)
+    monkeypatch.setattr(det, "_emb_trained_probability", lambda sig, txt: 5.0)
+    monkeypatch.setattr(det, "_llm_analysis_timed", lambda txt: {"prob": None, "sentences": []})
+    r = det.detect_ai(" ".join(["Saya menulis catatan harian tentang pasar pagi ini."] * 12))
+    assert r["binoculars_score"] is None
+    assert "binoculars" not in r["report"]["components"]
+    assert r["report"]["binoculars"].startswith("tidak tersedia")
+    assert r["ai_probability"] is not None
+
+
+def test_long_doc_binoculars_per_segment(monkeypatch):
+    import app.services.ai_detector as det
+
+    text = _long_doc(130)
+    monkeypatch.setattr(det, "_STACK", dict(_STACK_META))
+    monkeypatch.setattr(det, "_trained_probability", lambda sig: 50.0)
+    monkeypatch.setattr(det, "_emb_probabilities", lambda sigs, txts: [50.0] * len(txts))
+    monkeypatch.setattr(det, "_llm_analysis_timed", lambda txt: {"prob": None, "sentences": []})
+    monkeypatch.setattr(det, "binoculars_scores",
+                        lambda txts: [0.7] + [1.0] * (len(txts) - 1))
+    r = det.detect_ai(text)
+    assert r["segments"][0]["label"] == "ai"
+    assert r["segments"][-1]["label"] == "human"
+    assert "binoculars" in r["report"]["components"]
+    assert r["report"]["binoculars"] == "dipakai"
+
+
+def test_binoculars_client_fails_safe(monkeypatch):
+    from app.services.ai_detector import binoculars as b
+
+    monkeypatch.setattr(b, "BINOC_ENDPOINT", "http://127.0.0.1:9")
+    monkeypatch.setattr(b, "BINOC_TIMEOUT", 1.0)
+    assert b.binoculars_scores(["teks apa saja"]) is None
+    monkeypatch.setattr(b, "BINOC_ENABLED", False)
+    assert b.binoculars_scores(["teks"]) is None
+
+
+def test_fit_stack_learns_complementary_signal():
+    import random
+    from types import SimpleNamespace
+
+    from app.services.ai_detector.evaluate import _fit_stack
+
+    rng = random.Random(1)
+    rows = []
+    for i in range(400):
+        y = i % 2
+        rows.append({
+            "label": y, "split": "val" if i < 200 else "test", "lang": "en",
+            "stat_probability": 50.0, "llm_probability": None, "model_probability": None,
+            "emb_model_probability": min(99.0, max(1.0, 50 + (20 if y else -20)
+                                                   + rng.gauss(0, 25))),
+            "binoculars_score": 0.9 + (-0.08 if y else 0.0) + rng.gauss(0, 0.04),
+        })
+    st = _fit_stack(rows, SimpleNamespace(max_fpr_ai=0.05, max_fpr_mixed=0.15))
+    assert st["w_score"] > 0 and st["w_binoc"] > 0
+    auc = st["test_auc"]["semua"]
+    assert auc["gabungan"] >= max(auc["model"], auc["binoculars"]) - 0.01
+
+
+def test_eval_metrics_tpr_at_fpr_and_wilson():
+    from app.services.ai_detector.evaluate import _nll, _tpr_at_fpr, _wilson
+
+    humans = [float(i) for i in range(100)]  # 0..99
+    ais = [50.0, 98.5, 99.5, 120.0]
+    scores, labels = humans + ais, [0] * 100 + [1] * 4
+    r = _tpr_at_fpr(scores, labels)
+    # FPR 1% → ambang = skor manusia tertinggi ke-2 (98); AI di atasnya: 98.5, 99.5, 120
+    assert r["tpr@fpr0.01"] == 0.75
+    assert r["tpr@fpr0.05"] == 0.75
+    lo, hi = _wilson(5, 100)
+    assert 0.0 < lo < 0.05 < hi < 0.12
+    assert _wilson(0, 0) is None
+    assert _nll([99.0, 1.0], [1, 0]) < 0.02

@@ -228,6 +228,13 @@ function AiDetectorView({ result }: { result: Record<string, unknown> }) {
         )}
         <div className="min-w-0 flex-1 space-y-3">
           {verdict && <Pill tone={tone}>{verdict}</Pill>}
+          {aiShare !== null && num(result.uncertain_share) !== null && (
+            <p className="text-xs text-neutral-500">
+              Komposisi teks: AI {aiShare}% · tidak pasti {num(result.uncertain_share)}% ·
+              manusia {num(result.human_share)}%
+              {num(result.raw_score) !== null && <> · skor mentah {num(result.raw_score)}</>}
+            </p>
+          )}
           <div className="grid gap-2 sm:grid-cols-2">
             {components
               .filter(([, v]) => num(v) !== null)
@@ -295,7 +302,9 @@ type AiReport = {
   language?: string;
   components?: string[];
   llm_skipped_reason?: string | null;
+  binoculars?: string;
   score_definition?: string;
+  versions?: { pipeline?: string; calibration?: string | null; stack?: string | null };
   model?: {
     trained_at?: string | null;
     training_samples?: number | null;
@@ -319,6 +328,7 @@ function AiReportDetails({ report }: { report: AiReport }) {
     ["Kata dianalisis", report.words_analyzed?.toLocaleString("id-ID")],
     ["Jumlah segmen", report.segments],
     ["Komponen", report.components?.join(", ")],
+    ["Binoculars (zero-shot)", report.binoculars],
     ["Tanggal model", m.trained_at],
     ["Data latih", m.training_samples?.toLocaleString("id-ID")],
     ["Generator data latih", m.generators?.join(", ")],
@@ -329,6 +339,18 @@ function AiReportDetails({ report }: { report: AiReport }) {
         : null,
     ],
     ["Skor terkalibrasi", m.calibrated === undefined ? null : m.calibrated ? "ya" : "belum"],
+    [
+      "Versi",
+      report.versions?.pipeline
+        ? [
+            report.versions.pipeline,
+            report.versions.calibration && `kalibrasi ${report.versions.calibration}`,
+            report.versions.stack && `stack ${report.versions.stack}`,
+          ]
+            .filter(Boolean)
+            .join(" · ")
+        : null,
+    ],
   ];
   return (
     <details className="rounded-lg border border-c surface px-3 py-2 text-xs text-neutral-500">
