@@ -18,11 +18,13 @@ dan ≤ 5 % (campuran), dengan batas bawah 50/25 agar skor tetap bermakna sebaga
 ## Data latih
 
 - Data seed + `train_emb_v2/v2b` (model lokal: gemma, qwen, gpt-oss, sahabatai; termasuk humanized).
-- 2.000 teks dari 10 model cloud (Claude Haiku/Sonnet/Opus 5.5, Gemini 3.8-flash/4-argon/4-hydrogen,
-  GPT-6.1-sol, GPT-6-astra, Grok 4.7, Kimi K3), EN+ID, berbagai genre. Split per *prompt*
+- 4.500 teks dari 10 model cloud (Claude Haiku/Sonnet/Opus 5.5, Gemini 3.8-flash/4-argon/4-hydrogen,
+  GPT-6.1-sol, GPT-6-astra, Grok 4.7, Kimi K3), EN+ID, berbagai genre — termasuk 2.500 teks
+  pendek (abstrak/paragraf 110–280 kata) khusus memperkuat recall teks pendek. Split per *prompt*
   (60/20/20) sehingga prompt yang sama tidak bocor antar-split.
 - Manusia: 6.000 dokumen korpus pra-2021 (≥ 300 kata) + 3.500 abstrak pendek pra-2021
-  (80–300 kata, EN/ID). Split per dokumen 50/25/25. Tahun < 2021 dipilih agar label "manusia" pasti.
+  (80–300 kata, EN/ID) + 1.388 jawaban manusia kasual HC3 (EN, pra-2023). Split per dokumen
+  50/25/25. Tahun < 2021 (HC3 < 2023) dipilih agar label "manusia" pasti.
 - Augmentasi format: teks AI diberi sitasi/angka/hard-wrap palsu, teks manusia dibersihkan,
   agar model tidak belajar jalan pintas format.
 
@@ -30,13 +32,17 @@ dan ≤ 5 % (campuran), dengan batas bawah 50/25 agar skor tetap bermakna sebaga
 
 | Kelompok | n | Vonis AI | Ditandai (AI/campuran) |
 |---|---|---|---|
-| AI cloud ≥ 300 kata | 295 | 99,3 % | 100 % |
-| AI cloud < 300 kata | 117 | 94,0 % | 96,6 % |
-| Manusia EN ≥ 300 kata | 825 | 0,6 % | 1,6 % |
-| Manusia EN < 300 kata | 489 | 1,2 % | 6,3 % |
-| Manusia ID ≥ 300 kata | 602 | 0,5 % | 1,0 % |
-| Manusia ID < 300 kata | 336 | 1,2 % | 3,0 % |
-| Manusia bahasa lain < 300 kata | 378 | 2,9 % | 10,3 % |
+| AI cloud ≥ 300 kata | 295 | 99,7 % | 99,7 % |
+| AI cloud < 300 kata | 629 | 98,1 % | 99,2 % |
+| Manusia EN ≥ 300 kata | 825 | 0,5 % | 1,0 % |
+| Manusia EN < 300 kata | 829 | 1,0 % | 2,2 % |
+| Manusia ID ≥ 300 kata | 602 | 0,5 % | 0,5 % |
+| Manusia ID < 300 kata | 336 | 0,9 % | 2,1 % |
+| Manusia bahasa lain < 300 kata | 378 | 4,5 % | 10,6 % |
+
+Dibanding model sebelumnya (v4e): recall teks AI pendek naik dari 94,0 % menjadi 98,1 %,
+sementara FPR manusia (EN/ID) tetap ≤ 1 %. Manusia kasual EN (HC3) kini divonis AI 1,0 %
+(sebelum pelatihan ulang ±2,7 %).
 
 Eval set lama (429 dokumen, model lokal, sebagian besar < 300 kata), dibanding model sebelumnya (pr63):
 
