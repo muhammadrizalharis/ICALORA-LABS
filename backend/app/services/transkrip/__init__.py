@@ -19,6 +19,9 @@ _COMPUTE = os.environ.get("WHISPER_COMPUTE", "int8")
 _CACHE_DIR = os.environ.get("WHISPER_CACHE", os.path.expanduser("~/.cache/icalora-whisper"))
 # Beam search (>1) lebih akurat daripada greedy; default 5 seimbang akurasi/latensi.
 _BEAM_SIZE = int(os.environ.get("WHISPER_BEAM", "5"))
+# Bahasa default: paksa Indonesia agar tidak salah deteksi sebagai Melayu.
+# Kosongkan (WHISPER_LANGUAGE="") untuk mengaktifkan auto-deteksi.
+_DEFAULT_LANG = os.environ.get("WHISPER_LANGUAGE", "id")
 
 # Batas aman ukuran unggahan audio (MB).
 MAX_AUDIO_BYTES = 50 * 1024 * 1024
@@ -51,7 +54,14 @@ def is_supported(filename: str) -> bool:
 
 
 def transcribe_audio(filename: str, data: bytes, language: str | None = None) -> dict:
-    """Transkripsi berkas audio/video menjadi teks + segmen berwaktu."""
+    """Transkripsi berkas audio/video menjadi teks + segmen berwaktu.
+
+    CPU-bound (blocking) — panggil lewat thread offload bila dari konteks async.
+    """
+    # Normalisasi kode bahasa: pakai default (id) bila kosong; "auto"/"" -> deteksi.
+    lang = (language or _DEFAULT_LANG or "").strip().lower() or None
+    if lang == "auto":
+        lang = None
     suffix = os.path.splitext(filename or "")[1] or ".mp3"
     model = _get_model()
 
@@ -62,9 +72,10 @@ def transcribe_audio(filename: str, data: bytes, language: str | None = None) ->
     try:
         segments, info = model.transcribe(
             tmp_path,
-            language=language or None,
+            language=lang,
             vad_filter=True,
             beam_size=_BEAM_SIZE,
+            condition_on_previous_text=False,
         )
         seg_list: list[dict] = []
         parts: list[str] = []

@@ -1,6 +1,7 @@
 """Endpoint fitur ringan Fase 1."""
 
 import asyncio
+import os
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
@@ -54,6 +55,8 @@ router = APIRouter(prefix="/tools", tags=["tools"])
 # ekstrem — setara buku/tesis sangat panjang (~340rb kata). Analisis semantik
 # memakai embedding per-jendela, jadi seluruh isi dokumen tetap diperiksa.
 MAX_CHARS = 2_000_000
+# Batas waktu transkripsi (detik) agar tidak menahan worker pada berkas panjang.
+TRANSCRIBE_TIMEOUT = int(os.environ.get("WHISPER_TIMEOUT", "900"))
 settings = get_settings()
 
 
@@ -743,7 +746,18 @@ async def transcribe_ep(
             detail=f"Berkas melebihi {MAX_AUDIO_BYTES // (1024 * 1024)} MB.",
         )
     try:
-        res = transcribe_audio(file.filename or "audio", data, language)
+        res = await asyncio.wait_for(
+            run_in_threadpool(transcribe_audio, file.filename or "audio", data, language),
+            timeout=TRANSCRIBE_TIMEOUT,
+        )
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(
+            status_code=504,
+            detail=(
+                f"Transkripsi melebihi batas waktu {TRANSCRIBE_TIMEOUT} dtk. "
+                "Coba berkas lebih pendek."
+            ),
+        ) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Transkripsi gagal: {exc}") from exc
     _log(request, "transkrip-audio", "Transkrip Audio", file.filename or "audio", res)

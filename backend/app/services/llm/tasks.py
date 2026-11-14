@@ -132,6 +132,14 @@ def _extract_json(raw: str):
     raise json.JSONDecodeError("tidak ada JSON valid", raw, 0)
 
 
+def _clamp_score(val, lo: float = 0.0, hi: float = 100.0):
+    """Batasi skor numerik dari LLM ke rentang [lo, hi]; None bila bukan angka."""
+    try:
+        return max(lo, min(hi, float(val))) if val is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 def _text_metrics(text: str) -> dict:
     """Metrik tulisan deterministik (dihitung di Python, bukan LLM)."""
     chars = len(text)
@@ -214,13 +222,11 @@ def grammar_check(text: str) -> dict:
     # Skor menurun seiring kepadatan masalah, tetapi tetap adil untuk teks pendek:
     # 0 masalah -> 100; makin banyak poin relatif jumlah kata, makin rendah.
     score = max(0, min(100, round(100 * metrics["words"] / max(1, metrics["words"] + 2 * points))))
-    better_than_percent = max(1, round(score * 0.95))
 
     return {
         "corrected": corrected,
         "metrics": metrics,
         "score": score,
-        "better_than_percent": better_than_percent,
         "issues": issues,
         "issue_summary": {
             "total": len(issues),
@@ -230,13 +236,26 @@ def grammar_check(text: str) -> dict:
     }
 
 
+PARAPHRASE_STYLES = {
+    "standar": "standar dan netral",
+    "formal": "formal dan baku",
+    "akademik": "akademik dan ilmiah",
+    "sederhana": "sederhana dan mudah dipahami",
+    "kreatif": "kreatif dan bervariasi",
+}
+
+
 def paraphrase(text: str, style: str = "standar") -> dict:
     llm = get_llm()
+    key = (style or "").strip().lower()
+    if key not in PARAPHRASE_STYLES:
+        key = "standar"
+    desc = PARAPHRASE_STYLES[key]
     messages = [
         {
             "role": "system",
             "content": (
-                f"Parafrasekan teks pengguna dengan gaya '{style}', pertahankan makna "
+                f"Parafrasekan teks pengguna dengan gaya {desc}, pertahankan makna "
                 "dan bahasa aslinya. Balas HANYA hasil parafrase."
             ),
         },
@@ -306,6 +325,7 @@ def grade_essay(text: str, rubric: str | None = None) -> dict:
             "role": "system",
             "content": (
                 "Anda penilai esai akademik. " + rubric_line + " Nilai esai pengguna. "
+                "Jawab dalam bahasa yang sama dengan esai pengguna. "
                 "Balas HANYA JSON valid dengan bentuk: "
                 '{"overall_score": <0-100>, "grade": "<A/B/C/D/E>", '
                 '"criteria": [{"name": "<nama>", "score": <0-100>, '
@@ -339,6 +359,13 @@ def grade_essay(text: str, rubric: str | None = None) -> dict:
         score = None
     criteria = data.get("criteria")
     criteria = [c for c in criteria if isinstance(c, dict)] if isinstance(criteria, list) else []
+    # Clamp skor tiap kriteria ke 0-100 agar frontend tidak menerima nilai liar.
+    for c in criteria:
+        cs = c.get("score")
+        try:
+            c["score"] = max(0.0, min(100.0, float(cs))) if cs is not None else None
+        except (TypeError, ValueError):
+            c["score"] = None
     suggestions = data.get("suggestions")
     suggestions = (
         [str(s) for s in suggestions if s] if isinstance(suggestions, list) else []
@@ -360,6 +387,7 @@ def reader_reactions(text: str) -> dict:
             "role": "system",
             "content": (
                 "Prediksi bagaimana beragam pembaca akan bereaksi terhadap teks pengguna. "
+                "Jawab dalam bahasa yang sama dengan teks pengguna. "
                 "Balas HANYA JSON valid: "
                 '{"reactions": [{"persona": "<tipe pembaca>", '
                 '"reaction": "<reaksi singkat>", "sentiment": "<positif/netral/negatif>"}], '
@@ -371,16 +399,32 @@ def reader_reactions(text: str) -> dict:
         {"role": "user", "content": text},
     ]
     raw = llm.chat(messages, temperature=0.4, max_tokens=900)
+    fallback = {
+        "reactions": [],
+        "overall_sentiment": None,
+        "clarity_score": None,
+        "engagement_score": None,
+        "summary": raw[:500],
+    }
     try:
-        return _extract_json(raw)
+        data = _extract_json(raw)
     except json.JSONDecodeError:
-        return {
-            "reactions": [],
-            "overall_sentiment": None,
-            "clarity_score": None,
-            "engagement_score": None,
-            "summary": raw[:500],
-        }
+        return fallback
+    if not isinstance(data, dict):
+        return fallback
+    reactions = data.get("reactions")
+    reactions = [r for r in reactions if isinstance(r, dict)] if isinstance(reactions, list) else []
+    return {
+        "reactions": reactions,
+        "overall_sentiment": (
+            data.get("overall_sentiment")
+            if isinstance(data.get("overall_sentiment"), str)
+            else None
+        ),
+        "clarity_score": _clamp_score(data.get("clarity_score")),
+        "engagement_score": _clamp_score(data.get("engagement_score")),
+        "summary": str(data.get("summary") or raw[:500]),
+    }
 
 
 def build_resume(info: str, target_role: str | None = None) -> dict:
@@ -446,7 +490,9 @@ def generate_toc(text: str) -> dict:
             "role": "system",
             "content": (
                 "Anda penyusun struktur dokumen akademik. Dari isi dokumen pengguna, "
-                "susun Daftar Isi berjenjang (bab & sub-bab). Balas HANYA JSON valid: "
+                "susun Daftar Isi berjenjang (bab & sub-bab). "
+                "Jawab dalam bahasa yang sama dengan dokumen pengguna. "
+                "Balas HANYA JSON valid: "
                 '{"entries": [{"level": <1-3>, "title": "<judul>", '
                 '"number": "<1 / 1.1 / 1.1.1>"}], "markdown": "<daftar isi dalam Markdown>"}'
             ),
@@ -455,9 +501,27 @@ def generate_toc(text: str) -> dict:
     ]
     raw = llm.chat(messages, temperature=0.2, max_tokens=1200)
     try:
-        return _extract_json(raw)
+        data = _extract_json(raw)
     except json.JSONDecodeError:
         return {"entries": [], "markdown": raw[:1500]}
+    if not isinstance(data, dict):
+        return {"entries": [], "markdown": raw[:1500]}
+    entries = data.get("entries")
+    clean: list[dict] = []
+    if isinstance(entries, list):
+        for e in entries:
+            if not isinstance(e, dict):
+                continue
+            try:
+                lvl = int(e.get("level", 1))
+            except (TypeError, ValueError):
+                lvl = 1
+            clean.append({
+                "level": max(1, min(3, lvl)),
+                "title": str(e.get("title") or "").strip(),
+                "number": str(e.get("number") or "").strip(),
+            })
+    return {"entries": clean, "markdown": str(data.get("markdown") or raw[:1500])}
 
 
 def improve_document(text: str, goal: str | None = None) -> dict:
