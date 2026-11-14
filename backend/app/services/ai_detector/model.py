@@ -110,8 +110,14 @@ def save(model: LogisticModel, path: Path = MODEL_PATH) -> None:
     path.write_text(json.dumps(model.to_dict(), indent=2), encoding="utf-8")
 
 
-def load(path: Path = MODEL_PATH) -> LogisticModel | None:
+def load(path: Path = MODEL_PATH):
+    """Muat model (logistic atau MLP, dibedakan kunci "type")."""
     try:
-        return LogisticModel.from_dict(json.loads(path.read_text(encoding="utf-8")))
-    except (FileNotFoundError, json.JSONDecodeError, KeyError):
+        d = json.loads(path.read_text(encoding="utf-8"))
+        if d.get("type") == "mlp":
+            from app.services.ai_detector.mlp import MLPModel
+
+            return MLPModel.from_dict(d)
+        return LogisticModel.from_dict(d)
+    except (FileNotFoundError, json.JSONDecodeError, KeyError, ValueError):
         return None

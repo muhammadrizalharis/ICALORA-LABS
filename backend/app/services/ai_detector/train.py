@@ -753,7 +753,8 @@ def _unload_models(lanes: list[tuple[str, str]], timeout: int = 20) -> None:
 
 
 def _collect_humans_stream(target_en: int, target_id: int, client: httpx.Client,
-                           X: list[list[float]], y: list[int], used: set[int]) -> None:
+                           X: list[list[float]], y: list[int], used: set[int],
+                           sink: _JsonlSink | None = None) -> None:
     """Embed sampel manusia korpus (EN + ID) langsung ke RAM; tanpa tulis disk."""
     n = 0
     if target_en > 0:
@@ -762,8 +763,12 @@ def _collect_humans_stream(target_en: int, target_id: int, client: httpx.Client,
             if emb is None:
                 continue
             used.add(doc_id)
-            X.append(feature_vector(_statistical_signals(body)) + emb)
+            feat = feature_vector(_statistical_signals(body))
+            X.append(feat + emb)
             y.append(0)
+            if sink is not None:
+                sink.append({"label": 0, "feat": feat, "emb": emb, "src_id": doc_id,
+                             "lang": "en"})
             n += 1
             if n % 100 == 0:
                 print(f"[stream] manusia EN: {n}/{target_en}", flush=True)
@@ -775,12 +780,113 @@ def _collect_humans_stream(target_en: int, target_id: int, client: httpx.Client,
             if emb is None:
                 continue
             used.add(doc_id)
-            X.append(feature_vector(_statistical_signals(body)) + emb)
+            feat = feature_vector(_statistical_signals(body))
+            X.append(feat + emb)
             y.append(0)
+            if sink is not None:
+                sink.append({"label": 0, "feat": feat, "emb": emb, "src_id": doc_id,
+                             "lang": "id"})
             m += 1
             if m % 50 == 0:
                 print(f"[stream] manusia ID: {m}/{target_id}", flush=True)
         print(f"[stream] manusia ID terkumpul={m}", flush=True)
+
+
+# Prompt v2: genre, panjang & gaya permintaan beragam (seperti mahasiswa memakai
+# chatbot), dikirim sebagai pesan user. Sengaja TIDAK memakai template evaluasi
+# (evaluate._EVAL_PROMPTS) agar pengujian lintas-prompt tetap jujur.
+_PROMPTS_V2 = {
+    "en": [
+        "Write a {n}-word background section explaining why research on this topic matters: {t}",
+        "Explain the following topic to first-year university students in about {n} words: {t}",
+        "Write a problem statement and research objectives (about {n} words) for: {t}",
+        "Summarize current knowledge about this topic in {n} words, academic tone: {t}",
+        "I need a {n}-word discussion of the main challenges and future directions of: {t}",
+        "Write a conclusion section (around {n} words) for a paper about: {t}",
+        "Write a {n}-word answer to an exam question asking students to critically "
+        "evaluate: {t}",
+        "Draft the theoretical framework part of my paper (about {n} words). Topic: {t}",
+        "Write a short report (about {n} words) describing the methods one could use "
+        "to study: {t}",
+        "Can you write a reflective academic paragraph sequence (~{n} words) on: {t}",
+        "Write about {n} words comparing two different approaches to: {t}",
+        "Write the implications and recommendations section (~{n} words) for: {t}",
+        "Write a case-study style analysis of about {n} words on: {t}",
+        "Write a {n}-word assignment answer about {t}. Make it sound natural, not robotic.",
+        "Help me write the related work paragraphs ({n} words) for my study on: {t}",
+        "Write an informative article of about {n} words for a campus journal about: {t}",
+    ],
+    "id": [
+        "Buatkan latar belakang masalah sekitar {n} kata untuk penelitian tentang: {t}",
+        "Jelaskan topik berikut untuk mahasiswa semester awal dalam {n} kata: {t}",
+        "Tuliskan rumusan masalah dan tujuan penelitian (sekitar {n} kata) untuk: {t}",
+        "Rangkum pengetahuan terkini tentang topik ini dalam {n} kata, gaya akademik: {t}",
+        "Tolong buat pembahasan {n} kata tentang tantangan dan arah ke depan dari: {t}",
+        "Tuliskan bagian kesimpulan dan saran (sekitar {n} kata) untuk makalah tentang: {t}",
+        "Jawab soal ujian berikut dalam {n} kata secara kritis: analisislah {t}",
+        "Buatkan landasan teori untuk makalah saya (sekitar {n} kata). Topik: {t}",
+        "Tuliskan laporan singkat (sekitar {n} kata) tentang metode yang dapat dipakai "
+        "untuk meneliti: {t}",
+        "Buat tulisan reflektif akademik sekitar {n} kata mengenai: {t}",
+        "Bandingkan dua pendekatan berbeda terkait topik berikut dalam {n} kata: {t}",
+        "Tuliskan implikasi dan rekomendasi kebijakan (sekitar {n} kata) tentang: {t}",
+        "Buat analisis studi kasus sekitar {n} kata tentang: {t}",
+        "Kerjakan tugas makalah {n} kata tentang {t}. Buat agar terdengar alami, tidak kaku.",
+        "Bantu saya menulis kajian penelitian terdahulu ({n} kata) untuk topik: {t}",
+        "Tulis artikel populer ilmiah sekitar {n} kata untuk buletin kampus tentang: {t}",
+    ],
+}
+_PREAMBLE_RE = re.compile(
+    r"^\s*(here(?:'s| is| are)|sure|certainly|of course|berikut(?:nya)?|tentu|baik|"
+    r"oke|title:|judul:)[^\n]*\n",
+    re.I,
+)
+
+
+def _clean_output(txt: str) -> str:
+    """Buang kalimat pembuka chatbot, judul & format markdown."""
+    txt = _PREAMBLE_RE.sub("", txt.strip(), count=1)
+    lines = []
+    for ln in txt.splitlines():
+        s = ln.strip()
+        if s.startswith("#") or (s.startswith("**") and s.endswith("**") and len(s) < 120):
+            continue
+        if s.endswith(":") and len(s.split()) <= 6:
+            continue
+        lines.append(s.replace("**", "").replace("__", ""))
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+
+
+def _generate_v2(client: httpx.Client, endpoint: str, model: str, title: str, lang: str,
+                 rng: random.Random) -> tuple[str, int] | None:
+    """Generate dengan prompt v2; kembalikan (teks, prompt_id) atau None."""
+    pid = rng.randrange(len(_PROMPTS_V2[lang]))
+    n = rng.choice((120, 180, 250, 300, 350))
+    fallback = "a general research topic" if lang == "en" else "topik penelitian umum"
+    topic = title.strip() or fallback
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": _PROMPTS_V2[lang][pid].format(n=n, t=topic)}],
+        "stream": False,
+        "keep_alive": "10m",
+        "think": False,
+        "options": {"temperature": rng.choice(_AI_TEMPS), "num_predict": 900,
+                    "num_ctx": _NUM_CTX},
+    }
+    try:
+        resp = client.post(f"{endpoint}/api/chat", json=payload, timeout=300)
+        resp.raise_for_status()
+        out = _clean_output(resp.json()["message"]["content"] or "")
+    except Exception:  # noqa: BLE001
+        return None
+    words = out.split()
+    if len(words) < 80:
+        return None
+    if len(words) > 450:
+        out = " ".join(words[:450])
+    if lang == "id" and not _looks_indonesian(out, min_hits=5):
+        return None
+    return out, pid
 
 
 _HUMANIZE_PROMPT = {
@@ -827,7 +933,8 @@ def _generate_ai_stream(lanes: list[tuple[str, str]], target_ai: int,
                         titles_en: list[str], titles_id: list[str], id_frac: float,
                         X: list[list[float]], y: list[int], lock: threading.Lock,
                         max_seconds: int, concurrency: int,
-                        humanize_frac: float = 0.0) -> int:
+                        humanize_frac: float = 0.0, diverse: bool = False,
+                        sink: _JsonlSink | None = None) -> int:
     """Generate teks AI (EN + ID) via model modern, embed, simpan ke RAM. Tanpa disk.
 
     Sebagian (humanize_frac) diparafrase agar 'terdengar manusia' namun tetap
@@ -867,18 +974,25 @@ def _generate_ai_stream(lanes: list[tuple[str, str]], target_ai: int,
                     return
                 kind, title = task
                 endpoint, model = rng.choice(lanes)
-                txt = (_generate_id(client, endpoint, model, title, rng) if kind == "id"
-                       else _generate(client, endpoint, model, title, rng))
+                pid = None
+                if diverse:
+                    got = _generate_v2(client, endpoint, model, title, kind, rng)
+                    txt, pid = got if got else (None, None)
+                else:
+                    txt = (_generate_id(client, endpoint, model, title, rng) if kind == "id"
+                           else _generate(client, endpoint, model, title, rng))
                 if not txt:
                     fails += 1
                     if fails >= 30:
                         print(f"[stream]   worker {wid} berhenti (30 gagal beruntun)", flush=True)
                         return
                     continue
+                humanized = False
                 if humanize_frac > 0 and rng.random() < humanize_frac:
                     h = _humanize(client, endpoint, model, txt, kind, rng)
                     if h and (kind == "en" or _looks_indonesian(h, min_hits=5)):
-                        txt = h
+                        txt = _clean_output(h)
+                        humanized = True
                         with lock:
                             state["hum"] += 1
                 emb = embed_text(txt, client, EMB_ENDPOINT)
@@ -886,12 +1000,16 @@ def _generate_ai_stream(lanes: list[tuple[str, str]], target_ai: int,
                     fails += 1
                     continue
                 fails = 0
-                vec = feature_vector(_statistical_signals(txt)) + emb
+                feat = feature_vector(_statistical_signals(txt))
+                vec = feat + emb
                 with lock:
                     if state["ai"] >= target_ai:
                         return
                     X.append(vec)
                     y.append(1)
+                    if sink is not None:
+                        sink.append({"label": 1, "feat": feat, "emb": emb, "gen": model,
+                                     "lang": kind, "hum": humanized, "prompt": pid})
                     state["ai"] += 1
                     c = state["ai"]
                 if c % 25 == 0:
@@ -909,6 +1027,27 @@ def _generate_ai_stream(lanes: list[tuple[str, str]], target_ai: int,
     return state["ai"]
 
 
+class _JsonlSink:
+    """Tulis tiap sampel (feat+emb) LANGSUNG ke jsonl agar tak hilang bila proses mati."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.n = 0
+        self._fh = path.open("a", encoding="utf-8")
+        self._lock = threading.Lock()
+
+    def append(self, rec: dict) -> None:
+        rec = dict(rec, emb=[round(v, 5) for v in rec["emb"]])
+        with self._lock:
+            self._fh.write(json.dumps(rec) + "\n")
+            self._fh.flush()
+            self.n += 1
+
+    def close(self) -> None:
+        self._fh.close()
+        print(f"[stream] {self.n} sampel ditulis → {self.path}", flush=True)
+
+
 def cmd_stream_emb(args) -> None:
     """Retrain model_emb TANPA menyimpan korpus: embed di RAM lalu latih.
 
@@ -924,8 +1063,11 @@ def cmd_stream_emb(args) -> None:
     X: list[list[float]] = []
     y: list[int] = []
     used: set[int] = set()
+    sink = _JsonlSink(Path(args.save_emb)) if args.save_emb else None
+    if args.collect_only and sink is None:
+        raise SystemExit("[stream] --collect-only butuh --save-emb")
 
-    if args.seed_cache:
+    if args.seed_cache and not args.collect_only:
         Xc, yc, uc = _load_emb_cache()
         X.extend(Xc)
         y.extend(yc)
@@ -938,7 +1080,7 @@ def cmd_stream_emb(args) -> None:
     with httpx.Client() as client:
         if args.extra_humans > 0:
             print(f"[stream] kumpulkan manusia baru: EN={target_en_h} ID={target_id_h}", flush=True)
-            _collect_humans_stream(target_en_h, target_id_h, client, X, y, used)
+            _collect_humans_stream(target_en_h, target_id_h, client, X, y, used, sink)
 
     titles_en = [t for _id, t, _b in _human_samples(args.target_ai + 1000, set())]
     titles_id: list[str] = []
@@ -961,13 +1103,19 @@ def cmd_stream_emb(args) -> None:
         print(f"[stream] lane {li + 1}/{n_lanes}: {lane[1]} target={quota}", flush=True)
         got = _generate_ai_stream([lane], quota, en_part, id_part, args.id_frac,
                                   X, y, lock, args.max_seconds // n_lanes, args.concurrency,
-                                  humanize_frac=args.humanize_frac)
+                                  humanize_frac=args.humanize_frac,
+                                  diverse=args.diverse_prompts, sink=sink)
         per_lane[lane[1]] = got
         final += got
         print(f"[stream] lane {lane[1]} terkumpul={got}", flush=True)
         if not args.keep_vram:
             _unload_models([lane])
     print(f"[stream] AI modern terkumpul={final} per model={per_lane}", flush=True)
+    if sink is not None:
+        sink.close()
+    if args.collect_only:
+        print("[stream] --collect-only: selesai mengumpulkan; latih dengan `fit-emb`.", flush=True)
+        return
 
     pos = sum(y)
     print(f"[stream] total {len(X)} sampel (AI={pos}, manusia={len(y) - pos}), "
@@ -1002,6 +1150,7 @@ def cmd_stream_emb(args) -> None:
     model.meta["ai_per_generator"] = per_lane
     model.meta["humanize_frac"] = args.humanize_frac
     model.meta["trained_at"] = time.strftime("%Y-%m-%d", time.gmtime())
+    model.meta["prompts"] = "v2-diverse" if args.diverse_prompts else "v1"
 
     if args.dry_run:
         print("[stream] DRY-RUN: model TIDAK disimpan.", flush=True)
@@ -1069,9 +1218,15 @@ def main() -> None:
                     help="abaikan cache lama; latih hanya dari sampel streaming")
     se.add_argument("--humanize-frac", type=float, default=0.0,
                     help="porsi sampel AI yang diparafrase 'agar terdengar manusia'")
+    se.add_argument("--diverse-prompts", action="store_true",
+                    help="pakai prompt v2 (genre/panjang/gaya permintaan beragam)")
+    se.add_argument("--save-emb", default="",
+                    help="tulis sampel baru (feat+emb) ke file jsonl ini")
     se.add_argument("--keep-vram", action="store_true",
                     help="jangan lepas VRAM generator usai latih")
     se.add_argument("--dry-run", action="store_true", help="jangan simpan model (uji saja)")
+    se.add_argument("--collect-only", action="store_true",
+                    help="hanya kumpulkan sampel ke --save-emb (tanpa melatih); latih via mlp.py")
     se.add_argument("--max-seconds", type=int, default=7200)
     se.add_argument("--concurrency", type=int, default=4)
     se.add_argument("--test-frac", type=float, default=0.2)
