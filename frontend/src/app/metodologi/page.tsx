@@ -23,7 +23,7 @@ const SECTIONS = [
   {
     icon: "🆔",
     title: "Laporan yang dapat diverifikasi",
-    body: "Setiap laporan memiliki ID Laporan deterministik berformat ICL-TANGGAL-HASH dan hash integritas SHA-256 dari teks yang diperiksa. Teks yang sama akan selalu menghasilkan ID dan hash yang sama, sehingga pihak ketiga (dosen/reviewer) dapat memverifikasi bahwa laporan tidak dimanipulasi. Jumlah dokumen pembanding dicantumkan apa adanya pada setiap laporan.",
+    body: "Setiap laporan memiliki ID Laporan deterministik berformat ICL-TANGGAL-HASH dan hash integritas SHA-256 dari teks yang diperiksa. Teks yang sama akan selalu menghasilkan ID dan hash yang sama, sehingga pihak ketiga (dosen/reviewer) dapat memverifikasi bahwa laporan tidak dimanipulasi.",
   },
   {
     icon: "⚠️",
@@ -46,8 +46,6 @@ export default function MetodologiPage() {
       .catch(() => setStatus(null));
   }, []);
 
-  const total = status?.total_documents ?? 0;
-
   return (
     <div className="mx-auto max-w-3xl px-6 py-14">
       <div className="text-center">
@@ -62,11 +60,9 @@ export default function MetodologiPage() {
 
       <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3">
         <div className="rounded-xl border border-c p-4 text-center">
-          <div className="text-2xl font-bold text-neutral-900 dark:text-white">
-            {total > 0 ? total.toLocaleString("id-ID") : "…"}
-          </div>
+          <div className="text-2xl font-bold text-neutral-900 dark:text-white">Akses-terbuka</div>
           <div className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
-            dokumen akses-terbuka
+            OpenAlex · PMC · DOAJ
           </div>
         </div>
         <div className="rounded-xl border border-c p-4 text-center">
@@ -81,12 +77,12 @@ export default function MetodologiPage() {
 
       {status?.by_source && Object.keys(status.by_source).length > 0 && (
         <div className="mt-4 flex flex-wrap justify-center gap-2 text-xs">
-          {Object.entries(status.by_source).map(([src, n]) => (
+          {Object.keys(status.by_source).map((src) => (
             <span
               key={src}
               className="rounded-full border border-c px-3 py-1 text-neutral-600 dark:text-neutral-300"
             >
-              {src}: {n.toLocaleString("id-ID")}
+              {src}
             </span>
           ))}
         </div>

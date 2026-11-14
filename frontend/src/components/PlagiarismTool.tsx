@@ -43,7 +43,7 @@ export default function PlagiarismTool() {
         <span>
           Pemeriksaan berjalan di latar belakang server. Begitu kamu kirim, dokumen tampil di
           Beranda dengan status prosesnya — kamu boleh menutup halaman ini; hasil dapat dibuka saat
-          proses selesai (termasuk pencocokan ke ratusan sumber daring).
+          proses selesai.
         </span>
       </div>
 

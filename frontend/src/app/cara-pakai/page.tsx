@@ -17,7 +17,7 @@ const STEPS = [
     n: 3,
     icon: "⚡",
     title: "Jalankan analisis",
-    desc: "Klik tombol aksi. Mesin kami memproses dengan akselerasi GPU dan membandingkan ke 1 juta+ dokumen akses-terbuka.",
+    desc: "Klik tombol aksi. Mesin kami memproses dengan akselerasi GPU dan membandingkan ke korpus akses-terbuka.",
   },
   {
     n: 4,

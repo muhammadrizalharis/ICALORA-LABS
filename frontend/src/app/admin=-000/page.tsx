@@ -133,7 +133,7 @@ function AdminPanel() {
           <button
             onClick={async () => {
               await logout();
-              router.push("/admin-000");
+              router.push("/admin=-000");
             }}
             className="rounded-lg border border-c surface-2 px-4 py-2 text-sm hover:bg-neutral-50 dark:hover:bg-neutral-900"
           >
