@@ -72,8 +72,23 @@ def _extract_pdf(data: bytes) -> str:
 def _extract_docx(data: bytes) -> str:
     from docx import Document
 
-    doc = Document(io.BytesIO(data))
-    return "\n".join(p.text for p in doc.paragraphs)
+    try:
+        doc = Document(io.BytesIO(data))
+        text = "\n".join(p.text for p in doc.paragraphs)
+    except Exception:  # noqa: BLE001
+        text = ""
+    # Bila python-docx gagal/menghasilkan sedikit teks (mis. isi di tabel atau
+    # text-box), coba Tika yang membaca struktur docx lebih lengkap.
+    from app.core.config import get_settings
+
+    if len(text) < get_settings().tika_fallback_min_chars:
+        tika_text = _tika_extract(
+            data,
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+        if len(tika_text) > len(text):
+            text = tika_text
+    return text
 
 
 def extract_text(filename: str, data: bytes) -> str:

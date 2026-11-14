@@ -71,8 +71,16 @@ export function resetUserPassword(
   return req(`/auth/admin/users/${id}/reset-password`, { method: "POST" });
 }
 
-export function userHistory(id: number): Promise<{ items: unknown[] }> {
-  return req(`/auth/admin/users/${id}/history`);
+export interface HistoryItem {
+  id: number;
+  tool: string;
+  title: string | null;
+  input_preview: string | null;
+  created_at: string | null;
+}
+
+export function userHistory(id: number, limit = 50): Promise<{ items: HistoryItem[] }> {
+  return req(`/auth/admin/users/${id}/history?limit=${limit}`);
 }
 
 export function getSettings(): Promise<AppSettings> {
