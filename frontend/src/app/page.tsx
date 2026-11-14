@@ -13,7 +13,7 @@ const STEPS = [
   {
     icon: "⚡",
     title: "Analisis dengan GPU",
-    desc: "Mesin kami membandingkan ke 1 juta+ dokumen akses-terbuka dalam hitungan detik.",
+    desc: "Mesin kami membandingkan ke korpus akses-terbuka dalam hitungan detik.",
   },
   {
     icon: "📊",
@@ -52,7 +52,7 @@ export default function Home() {
 
               <p className="mt-5 max-w-xl text-lg leading-relaxed text-neutral-600 dark:text-neutral-300">
                 ICALORA-LABS membandingkan tulisan Anda dengan{" "}
-                <strong className="text-neutral-900 dark:text-white">1 juta+ dokumen akses-terbuka</strong>{" "}
+                <strong className="text-neutral-900 dark:text-white">korpus akses-terbuka</strong>{" "}
                 dari jurnal & publisher global. 13 fitur integritas akademik dalam satu platform.
               </p>
 

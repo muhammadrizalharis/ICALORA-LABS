@@ -317,21 +317,6 @@ def upsert_admin_user() -> dict:
 
 
 
-def create_demo_user() -> dict:
-    with engine.begin() as c:
-        r = c.execute(
-            text(
-                """
-                INSERT INTO users (email, name, picture, is_demo, last_login_at)
-                VALUES (:email, :name, NULL, TRUE, now())
-                RETURNING id, email, name, picture, token_balance, is_demo
-                """
-            ),
-            {"email": "demo@icalora.local", "name": "Pengguna Demo"},
-        ).first()
-    return _row_to_user(r)
-
-
 def purge_expired_history() -> int:
     """Hapus riwayat yang lebih tua dari batas retensi (default 3 hari).
 

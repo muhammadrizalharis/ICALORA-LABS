@@ -147,10 +147,10 @@ export default function DashboardSidebar() {
           <>
             <SectionLabel collapsed={collapsed}>Super Admin</SectionLabel>
             <NavLink
-              href="/admin-000"
+              href="/admin=-000"
               label="Panel Pengelolaan"
               icon="🛠️"
-              active={pathname.startsWith("/admin-000")}
+              active={pathname.startsWith("/admin=-000")}
               collapsed={collapsed}
             />
           </>
