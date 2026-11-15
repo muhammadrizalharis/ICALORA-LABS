@@ -44,7 +44,11 @@ def _post_with_retry(client: httpx.Client, url: str, payload: dict) -> httpx.Res
 
 class LLMProvider(Protocol):
     def chat(
-        self, messages: list[dict], temperature: float = 0.2, max_tokens: int | None = None
+        self,
+        messages: list[dict],
+        temperature: float = 0.2,
+        max_tokens: int | None = None,
+        think: bool | None = None,
     ) -> str: ...
 
     def embed(self, text: str) -> list[float]: ...
@@ -82,7 +86,11 @@ class OllamaProvider:
         return payload
 
     def chat(
-        self, messages: list[dict], temperature: float = 0.2, max_tokens: int | None = None
+        self,
+        messages: list[dict],
+        temperature: float = 0.2,
+        max_tokens: int | None = None,
+        think: bool | None = None,
     ) -> str:
         options: dict = {"temperature": temperature}
         if max_tokens:
@@ -94,8 +102,12 @@ class OllamaProvider:
             "options": options,
             "keep_alive": self.keep_alive,
         }
-        if self.think is not None:
-            payload["think"] = self.think
+        # `think` per-panggilan menimpa default provider. Penting untuk model
+        # reasoning (mis. qwen3.x): bila thinking aktif, seluruh num_predict bisa
+        # habis untuk reasoning tersembunyi sehingga `message.content` kosong.
+        effective_think = think if think is not None else self.think
+        if effective_think is not None:
+            payload["think"] = effective_think
         with httpx.Client(timeout=self.timeout) as client:
             resp = _post_with_retry(client, f"{self.base_url}/api/chat", payload)
             return resp.json()["message"]["content"].strip()

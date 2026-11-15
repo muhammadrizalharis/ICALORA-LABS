@@ -22,3 +22,46 @@ def test_embed_keep_alive_server_omits_field():
     payload = p._embed_payload(input=["x"])
     assert "keep_alive" not in payload
     assert payload == {"model": "bge-m3", "input": ["x"]}
+
+
+class _FakeResp:
+    def __init__(self, content: str):
+        self._content = content
+
+    def json(self) -> dict:
+        return {"message": {"content": self._content}}
+
+    def raise_for_status(self) -> None:
+        pass
+
+
+def _capture_chat(monkeypatch, provider, **chat_kw) -> dict:
+    captured: dict = {}
+
+    def fake_post(client, url, payload):  # noqa: ANN001
+        captured.update(payload)
+        return _FakeResp('{"ai_probability": 50, "ai_sentences": []}')
+
+    import app.services.llm.provider as mod
+
+    monkeypatch.setattr(mod, "_post_with_retry", fake_post)
+    provider.chat([{"role": "user", "content": "hi"}], **chat_kw)
+    return captured
+
+
+def test_chat_think_false_override(monkeypatch):
+    p = _provider()  # self.think defaults to None
+    payload = _capture_chat(monkeypatch, p, think=False)
+    assert payload["think"] is False
+
+
+def test_chat_think_default_omitted(monkeypatch):
+    p = _provider()
+    payload = _capture_chat(monkeypatch, p)
+    assert "think" not in payload
+
+
+def test_chat_think_param_overrides_provider_default(monkeypatch):
+    p = _provider(think=True)
+    payload = _capture_chat(monkeypatch, p, think=False)
+    assert payload["think"] is False
