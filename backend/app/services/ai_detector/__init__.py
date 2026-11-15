@@ -34,9 +34,9 @@ _LLM_ENABLED = os.getenv("ICALORA_AIDETECT_LLM", "on").strip().lower() not in {
     "no",
 }
 try:
-    _LLM_TIMEOUT = float(os.getenv("ICALORA_AIDETECT_LLM_TIMEOUT", "45"))
+    _LLM_TIMEOUT = float(os.getenv("ICALORA_AIDETECT_LLM_TIMEOUT", "120"))
 except ValueError:
-    _LLM_TIMEOUT = 45.0
+    _LLM_TIMEOUT = 120.0
 
 # Binoculars hanya dipanggil bila penggabungnya terpasang di meta model (atau
 # dipaksa oleh evaluate.py untuk mengumpulkan skor) agar GPU tak dipakai sia-sia.

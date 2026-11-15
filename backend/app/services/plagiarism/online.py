@@ -303,19 +303,21 @@ async def _fetch_fulltext(
         # PRIORITAS: ikuti PDF artikel asli yang diiklankan halaman landing
         # (citation_pdf_url / galley OJS). Tanpa ini, landing page sering lolos
         # ambang `min_strip_chars` dan DISALAHARTIKAN sebagai teks penuh.
+        # Ambil yang LEBIH PANJANG antara PDF-ikutan dan strip landing agar
+        # tak pernah REGRESI (mis. bila PDF ternyata halaman login/paywall).
+        pdf_text = ""
         if _depth < 1:
             pdf_url = _pdf_url_from_html(html, final_url)
             if pdf_url and pdf_url != url and pdf_url != final_url:
                 pdf_text = await _fetch_fulltext(client, pdf_url, _depth + 1)
-                if len(pdf_text) >= settings.crawl4ai_min_strip_chars:
-                    return pdf_text
         # Jalur CEPAT: penjungkiran tag murah. Mayoritas halaman penerbit/arXiv
         # memuat teks artikel di HTML mentah → tak perlu Crawl4AI yang lambat.
         stripped = _clean(_TAG_RE.sub(" ", html))
-        if len(stripped) >= settings.crawl4ai_min_strip_chars:
-            return stripped
+        best_html = pdf_text if len(pdf_text) > len(stripped) else stripped
+        if len(best_html) >= settings.crawl4ai_min_strip_chars:
+            return best_html
         clean = await _crawl4ai_markdown(client, url)
-        return clean if len(clean) > len(stripped) else stripped
+        return clean if len(clean) > len(best_html) else best_html
     try:
         text = await asyncio.to_thread(extract_text, "oa.pdf", data)
     except Exception:  # noqa: BLE001
