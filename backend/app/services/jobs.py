@@ -19,6 +19,14 @@ from app.core.clients import engine
 
 _JOB_SCHEMA_READY = False
 
+# Batas keras (detik) sebuah job boleh berstatus 'processing'. Melewati ini,
+# job dianggap tersangkut (mis. fase lokal menggantung, atau task mati tanpa
+# sempat menandai gagal) dan ditutup otomatis saat di-poll — menjamin status
+# yang ditampilkan selalu mencerminkan kenyataan, tak pernah "processing"
+# selamanya. Disetel jauh di atas durasi wajar terpanjang (~13 mnt: anggaran
+# daring 12 mnt + korpus lokal) agar tak pernah membunuh job yang sah.
+_HARD_CEILING_SECONDS = 1500
+
 
 def ensure_job_schema() -> None:
     global _JOB_SCHEMA_READY
@@ -94,7 +102,24 @@ def fail_job(job_id: str, message: str) -> None:
 
 def get_job(job_id: str, user_id: int | None) -> dict | None:
     ensure_job_schema()
+    # Watchdog: tutup job yang melewati batas keras agar tak pernah tampil
+    # "processing" selamanya. Dijalankan saat polling (idempoten, murah).
     with engine.begin() as c:
+        c.execute(
+            text(
+                "UPDATE tool_job SET status='error', error=:err, updated_at=now() "
+                "WHERE id=:id AND status='processing' "
+                "AND created_at < now() - make_interval(secs => :sec)"
+            ),
+            {
+                "id": job_id,
+                "err": (
+                    "Pemeriksaan melebihi batas waktu wajar dan dihentikan. "
+                    "Silakan coba lagi."
+                ),
+                "sec": _HARD_CEILING_SECONDS,
+            },
+        )
         row = c.execute(
             text(
                 """

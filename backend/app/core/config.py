@@ -99,9 +99,11 @@ class Settings(BaseSettings):
     # Anggaran waktu maksimum (detik) untuk fase pengumpulan sumber DARING pada
     # satu pemeriksaan. Bila terlampaui, fase daring dibatalkan dan laporan tetap
     # dibuat dari korpus lokal (gagal-aman) — mencegah pemeriksaan menggantung
-    # melewati batas waktu klien. Disetel di bawah batas polling frontend (20
-    # mnt) agar selalu menyisakan waktu untuk pencocokan korpus lokal.
-    online_budget_seconds: int = Field(default=720)
+    # melewati batas waktu klien. Disetel agar menampung pencocokan identitas
+    # paper terbit (bisa 12-15 mnt pada dokumen besar dengan banyak teks-penuh)
+    # namun tetap di bawah batas polling frontend (20 mnt) dengan sisa untuk
+    # pencocokan korpus lokal.
+    online_budget_seconds: int = Field(default=960)
     core_api_key: str = Field(default="")
     core_enabled: bool = Field(default=True)
     # Ambil teks-PENUH open-access (PDF/HTML) untuk paper yang teridentifikasi

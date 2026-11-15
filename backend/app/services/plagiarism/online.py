@@ -42,6 +42,12 @@ settings = get_settings()
 # IDENTIK pun hanya tercakup ~72%. Pola ini aman untuk teks matematis.
 _TAG_RE = re.compile(r"</?[a-zA-Z][^<>\n]{0,200}?>")
 _WS_RE = re.compile(r"\s+")
+# Pembersih HTML halaman penerbit (BUKAN isi dokumen): buang komentar,
+# script/style, lalu SEMUA tag termasuk `<!doctype>` & `<html ...>` panjang
+# yang lolos dari `_TAG_RE` konservatif → teks landing bersih untuk cuplikan.
+_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
+_HTML_SCRIPT_RE = re.compile(r"<(script|style)\b[^>]*>.*?</\1>", re.I | re.S)
+_HTML_TAG_RE = re.compile(r"<[^>]+>", re.S)
 _DOI_RE = re.compile(r"10\.\d{4,9}/[-._;()/:A-Za-z0-9]+", re.UNICODE)
 _WORD_RE = re.compile(r"[A-Za-z\u00C0-\u024F]{2,}", re.UNICODE)
 _UA = {"User-Agent": "ICALORA-LABS/1.0 (academic integrity; mailto:noreply@icalora-labs.local)"}
@@ -94,6 +100,18 @@ async def _get_json(client: httpx.AsyncClient, url: str, params: dict, headers: 
 
 def _clean(txt: str) -> str:
     return _WS_RE.sub(" ", _TAG_RE.sub(" ", txt or "")).strip()
+
+
+def _strip_html(html: str) -> str:
+    """Bersihkan HTML landing-page penerbit menjadi teks terbaca.
+
+    Buang komentar, blok script/style, lalu SELURUH tag (termasuk `<!doctype>`
+    dan `<html ...>` beratribut panjang yang lolos `_TAG_RE`). Khusus HTML
+    penerbit; isi dokumen tetap memakai `_clean`/`_TAG_RE` yang konservatif.
+    """
+    html = _HTML_COMMENT_RE.sub(" ", html or "")
+    html = _HTML_SCRIPT_RE.sub(" ", html)
+    return _WS_RE.sub(" ", _HTML_TAG_RE.sub(" ", html)).strip()
 
 
 def _sentence_budget(doc: str) -> int:
@@ -245,12 +263,28 @@ _CIT_PDF_RE2 = re.compile(
 _OJS_DL_RE = re.compile(
     r"href=[\"']([^\"']*/article/download/[^\"']+)[\"']", re.I
 )
+# IIETA & banyak penerbit berbasis Drupal menautkan PDF artikel lewat pola
+# `/download/file/fid/<id>` (TANPA meta citation_pdf_url & bukan galley OJS).
+# Tanpa pola ini, fetcher hanya mengambil halaman landing (judul+abstrak+daftar
+# referensi) → paper SENDIRI pun skornya <1% padahal seluruh isinya ada di PDF.
+_FID_DL_RE = re.compile(
+    r"href=[\"']([^\"']*/download/file/fid/\d+[^\"']*)[\"']", re.I
+)
+# Fallback generik: tautan yang jelas menuju berkas PDF. Tautan "daftar
+# sitasi/citation list" DIKECUALIKAN agar tak salah ambil PDF non-artikel.
+_PDF_HREF_RE = re.compile(
+    r"href=[\"']([^\"']+\.pdf(?:\?[^\"']*)?)[\"']", re.I
+)
+_PDF_NOISE_RE = re.compile(r"citation|cite|list|cover|flyer|template", re.I)
 
 
 def _pdf_url_from_html(html: str, base_url: str) -> str | None:
     """URL PDF artikel asli yang diiklankan halaman landing (bila ada).
 
-    Prioritas: meta `citation_pdf_url` (standar), lalu pola unduh galley OJS.
+    Prioritas: meta `citation_pdf_url` (standar), pola unduh galley OJS, pola
+    unduh berbasis Drupal (`/download/file/fid/`, mis. IIETA), lalu fallback
+    tautan `.pdf` generik (dengan menyaring berkas non-artikel seperti daftar
+    sitasi/template).
     """
     if not html or len(html) > 4_000_000:
         html = (html or "")[:4_000_000]
@@ -258,9 +292,15 @@ def _pdf_url_from_html(html: str, base_url: str) -> str | None:
         m = rx.search(html)
         if m:
             return urljoin(base_url, _html_unescape(m.group(1)).strip())
-    m = _OJS_DL_RE.search(html)
-    if m:
-        return urljoin(base_url, _html_unescape(m.group(1)).strip())
+    for rx in (_OJS_DL_RE, _FID_DL_RE):
+        m = rx.search(html)
+        if m:
+            return urljoin(base_url, _html_unescape(m.group(1)).strip())
+    for m in _PDF_HREF_RE.finditer(html):
+        href = m.group(1)
+        if _PDF_NOISE_RE.search(href):
+            continue
+        return urljoin(base_url, _html_unescape(href).strip())
     return None
 
 
@@ -301,10 +341,12 @@ async def _fetch_fulltext(
         except Exception:  # noqa: BLE001
             html = ""
         # PRIORITAS: ikuti PDF artikel asli yang diiklankan halaman landing
-        # (citation_pdf_url / galley OJS). Tanpa ini, landing page sering lolos
-        # ambang `min_strip_chars` dan DISALAHARTIKAN sebagai teks penuh.
-        # Ambil yang LEBIH PANJANG antara PDF-ikutan dan strip landing agar
-        # tak pernah REGRESI (mis. bila PDF ternyata halaman login/paywall).
+        # (citation_pdf_url / galley OJS / unduhan Drupal). Tanpa ini, landing
+        # page sering lolos ambang `min_strip_chars` dan DISALAHARTIKAN sebagai
+        # teks penuh. Bila PDF artikel berhasil diambil dan isinya SUBSTANSIAL,
+        # UTAMAKAN PDF itu: halaman landing kerap lebih PANJANG karena memuat
+        # navigasi/daftar referensi/artikel lain (noise) sehingga pembanding
+        # panjang keliru memilih landing alih-alih teks artikel sebenarnya.
         pdf_text = ""
         if _depth < 1:
             pdf_url = _pdf_url_from_html(html, final_url)
@@ -312,8 +354,11 @@ async def _fetch_fulltext(
                 pdf_text = await _fetch_fulltext(client, pdf_url, _depth + 1)
         # Jalur CEPAT: penjungkiran tag murah. Mayoritas halaman penerbit/arXiv
         # memuat teks artikel di HTML mentah → tak perlu Crawl4AI yang lambat.
-        stripped = _clean(_TAG_RE.sub(" ", html))
-        best_html = pdf_text if len(pdf_text) > len(stripped) else stripped
+        stripped = _strip_html(html)
+        if pdf_text and len(pdf_text) >= settings.crawl4ai_min_strip_chars:
+            best_html = pdf_text
+        else:
+            best_html = pdf_text if len(pdf_text) > len(stripped) else stripped
         if len(best_html) >= settings.crawl4ai_min_strip_chars:
             return best_html
         clean = await _crawl4ai_markdown(client, url)
