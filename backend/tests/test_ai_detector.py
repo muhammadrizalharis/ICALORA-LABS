@@ -243,6 +243,39 @@ def test_long_doc_reports_segments_and_share(monkeypatch):
     assert r["segments"][-1]["end"] == len(text)
 
 
+def test_breakdown_present_for_short_text(monkeypatch):
+    import app.services.ai_detector as det
+
+    monkeypatch.setattr(det, "_trained_probability", lambda sig: 70.0)
+    monkeypatch.setattr(det, "_emb_trained_probability", lambda sig, txt: 65.0)
+    monkeypatch.setattr(det, "_llm_analysis_timed", lambda txt: {"prob": None, "sentences": []})
+    r = det.detect_ai(_long_doc(10))  # satu segmen
+    bd = r["breakdown"]
+    assert bd["basis"] == "keyakinan"
+    assert bd["ai"] == pytest.approx(r["ai_probability"], abs=0.1)
+    assert bd["ai"] + bd["human"] + bd["uncertain"] == pytest.approx(100, abs=0.2)
+    assert bd["note"]
+    assert r["verdict_explanation"] == det._VERDICT_EXPLAIN[r["verdict"]]
+
+
+def test_breakdown_present_for_long_text(monkeypatch):
+    import app.services.ai_detector as det
+
+    text = _long_doc(130)
+    monkeypatch.setattr(det, "_trained_probability", lambda sig: 20.0)
+    monkeypatch.setattr(
+        det, "_emb_probabilities", lambda sigs, txts: [99.0] + [2.0] * (len(txts) - 1)
+    )
+    monkeypatch.setattr(det, "_llm_analysis_timed", lambda txt: {"prob": None, "sentences": []})
+    r = det.detect_ai(text)
+    bd = r["breakdown"]
+    assert bd["basis"] == "segmen"
+    assert bd["ai"] == pytest.approx(r["ai_share"], abs=0.1)
+    assert bd["human"] == pytest.approx(r["human_share"], abs=0.1)
+    assert bd["ai"] + bd["human"] + bd["uncertain"] == pytest.approx(100, abs=0.2)
+    assert bd["note"]
+
+
 def test_llm_sample_is_bounded():
     import app.services.ai_detector as det
 

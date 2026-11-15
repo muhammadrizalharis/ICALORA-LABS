@@ -188,6 +188,52 @@ function AiSegmentMap({ segments }: { segments: AiSegment[] }) {
   );
 }
 
+type AiBreakdownData = {
+  basis?: string;
+  ai?: number;
+  uncertain?: number;
+  human?: number;
+  note?: string;
+};
+
+function AiBreakdown({
+  breakdown,
+  rawScore,
+}: {
+  breakdown?: AiBreakdownData;
+  rawScore: number | null;
+}) {
+  if (!breakdown || typeof breakdown.ai !== "number") return null;
+  const ai = breakdown.ai;
+  const uncertain = typeof breakdown.uncertain === "number" ? breakdown.uncertain : 0;
+  const human = typeof breakdown.human === "number" ? breakdown.human : Math.max(0, 100 - ai - uncertain);
+  const bySegment = breakdown.basis === "segmen";
+  const heading = bySegment ? "Komposisi teks" : "Tingkat keyakinan";
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between text-[11px] font-medium text-neutral-500">
+        <span>{heading}</span>
+        {rawScore !== null && <span>skor mentah {rawScore}</span>}
+      </div>
+      <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-700">
+        {ai > 0 && <div style={{ width: `${ai}%`, background: "#ef4444" }} title={`AI ${ai}%`} />}
+        {uncertain > 0 && (
+          <div style={{ width: `${uncertain}%`, background: "#f59e0b" }} title={`Tidak pasti ${uncertain}%`} />
+        )}
+        {human > 0 && <div style={{ width: `${human}%`, background: "#10b981" }} title={`Manusia ${human}%`} />}
+      </div>
+      <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-neutral-500">
+        <span><span className="text-red-500">●</span> AI {ai}%</span>
+        {uncertain > 0 && <span><span className="text-amber-500">●</span> tidak pasti {uncertain}%</span>}
+        <span><span className="text-emerald-500">●</span> manusia {human}%</span>
+      </div>
+      {breakdown.note && (
+        <p className="text-[11px] leading-relaxed text-neutral-400">{breakdown.note}</p>
+      )}
+    </div>
+  );
+}
+
 function AiDetectorView({ result }: { result: Record<string, unknown> }) {
   const prob = num(result.ai_probability);
   const aiShare = num(result.ai_share);
@@ -228,13 +274,15 @@ function AiDetectorView({ result }: { result: Record<string, unknown> }) {
         )}
         <div className="min-w-0 flex-1 space-y-3">
           {verdict && <Pill tone={tone}>{verdict}</Pill>}
-          {aiShare !== null && num(result.uncertain_share) !== null && (
-            <p className="text-xs text-neutral-500">
-              Komposisi teks: AI {aiShare}% · tidak pasti {num(result.uncertain_share)}% ·
-              manusia {num(result.human_share)}%
-              {num(result.raw_score) !== null && <> · skor mentah {num(result.raw_score)}</>}
+          {typeof result.verdict_explanation === "string" && result.verdict_explanation && (
+            <p className="text-xs leading-relaxed text-neutral-600 dark:text-neutral-300">
+              {result.verdict_explanation}
             </p>
           )}
+          <AiBreakdown
+            breakdown={result.breakdown as AiBreakdownData | undefined}
+            rawScore={num(result.raw_score)}
+          />
           <div className="grid gap-2 sm:grid-cols-2">
             {components
               .filter(([, v]) => num(v) !== null)

@@ -681,6 +681,65 @@ def _seg_label(score: float, stacked: bool = False, n_words: int | None = None) 
     return "human"
 
 
+_VERDICT_EXPLAIN: dict[str, str] = {
+    "kemungkinan besar AI": (
+        "Mayoritas ciri teks (pola statistik, model terlatih, dan embedding) "
+        "konsisten dengan tulisan yang dihasilkan AI."
+    ),
+    "kemungkinan besar manusia": (
+        "Ciri teks konsisten dengan tulisan manusia. Tidak ada indikasi kuat "
+        "bahwa teks dibuat oleh AI."
+    ),
+    "campuran / tidak pasti": (
+        "Teks menunjukkan ciri AI dan manusia sekaligus, sehingga tidak dapat "
+        "dipastikan ke salah satu. Tinjau bersama konteks (draf, riwayat revisi)."
+    ),
+    "campuran / perlu tinjauan manual": (
+        "Metode deteksi memberi sinyal yang berbeda tajam (mis. teks AI yang "
+        "diparafrase). Sebaiknya ditinjau manusia sebelum disimpulkan."
+    ),
+    "sebagian terindikasi AI": (
+        "Secara keseluruhan teks condong manusia, tetapi ada bagian yang "
+        "terindikasi AI. Lihat sorotan per-bagian di bawah."
+    ),
+    "tidak cukup teks": "Teks terlalu pendek untuk analisis yang bermakna.",
+}
+
+
+def _breakdown(
+    basis: str,
+    ai: float,
+    human: float,
+    uncertain: float = 0.0,
+) -> dict:
+    """Rincian AI vs manusia yang SELALU tersedia agar hasil mudah dipahami.
+
+    basis="segmen"  → komposisi spasial sebenarnya (porsi kata per label),
+                      hanya untuk teks multi-paragraf.
+    basis="keyakinan" → untuk teks pendek/satu blok yang tak bisa dipecah; angka
+                        adalah tingkat keyakinan model, bukan porsi teks.
+    """
+    if basis == "segmen":
+        note = (
+            "Porsi teks berdasarkan analisis per-bagian: berapa persen kata "
+            "berada di bagian yang terindikasi AI, tidak pasti, dan manusia."
+        )
+    else:
+        note = (
+            "Teks terlalu pendek/satu paragraf untuk dipecah per-bagian, jadi "
+            "angka ini adalah tingkat keyakinan model (seberapa yakin teks AI vs "
+            "manusia), bukan porsi teks. Beri teks lebih panjang untuk rincian "
+            "per-bagian."
+        )
+    return {
+        "basis": basis,
+        "ai": round(ai, 1),
+        "uncertain": round(uncertain, 1),
+        "human": round(human, 1),
+        "note": note,
+    }
+
+
 def detect_ai(text: str) -> dict:
     text = text.strip()
     words = _WORD_RE.findall(text)
@@ -688,6 +747,7 @@ def detect_ai(text: str) -> dict:
         return {
             "ai_probability": None,
             "verdict": "tidak cukup teks",
+            "verdict_explanation": _VERDICT_EXPLAIN.get("tidak cukup teks", ""),
             "note": "Butuh minimal ~20 kata untuk analisis yang bermakna.",
             "signals": _statistical_signals(text),
             "flagged_sentences": [],
@@ -715,12 +775,17 @@ def detect_ai(text: str) -> dict:
         llm_pct = analysis["prob"]
         final, verdict, needs_review = _blend(
             stat_pct, llm_pct, model_pct, emb_pct, binoc, n_words=len(words))
+        ai_conf = final if final is not None else 0.0
         return _annotate({
             "ai_probability": final,
             "raw_score": round(_raw_blend(stat_pct, llm_pct, model_pct, emb_pct), 1),
             "verdict": verdict,
+            "verdict_explanation": _VERDICT_EXPLAIN.get(verdict, ""),
             "needs_review": needs_review,
             "ai_share": None,
+            "breakdown": _breakdown(
+                "keyakinan", ai_conf, round(max(0.0, 100.0 - ai_conf), 1)
+            ),
             "segments": [],
             "language": language,
             "stat_probability": round(stat_pct, 1),
@@ -791,10 +856,12 @@ def detect_ai(text: str) -> dict:
         "ai_probability": final,
         "raw_score": round(_raw_blend(stat_pct, llm_pct, model_pct, emb_pct), 1),
         "verdict": verdict,
+        "verdict_explanation": _VERDICT_EXPLAIN.get(verdict, ""),
         "needs_review": needs_review,
         "ai_share": ai_share,
         "uncertain_share": uncertain_share,
         "human_share": human_share,
+        "breakdown": _breakdown("segmen", ai_share, human_share, uncertain_share),
         "segments": segments,
         "language": language,
         "stat_probability": round(stat_pct, 1),
