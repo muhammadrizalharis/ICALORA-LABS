@@ -104,7 +104,7 @@ class Settings(BaseSettings):
     # penyimpanan. Ini membuat % plagiarisme akurat untuk karya terbit/duplikat.
     online_fulltext_enabled: bool = Field(default=True)
     online_fulltext_max_bytes: int = Field(default=20 * 1024 * 1024)
-    online_fulltext_max_docs: int = Field(default=6)
+    online_fulltext_max_docs: int = Field(default=10)
     # Jumlah percobaan pengambilan teks-PENUH per URL. Unduhan PDF OA (mis.
     # tautan unduh OJS) sesekali gagal transient (koneksi putus/timeout),
     # membuat kandidat identitas jatuh ke abstrak saja → skor anjlok (mis.
@@ -115,7 +115,7 @@ class Settings(BaseSettings):
     # kandidat PALING MIRIP (calon sumber plagiarisme) agar perbandingan
     # mencakup seluruh isi sumber, bukan hanya abstrak. Tetap ephemeral
     # (di memori, tak disimpan) → nol tambahan disk.
-    online_fulltext_similar_docs: int = Field(default=16)
+    online_fulltext_similar_docs: int = Field(default=32)
     # Cache teks-penuh OA yang BERHASIL diunduh (disimpan sebagai TEKS di DB,
     # bukan berkas PDF → tetap hemat disk). Tujuannya determinisme: sekali teks
     # penuh sebuah sumber terunduh, pemeriksaan berikutnya MEMAKAI ULANG teks
