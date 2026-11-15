@@ -1327,6 +1327,44 @@ async def online_candidates(doc: str, title_hint: str = "") -> tuple[list[dict],
     return candidates, provider_hits
 
 
+async def identity_candidates(doc: str, title_hint: str = "") -> list[dict]:
+    """Pass RINGAN & CEPAT: temukan paper terbit yang MERUPAKAN dokumen ini
+    (via judul/DOI sendiri) lalu perkaya dengan TEKS PENUH open-access.
+
+    Dirancang berjalan PARALEL dengan `online_candidates` (pencarian luas
+    per-kalimat yang lambat). Karena hanya beberapa permintaan + unduh 1–2 PDF,
+    pass ini selesai jauh di dalam anggaran dan MENJAMIN paper terbit milik user
+    tetap tercocok meskipun fase pencarian luas kehabisan waktu/dibatalkan.
+    """
+    doc = (doc or "").strip()
+    if not doc or not _active_providers():
+        return []
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(45.0, connect=10.0),
+            headers=_UA,
+            follow_redirects=True,
+        ) as client:
+            raw = await _resolve_publication(doc=doc, client=client, title_hint=title_hint)
+            seen: dict[str, dict] = {}
+            for cand in raw:
+                if not cand.get("title"):
+                    continue
+                key = (cand.get("doi") or cand["title"]).lower().strip()
+                cand["doc_id"] = None
+                if key not in seen:
+                    seen[key] = cand
+                elif len(cand.get("_fulltext") or "") > len(seen[key].get("_fulltext") or ""):
+                    seen[key] = cand
+            cands = list(seen.values())
+            if settings.online_fulltext_enabled:
+                await _enrich_fulltext(client, cands, doc, title_hint)
+            # Hanya pertahankan kandidat yang benar-benar punya teks untuk dicocokkan.
+            return [c for c in cands if c.get("_fulltext") and c.get("title")]
+    except Exception:  # noqa: BLE001
+        return []
+
+
 async def online_check(doc: str) -> dict:
     """Jalankan pemeriksaan daring tanpa-unduh dan kembalikan laporan ringkas."""
     doc = doc.strip()

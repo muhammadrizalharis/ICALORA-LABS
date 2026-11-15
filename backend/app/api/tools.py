@@ -41,7 +41,11 @@ from app.services.llm.tasks import (
     rewrite,
 )
 from app.services.plagiarism import check_plagiarism
-from app.services.plagiarism.online import online_candidates, online_check
+from app.services.plagiarism.online import (
+    identity_candidates,
+    online_candidates,
+    online_check,
+)
 from app.services.plagiarism.report_pdf import build_report_pdf
 from app.services.publikasi import recommend_journals
 from app.services.report import MAX_HTML_BYTES, render_pdf
@@ -390,15 +394,44 @@ async def _run_plagiarism_merged(
     extra: list[dict] = []
     providers: dict = {}
     if settings.online_check_enabled:
+        # 1) PASS IDENTITAS DULU (cepat, ~9–60 dtk): resolusi judul/DOI + unduh
+        #    teks-penuh paper dokumen itu sendiri. WAJIB dijalankan SEBELUM
+        #    pencarian luas, karena pencarian luas membanjiri Crossref/OpenAlex
+        #    dengan ribuan permintaan → kueri identitas kena rate-limit (429)
+        #    dan paper terbit milik user tak ditemukan. Mendahulukannya menjamin
+        #    kandidat identitas selalu tertangkap, lalu digabung ke hasil luas.
+        ident: list[dict] = []
+        try:
+            ident = await asyncio.wait_for(
+                identity_candidates(text, title_hint),
+                timeout=max(30, settings.online_identity_budget_seconds),
+            )
+        except Exception:  # noqa: BLE001
+            ident = []
+        # 2) Pencarian luas per-kalimat dengan sisa anggaran. Bila timeout, hasil
+        #    identitas di atas tetap dipakai (laporan tak pernah kehilangan paper
+        #    terbit hanya karena fase luas lambat).
         try:
             extra, providers = await asyncio.wait_for(
                 online_candidates(text, title_hint),
                 timeout=max(30, settings.online_budget_seconds),
             )
         except Exception:  # noqa: BLE001
-            # Batas waktu/galat daring tidak membatalkan laporan: turun ke korpus
-            # lokal agar hasil tetap akurat dan tak pernah menggantung.
             extra, providers = [], {}
+        # Gabungkan: dedup per DOI/judul, pertahankan teks-penuh TERPANJANG agar
+        # cakupan pencocokan maksimal (paper terbit sering hanya lengkap dari
+        # pass identitas).
+        merged: dict[str, dict] = {}
+        for cand in list(extra) + list(ident):
+            if not cand.get("_fulltext") or not cand.get("title"):
+                continue
+            key = (cand.get("doi") or cand["title"]).lower().strip()
+            cur = merged.get(key)
+            if cur is None or len(cand["_fulltext"]) > len(cur.get("_fulltext") or ""):
+                if cur is not None and not cand.get("_oa_url") and cur.get("_oa_url"):
+                    cand["_oa_url"] = cur["_oa_url"]
+                merged[key] = cand
+        extra = list(merged.values())
     res = await run_in_threadpool(check_plagiarism, text, top_k, extra, exclude)
     res["online_merged"] = bool(extra)
     res["online_providers"] = [
