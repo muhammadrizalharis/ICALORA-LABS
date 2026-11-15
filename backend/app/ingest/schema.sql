@@ -23,6 +23,9 @@ CREATE INDEX IF NOT EXISTS idx_corpus_source      ON corpus_documents (source);
 CREATE INDEX IF NOT EXISTS idx_corpus_year        ON corpus_documents (pub_year);
 CREATE INDEX IF NOT EXISTS idx_corpus_license     ON corpus_documents (license);
 CREATE INDEX IF NOT EXISTS idx_corpus_no_embed    ON corpus_documents (id) WHERE has_embedding = FALSE;
+-- Embedding terarah per-bahasa (mis. lang='id'): tanpa ini pencarian dok belum
+-- ter-embed per-bahasa memindai jutaan baris bahasa lain (lambat & makin lama).
+CREATE INDEX IF NOT EXISTS idx_corpus_lang_noembed ON corpus_documents (lang, id) WHERE has_embedding = FALSE;
 
 -- Sidik jari MinHash (deteksi salinan & near-duplicate)
 CREATE TABLE IF NOT EXISTS corpus_fingerprints (
