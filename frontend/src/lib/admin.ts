@@ -83,6 +83,42 @@ export function userHistory(id: number, limit = 50): Promise<{ items: HistoryIte
   return req(`/auth/admin/users/${id}/history?limit=${limit}`);
 }
 
+export interface AnalyticsOverview {
+  days: number;
+  totals: {
+    runs: number;
+    runs_window: number;
+    users: number;
+    active_users_window: number;
+    new_users_window: number;
+    tokens_outstanding: number;
+  };
+  per_tool: { tool: string; count: number }[];
+  daily: { day: string; runs: number; users: number }[];
+  top_users: { user_id: number | null; email: string | null; name: string | null; runs: number }[];
+  jobs: { by_status: Record<string, number>; total: number; error_rate: number };
+}
+
+export interface ActivityItem {
+  id: number;
+  user_id: number | null;
+  email: string | null;
+  name: string | null;
+  tool: string;
+  title: string | null;
+  input_preview: string | null;
+  created_at: string | null;
+}
+
+export function getAnalytics(days = 14): Promise<AnalyticsOverview> {
+  return req(`/auth/admin/analytics?days=${days}`);
+}
+
+export function getActivity(limit = 50, tool?: string): Promise<{ items: ActivityItem[] }> {
+  const qs = tool ? `?limit=${limit}&tool=${encodeURIComponent(tool)}` : `?limit=${limit}`;
+  return req(`/auth/admin/activity${qs}`);
+}
+
 export function getSettings(): Promise<AppSettings> {
   return req(`/auth/admin/settings`);
 }

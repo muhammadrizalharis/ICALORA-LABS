@@ -4,12 +4,16 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import {
+  ActivityItem,
   AdminUser,
+  AnalyticsOverview,
   AppSettings,
   FEATURE_LABELS,
   HistoryItem,
   UserStats,
   deleteUser,
+  getActivity,
+  getAnalytics,
   getSettings,
   listUsers,
   patchUser,
@@ -109,7 +113,7 @@ function AdminLogin({
 function AdminPanel() {
   const { user, logout } = useAuth();
   const router = useRouter();
-  const [tab, setTab] = useState<"users" | "settings">("users");
+  const [tab, setTab] = useState<"aktivitas" | "users" | "settings">("aktivitas");
 
   return (
     <div className="mx-auto max-w-6xl p-4 sm:p-8">
@@ -143,7 +147,7 @@ function AdminPanel() {
       </div>
 
       <div className="mb-5 flex gap-1 border-b border-c">
-        {(["users", "settings"] as const).map((t) => (
+        {(["aktivitas", "users", "settings"] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -153,12 +157,322 @@ function AdminPanel() {
                 : "border-transparent text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200"
             }`}
           >
-            {t === "users" ? "Pengguna" : "Pengaturan Aplikasi"}
+            {t === "aktivitas"
+              ? "Aktivitas"
+              : t === "users"
+                ? "Pengguna"
+                : "Pengaturan Aplikasi"}
           </button>
         ))}
       </div>
 
-      {tab === "users" ? <UsersTab adminId={user?.id ?? -1} /> : <SettingsTab />}
+      {tab === "aktivitas" ? (
+        <ActivityTab />
+      ) : tab === "users" ? (
+        <UsersTab adminId={user?.id ?? -1} />
+      ) : (
+        <SettingsTab />
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------ AKTIVITAS ---------------------------- */
+
+function fmtNum(n: number): string {
+  return new Intl.NumberFormat("id-ID").format(n);
+}
+
+function timeAgo(iso: string | null): string {
+  if (!iso) return "—";
+  const d = new Date(iso).getTime();
+  if (Number.isNaN(d)) return "—";
+  const s = Math.max(0, Math.floor((Date.now() - d) / 1000));
+  if (s < 60) return `${s} dtk lalu`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m} mnt lalu`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} jam lalu`;
+  const dd = Math.floor(h / 24);
+  if (dd < 30) return `${dd} hari lalu`;
+  return new Date(iso).toLocaleDateString("id-ID");
+}
+
+function toolLabel(slug: string): string {
+  return FEATURE_LABELS[slug] ?? slug;
+}
+
+const STAT_GRADIENTS = [
+  "from-sky-500/15 to-blue-500/5 text-sky-600 dark:text-sky-400",
+  "from-emerald-500/15 to-green-500/5 text-emerald-600 dark:text-emerald-400",
+  "from-violet-500/15 to-purple-500/5 text-violet-600 dark:text-violet-400",
+  "from-amber-500/15 to-orange-500/5 text-amber-600 dark:text-amber-400",
+  "from-rose-500/15 to-pink-500/5 text-rose-600 dark:text-rose-400",
+  "from-cyan-500/15 to-teal-500/5 text-cyan-600 dark:text-cyan-400",
+];
+
+function StatCard({
+  idx,
+  label,
+  value,
+  sub,
+  icon,
+}: {
+  idx: number;
+  label: string;
+  value: string;
+  sub?: string;
+  icon: string;
+}) {
+  return (
+    <div
+      className={`relative overflow-hidden rounded-2xl border border-c bg-gradient-to-br ${STAT_GRADIENTS[idx % STAT_GRADIENTS.length]} p-4`}
+    >
+      <div className="flex items-start justify-between">
+        <div className="text-[11px] font-medium uppercase tracking-wider text-neutral-500">
+          {label}
+        </div>
+        <span className="text-lg leading-none opacity-80">{icon}</span>
+      </div>
+      <div className="mt-2 text-2xl font-bold text-neutral-900 dark:text-neutral-50">
+        {value}
+      </div>
+      {sub ? <div className="mt-0.5 text-xs text-neutral-500">{sub}</div> : null}
+    </div>
+  );
+}
+
+function ActivityTab() {
+  const [days, setDays] = useState(14);
+  const [data, setData] = useState<AnalyticsOverview | null>(null);
+  const [feed, setFeed] = useState<ActivityItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+  const [toolFilter, setToolFilter] = useState<string>("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setErr(null);
+    try {
+      const [a, f] = await Promise.all([
+        getAnalytics(days),
+        getActivity(60, toolFilter || undefined),
+      ]);
+      setData(a);
+      setFeed(f.items);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Gagal memuat analitik.");
+    } finally {
+      setLoading(false);
+    }
+  }, [days, toolFilter]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  if (loading && !data) {
+    return (
+      <div className="py-16 text-center text-sm text-neutral-500">Memuat analitik…</div>
+    );
+  }
+  if (err) {
+    return (
+      <div className="rounded-xl border border-red-300 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+        {err}
+      </div>
+    );
+  }
+  if (!data) return null;
+
+  const t = data.totals;
+  const maxTool = Math.max(1, ...data.per_tool.map((x) => x.count));
+  const maxDaily = Math.max(1, ...data.daily.map((x) => x.runs));
+  const errPct = Math.round((data.jobs.error_rate || 0) * 1000) / 10;
+
+  return (
+    <div className="space-y-6">
+      {/* kontrol rentang */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="text-sm text-neutral-500">
+          Ringkasan {data.days} hari terakhir
+        </div>
+        <div className="flex items-center gap-2">
+          {[7, 14, 30, 90].map((d) => (
+            <button
+              key={d}
+              onClick={() => setDays(d)}
+              className={`rounded-lg border px-3 py-1.5 text-xs font-medium ${
+                days === d
+                  ? "border-[color:var(--brand)] text-[color:var(--brand)]"
+                  : "border-c text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200"
+              }`}
+            >
+              {d} hr
+            </button>
+          ))}
+          <button
+            onClick={load}
+            className="rounded-lg border border-c px-3 py-1.5 text-xs font-medium text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200"
+          >
+            ⟳ Segarkan
+          </button>
+        </div>
+      </div>
+
+      {/* kartu statistik */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">
+        <StatCard idx={0} label="Analisis (window)" value={fmtNum(t.runs_window)} sub={`${fmtNum(t.runs)} total`} icon="⚡" />
+        <StatCard idx={1} label="Pengguna aktif" value={fmtNum(t.active_users_window)} sub={`dari ${fmtNum(t.users)} total`} icon="👥" />
+        <StatCard idx={2} label="Pengguna baru" value={fmtNum(t.new_users_window)} sub="pendaftaran baru" icon="✨" />
+        <StatCard idx={3} label="Token beredar" value={fmtNum(t.tokens_outstanding)} sub="saldo seluruh user" icon="🪙" />
+        <StatCard idx={4} label="Job async" value={fmtNum(data.jobs.total)} sub={`${Object.keys(data.jobs.by_status).length} status`} icon="⚙️" />
+        <StatCard idx={5} label="Error rate" value={`${errPct}%`} sub={`${fmtNum(data.jobs.by_status.error ?? 0)} gagal`} icon="🩺" />
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        {/* per tool */}
+        <div className="rounded-2xl border border-c surface-2 p-4">
+          <div className="mb-3 text-sm font-semibold text-neutral-800 dark:text-neutral-100">
+            Pemakaian per Fitur
+          </div>
+          {data.per_tool.length === 0 ? (
+            <div className="py-8 text-center text-xs text-neutral-400">Belum ada data.</div>
+          ) : (
+            <div className="space-y-2.5">
+              {data.per_tool.map((row) => (
+                <div key={row.tool} className="flex items-center gap-3">
+                  <div className="w-28 shrink-0 truncate text-xs text-neutral-600 dark:text-neutral-300">
+                    {toolLabel(row.tool)}
+                  </div>
+                  <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-neutral-200/60 dark:bg-neutral-800">
+                    <div
+                      className="h-full rounded-full bg-[color:var(--brand)]"
+                      style={{ width: `${(row.count / maxTool) * 100}%` }}
+                    />
+                  </div>
+                  <div className="w-10 shrink-0 text-right text-xs font-medium tabular-nums text-neutral-700 dark:text-neutral-200">
+                    {fmtNum(row.count)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* tren harian */}
+        <div className="rounded-2xl border border-c surface-2 p-4">
+          <div className="mb-3 text-sm font-semibold text-neutral-800 dark:text-neutral-100">
+            Tren Harian
+          </div>
+          {data.daily.length === 0 ? (
+            <div className="py-8 text-center text-xs text-neutral-400">Belum ada data.</div>
+          ) : (
+            <div className="flex h-36 items-end gap-1">
+              {data.daily.map((d) => (
+                <div
+                  key={d.day}
+                  className="group relative flex flex-1 flex-col items-center justify-end"
+                  title={`${d.day}: ${d.runs} analisis, ${d.users} user`}
+                >
+                  <div
+                    className="w-full rounded-t bg-[color:var(--brand)]/80 transition-all group-hover:bg-[color:var(--brand)]"
+                    style={{ height: `${Math.max(4, (d.runs / maxDaily) * 100)}%` }}
+                  />
+                  <div className="mt-1 text-[9px] text-neutral-400">
+                    {d.day.slice(5)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* pengguna teraktif */}
+      <div className="rounded-2xl border border-c surface-2 p-4">
+        <div className="mb-3 text-sm font-semibold text-neutral-800 dark:text-neutral-100">
+          Pengguna Teraktif
+        </div>
+        {data.top_users.length === 0 ? (
+          <div className="py-8 text-center text-xs text-neutral-400">Belum ada aktivitas.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-[11px] uppercase tracking-wider text-neutral-400">
+                  <th className="pb-2 pr-3 font-medium">#</th>
+                  <th className="pb-2 pr-3 font-medium">Pengguna</th>
+                  <th className="pb-2 pr-3 text-right font-medium">Analisis</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.top_users.map((u, i) => (
+                  <tr key={u.user_id ?? i} className="border-t border-c">
+                    <td className="py-2 pr-3 text-neutral-400">{i + 1}</td>
+                    <td className="py-2 pr-3">
+                      <div className="font-medium text-neutral-800 dark:text-neutral-100">
+                        {u.name || u.email || `User #${u.user_id ?? "?"}`}
+                      </div>
+                      {u.email && u.name ? (
+                        <div className="text-xs text-neutral-400">{u.email}</div>
+                      ) : null}
+                    </td>
+                    <td className="py-2 pr-3 text-right font-semibold tabular-nums text-neutral-700 dark:text-neutral-200">
+                      {fmtNum(u.runs)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* feed aktivitas */}
+      <div className="rounded-2xl border border-c surface-2 p-4">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="text-sm font-semibold text-neutral-800 dark:text-neutral-100">
+            Aktivitas Terbaru
+          </div>
+          <select
+            value={toolFilter}
+            onChange={(e) => setToolFilter(e.target.value)}
+            className="rounded-lg border border-c surface-2 px-2 py-1 text-xs text-neutral-600 dark:text-neutral-300"
+          >
+            <option value="">Semua fitur</option>
+            {data.per_tool.map((r) => (
+              <option key={r.tool} value={r.tool}>
+                {toolLabel(r.tool)}
+              </option>
+            ))}
+          </select>
+        </div>
+        {feed.length === 0 ? (
+          <div className="py-8 text-center text-xs text-neutral-400">Belum ada aktivitas.</div>
+        ) : (
+          <ul className="divide-y divide-[color:var(--border)]">
+            {feed.map((it) => (
+              <li key={it.id} className="flex items-center gap-3 py-2.5">
+                <span className="inline-flex shrink-0 items-center rounded-full bg-[color:var(--brand)]/10 px-2 py-0.5 text-[11px] font-medium text-[color:var(--brand)]">
+                  {toolLabel(it.tool)}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm text-neutral-700 dark:text-neutral-200">
+                    {it.title || it.input_preview || "—"}
+                  </div>
+                  <div className="truncate text-xs text-neutral-400">
+                    {it.name || it.email || `User #${it.user_id ?? "?"}`}
+                  </div>
+                </div>
+                <div className="shrink-0 text-xs text-neutral-400">
+                  {timeAgo(it.created_at)}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }
