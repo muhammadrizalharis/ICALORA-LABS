@@ -222,7 +222,7 @@ def _llm_analysis(text: str) -> dict:
         {"role": "user", "content": text[:6000]},
     ]
     try:
-        raw = llm.chat(messages, temperature=0.0, max_tokens=600)
+        raw = llm.chat(messages, temperature=0.0, max_tokens=600, think=False)
         return _parse_llm_json(raw)
     except Exception:  # noqa: BLE001
         return {"prob": None, "sentences": []}
