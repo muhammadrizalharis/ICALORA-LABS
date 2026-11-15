@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { API_BASE } from "@/lib/api";
 import { getFeature } from "@/lib/features";
 import ReportBar from "@/components/ReportBar";
 import { escapeHtml } from "@/lib/report";
@@ -114,10 +115,15 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+// Tool slug -> suffix endpoint laporan PDF server-side (butuh history id).
+const PDF_REPORT_ENDPOINT: Record<string, string> = {
+  "ai-detector": "ai-detect-report",
+  "grammar-checker": "grammar-report",
+};
+
 export default function HistoryResultView({ item }: { item: HistoryItemFull }) {
   const feature = getFeature(item.tool);
   const result = item.result ?? {};
-
   const isPlagiarism =
     item.tool === "plagiarism-checker" && Array.isArray(result.matched_passages);
   const isRich = !isPlagiarism && hasRichToolView(item.tool);
@@ -163,12 +169,22 @@ export default function HistoryResultView({ item }: { item: HistoryItemFull }) {
           </div>
         </div>
         {feature && (
-          <Link
-            href={`/dashboard/tools/${item.tool}`}
-            className="shrink-0 rounded-lg bg-[color:var(--brand)] px-4 py-2 text-sm font-medium text-white hover:opacity-90"
-          >
-            Periksa ulang
-          </Link>
+          <div className="flex shrink-0 items-center gap-2">
+            {PDF_REPORT_ENDPOINT[item.tool] && (
+              <a
+                href={`${API_BASE}/tools/${PDF_REPORT_ENDPOINT[item.tool]}/${item.id}?dl=1`}
+                className="rounded-lg border border-c surface-2 px-4 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50 dark:text-neutral-200 dark:hover:bg-neutral-900"
+              >
+                Unduh PDF
+              </a>
+            )}
+            <Link
+              href={`/dashboard/tools/${item.tool}`}
+              className="rounded-lg bg-[color:var(--brand)] px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+            >
+              Periksa ulang
+            </Link>
+          </div>
         )}
       </div>
 

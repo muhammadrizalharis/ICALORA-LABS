@@ -44,6 +44,7 @@ from app.services.plagiarism.online import online_candidates, online_check
 from app.services.plagiarism.report_pdf import build_report_pdf
 from app.services.publikasi import recommend_journals
 from app.services.report import MAX_HTML_BYTES, render_pdf
+from app.services.report.reports import ai_detector_report_html, grammar_report_html
 from app.services.text_tools import analyze_text
 from app.services.transkrip import (
     MAX_AUDIO_BYTES,
@@ -628,6 +629,49 @@ def plagiarism_report_ep(history_id: int, request: Request, dl: int = 0) -> Resp
         media_type="application/pdf",
         headers={"Content-Disposition": f'{disp}; filename="{name}"'},
     )
+
+
+def _report_history(request: Request, history_id: int, expect_tool: str) -> dict:
+    user = optional_user_from_request(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Perlu login.")
+    item = get_history_item(user["id"], history_id)
+    if not item or item.get("tool") != expect_tool:
+        raise HTTPException(status_code=404, detail="Riwayat tidak ditemukan.")
+    return item
+
+
+def _pdf_response(pdf: bytes, name: str, dl: int) -> Response:
+    disp = "attachment" if dl else "inline"
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'{disp}; filename="{name}"'},
+    )
+
+
+@router.get("/ai-detect-report/{history_id}")
+def ai_detect_report_ep(history_id: int, request: Request, dl: int = 0) -> Response:
+    """Laporan PDF hasil deteksi AI dari riwayat pengguna."""
+    item = _report_history(request, history_id, "ai-detector")
+    try:
+        html = ai_detector_report_html(item.get("result") or {}, {"title": item.get("title")})
+        pdf = render_pdf(html)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Render laporan gagal: {exc}") from exc
+    return _pdf_response(pdf, f"laporan-ai-detector-{history_id}.pdf", dl)
+
+
+@router.get("/grammar-report/{history_id}")
+def grammar_report_ep(history_id: int, request: Request, dl: int = 0) -> Response:
+    """Laporan PDF hasil pemeriksaan tata bahasa dari riwayat pengguna."""
+    item = _report_history(request, history_id, "grammar-checker")
+    try:
+        html = grammar_report_html(item.get("result") or {}, {"title": item.get("title")})
+        pdf = render_pdf(html)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Render laporan gagal: {exc}") from exc
+    return _pdf_response(pdf, f"laporan-grammar-{history_id}.pdf", dl)
 
 
 @router.post("/rewrite")
