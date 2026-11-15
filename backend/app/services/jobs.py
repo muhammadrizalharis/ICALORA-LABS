@@ -11,7 +11,6 @@ lintas-permintaan. Hasil akhir ditautkan ke `tool_history` lewat `history_id`.
 
 from __future__ import annotations
 
-import json
 import uuid
 
 from sqlalchemy import text
@@ -129,5 +128,30 @@ def purge_expired_jobs(hours: int = 24) -> int:
                 "WHERE created_at < now() - make_interval(hours => :h)"
             ),
             {"h": max(1, int(hours))},
+        )
+    return res.rowcount or 0
+
+
+def fail_orphaned_jobs(
+    message: str = (
+        "Proses terhenti karena server dimulai ulang. Silakan jalankan ulang pemeriksaan."
+    ),
+) -> int:
+    """Tandai semua job yang masih 'processing' sebagai gagal.
+
+    Dipanggil saat startup aplikasi: tugas latar belakang yang menjalankannya
+    hidup di dalam proses backend, jadi ketika proses mati/di-restart (mis. saat
+    deploy) job tersebut menjadi yatim dan tak akan pernah selesai sendiri —
+    menyebabkan status 'processing' menggantung selamanya dan klien menunggu
+    hingga batas waktu. Sweep ini menutupnya dengan pesan yang jelas.
+    """
+    ensure_job_schema()
+    with engine.begin() as c:
+        res = c.execute(
+            text(
+                "UPDATE tool_job SET status='error', error=:err, updated_at=now() "
+                "WHERE status='processing'"
+            ),
+            {"err": message[:500]},
         )
     return res.rowcount or 0
