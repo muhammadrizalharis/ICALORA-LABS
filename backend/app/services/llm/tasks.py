@@ -262,7 +262,7 @@ def paraphrase(text: str, style: str = "standar") -> dict:
         {"role": "user", "content": text},
     ]
     result = llm.chat(messages, temperature=0.7)
-    return {"result": result, "style": style}
+    return {"result": result, "style": key}
 
 
 def humanize(text: str) -> dict:
@@ -295,7 +295,10 @@ REWRITE_TONES = {
 
 def rewrite(text: str, tone: str = "formal") -> dict:
     """AI Rewriter: rombak gaya tulisan sesuai nada yang dipilih."""
-    desc = REWRITE_TONES.get(tone, REWRITE_TONES["formal"])
+    key = (tone or "").strip().lower()
+    if key not in REWRITE_TONES:
+        key = "formal"
+    desc = REWRITE_TONES[key]
     llm = get_llm()
     messages = [
         {
