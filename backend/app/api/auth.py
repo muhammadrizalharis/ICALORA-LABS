@@ -331,6 +331,18 @@ def admin_reset_user_password(user_id: int, request: Request) -> dict:
     return {"ok": True, "password": new_pw, "email": target.get("email")}
 
 
+@router.get("/admin/analytics")
+def admin_analytics(request: Request, days: int = 14) -> dict:
+    require_admin(request)
+    return admin_svc.analytics_overview(days)
+
+
+@router.get("/admin/activity")
+def admin_activity(request: Request, limit: int = 50, tool: str | None = None) -> dict:
+    require_admin(request)
+    return {"items": admin_svc.recent_activity(limit, tool)}
+
+
 @router.get("/admin/settings")
 def admin_get_settings(request: Request) -> dict:
     require_admin(request)

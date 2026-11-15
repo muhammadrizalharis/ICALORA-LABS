@@ -265,3 +265,167 @@ def count_users() -> dict[str, int]:
             text("SELECT count(*) FROM users WHERE NOT COALESCE(is_active, TRUE)")
         ).scalar() or 0
     return {"total": int(total), "admins": int(admins), "inactive": int(inactive)}
+
+
+# ---------------------------------------------------------------------------
+# Analitik Super Admin: agregasi pemakaian dari tool_history / tool_job / users
+# ---------------------------------------------------------------------------
+
+def analytics_overview(days: int = 14) -> dict[str, Any]:
+    """Ringkasan aktivitas untuk dashboard super-admin.
+
+    Mengagregasi tanpa menyentuh isi `result` (hanya metadata) agar murah &
+    privasi terjaga. Semua angka dihitung di SQL (cepat, lintas seluruh data).
+    """
+    ensure_settings_schema()
+    days = max(1, min(90, int(days)))
+    out: dict[str, Any] = {"days": days}
+    with engine.connect() as c:
+        # --- Kartu ringkasan ---
+        out["totals"] = {
+            "runs": int(c.execute(text("SELECT count(*) FROM tool_history")).scalar() or 0),
+            "runs_window": int(
+                c.execute(
+                    text(
+                        "SELECT count(*) FROM tool_history "
+                        "WHERE created_at >= now() - make_interval(days => :d)"
+                    ),
+                    {"d": days},
+                ).scalar()
+                or 0
+            ),
+            "users": int(c.execute(text("SELECT count(*) FROM users")).scalar() or 0),
+            "active_users_window": int(
+                c.execute(
+                    text(
+                        "SELECT count(DISTINCT user_id) FROM tool_history "
+                        "WHERE created_at >= now() - make_interval(days => :d)"
+                    ),
+                    {"d": days},
+                ).scalar()
+                or 0
+            ),
+            "new_users_window": int(
+                c.execute(
+                    text(
+                        "SELECT count(*) FROM users "
+                        "WHERE created_at >= now() - make_interval(days => :d)"
+                    ),
+                    {"d": days},
+                ).scalar()
+                or 0
+            ),
+            "tokens_outstanding": int(
+                c.execute(text("SELECT COALESCE(sum(token_balance),0) FROM users")).scalar() or 0
+            ),
+        }
+
+        # --- Pemakaian per tool (sepanjang masa) ---
+        out["per_tool"] = [
+            {"tool": r[0], "count": int(r[1])}
+            for r in c.execute(
+                text(
+                    "SELECT tool, count(*) c FROM tool_history "
+                    "GROUP BY tool ORDER BY c DESC"
+                )
+            )
+        ]
+
+        # --- Tren harian (window) ---
+        out["daily"] = [
+            {"day": str(r[0]), "runs": int(r[1]), "users": int(r[2])}
+            for r in c.execute(
+                text(
+                    "SELECT date_trunc('day', created_at)::date AS d, "
+                    "       count(*) AS runs, count(DISTINCT user_id) AS users "
+                    "FROM tool_history "
+                    "WHERE created_at >= now() - make_interval(days => :d) "
+                    "GROUP BY d ORDER BY d"
+                ),
+                {"d": days},
+            )
+        ]
+
+        # --- Pengguna teraktif (window) ---
+        out["top_users"] = [
+            {
+                "user_id": int(r[0]) if r[0] is not None else None,
+                "email": r[1],
+                "name": r[2],
+                "runs": int(r[3]),
+            }
+            for r in c.execute(
+                text(
+                    "SELECT h.user_id, u.email, u.name, count(*) AS runs "
+                    "FROM tool_history h LEFT JOIN users u ON u.id = h.user_id "
+                    "WHERE h.created_at >= now() - make_interval(days => :d) "
+                    "GROUP BY h.user_id, u.email, u.name "
+                    "ORDER BY runs DESC LIMIT 10"
+                ),
+                {"d": days},
+            )
+        ]
+
+        # --- Kesehatan job async (error rate) ---
+        try:
+            job_rows = list(
+                c.execute(
+                    text(
+                        "SELECT status, count(*) FROM tool_job "
+                        "WHERE created_at >= now() - make_interval(days => :d) "
+                        "GROUP BY status"
+                    ),
+                    {"d": days},
+                )
+            )
+            by_status = {str(r[0]): int(r[1]) for r in job_rows}
+            total_jobs = sum(by_status.values())
+            out["jobs"] = {
+                "by_status": by_status,
+                "total": total_jobs,
+                "error_rate": round(by_status.get("error", 0) / total_jobs, 4)
+                if total_jobs
+                else 0.0,
+            }
+        except Exception:  # noqa: BLE001 — tabel job opsional
+            out["jobs"] = {"by_status": {}, "total": 0, "error_rate": 0.0}
+
+    return out
+
+
+def recent_activity(limit: int = 50, tool: str | None = None) -> list[dict[str, Any]]:
+    """Feed aktivitas terbaru lintas SEMUA pengguna (metadata saja, tanpa isi).
+
+    Berguna bagi super-admin untuk memantau penyalahgunaan / pola pemakaian.
+    """
+    ensure_settings_schema()
+    limit = max(1, min(200, int(limit)))
+    clause = ""
+    params: dict[str, Any] = {"lim": limit}
+    if tool:
+        clause = "WHERE h.tool = :tool"
+        params["tool"] = tool
+    with engine.connect() as c:
+        rows = c.execute(
+            text(
+                "SELECT h.id, h.user_id, u.email, u.name, h.tool, h.title, "
+                "       h.input_preview, h.created_at "
+                "FROM tool_history h LEFT JOIN users u ON u.id = h.user_id "
+                f"{clause} "
+                "ORDER BY h.created_at DESC LIMIT :lim"
+            ),
+            params,
+        )
+        return [
+            {
+                "id": int(r[0]),
+                "user_id": int(r[1]) if r[1] is not None else None,
+                "email": r[2],
+                "name": r[3],
+                "tool": r[4],
+                "title": r[5],
+                "input_preview": r[6],
+                "created_at": r[7].isoformat() if r[7] else None,
+            }
+            for r in rows
+        ]
