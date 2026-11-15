@@ -104,6 +104,12 @@ class Settings(BaseSettings):
     # namun tetap di bawah batas polling frontend (20 mnt) dengan sisa untuk
     # pencocokan korpus lokal.
     online_budget_seconds: int = Field(default=960)
+    # Anggaran waktu untuk PASS IDENTITAS yang berjalan PARALEL dengan pencarian
+    # luas per-kalimat. Pass ini ringan (resolusi judul/DOI + unduh teks-penuh
+    # paper dokumen itu sendiri) dan DIJAMIN selesai jauh lebih cepat dari
+    # anggaran luas, sehingga paper terbit milik user tetap tercocok meski fase
+    # pencarian luas kehabisan waktu. Disetel < `online_budget_seconds`.
+    online_identity_budget_seconds: int = Field(default=300)
     core_api_key: str = Field(default="")
     core_enabled: bool = Field(default=True)
     # Ambil teks-PENUH open-access (PDF/HTML) untuk paper yang teridentifikasi
