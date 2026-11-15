@@ -498,3 +498,39 @@ def test_eval_metrics_tpr_at_fpr_and_wilson():
     assert 0.0 < lo < 0.05 < hi < 0.12
     assert _wilson(0, 0) is None
     assert _nll([99.0, 1.0], [1, 0]) < 0.02
+
+
+def test_llm_skipped_reason_english_disabled(monkeypatch):
+    import app.services.ai_detector as det
+
+    monkeypatch.setattr(det, "_BLEND_W", {"stat": 0.0, "llm": 0.0, "model": 0.0, "emb": 1.0})
+    reason = det._llm_skipped_reason("en", None)
+    assert reason is not None
+    assert "dinonaktifkan" in reason
+    assert "bukan timeout" in reason.lower()
+
+
+def test_llm_skipped_reason_none_when_llm_weighted(monkeypatch):
+    import app.services.ai_detector as det
+
+    monkeypatch.setattr(det, "_BLEND_W", {"stat": 0.1, "llm": 0.2, "model": 0.1, "emb": 0.6})
+    assert det._llm_skipped_reason("en", None) is None
+
+
+def test_no_timeout_warning_when_llm_weight_zero(monkeypatch):
+    import app.services.ai_detector as det
+
+    monkeypatch.setattr(det, "_BLEND_W", {"stat": 0.0, "llm": 0.0, "model": 0.0, "emb": 1.0})
+    res_in = {"llm_probability": None, "verdict": "kemungkinan besar manusia"}
+    out = det._annotate(res_in, 500, "en")
+    assert not any("timeout/nonaktif" in w for w in out["warnings"])
+    assert "dinonaktifkan" in out["report"]["llm_skipped_reason"]
+
+
+def test_timeout_warning_kept_when_llm_weighted(monkeypatch):
+    import app.services.ai_detector as det
+
+    monkeypatch.setattr(det, "_BLEND_W", {"stat": 0.1, "llm": 0.2, "model": 0.1, "emb": 0.6})
+    res_in = {"llm_probability": None, "verdict": "kemungkinan besar manusia"}
+    out = det._annotate(res_in, 500, "en")
+    assert any("timeout/nonaktif" in w for w in out["warnings"])

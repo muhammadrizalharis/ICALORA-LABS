@@ -544,6 +544,28 @@ def _model_info() -> dict:
     return _MODEL_INFO
 
 
+def _llm_skipped_reason(language: str, llm_probability: float | None) -> str | None:
+    """Alasan jelas mengapa komponen LLM tidak menyumbang ke skor.
+
+    Penting: bobot LLM memang 0 pada model terkini karena LLM terukur sering
+    salah menuduh tulisan akademik manusia sebagai AI (mis. paper manusia dinilai
+    95% AI oleh LLM, padahal model embedding benar menilai ~manusia). Ini bukan
+    kegagalan/timeout; menonaktifkannya justru menaikkan akurasi.
+    """
+    if language == "id":
+        return (
+            "LLM tidak dipakai untuk teks Indonesia (terukur sering salah menuduh "
+            "tulisan akademik manusia)."
+        )
+    if llm_probability is None and _blend_weights()["llm"] <= 0:
+        return (
+            "Penilaian LLM sengaja dinonaktifkan pada model ini: model embedding "
+            "terbukti lebih akurat & stabil, sedangkan LLM cenderung salah menuduh "
+            "tulisan akademik manusia sebagai AI. Ini bukan timeout/kegagalan."
+        )
+    return None
+
+
 def _annotate(res: dict, n_words: int, language: str) -> dict:
     """Tambahkan peringatan, tingkat keandalan, dan metadata laporan."""
     warnings: list[str] = []
@@ -557,7 +579,7 @@ def _annotate(res: dict, n_words: int, language: str) -> dict:
             "Bahasa teks tidak terdeteksi sebagai Indonesia/Inggris; model hanya "
             "dilatih untuk dua bahasa tersebut."
         )
-    if res.get("llm_probability") is None and language == "en":
+    if res.get("llm_probability") is None and language == "en" and _blend_weights()["llm"] > 0:
         warnings.append("Penilaian LLM tidak tersedia (timeout/nonaktif); skor dari model lain.")
     low = n_words < _SHORT_WORDS or language == "other"
     reliability = "rendah" if low else "normal"
@@ -581,10 +603,7 @@ def _annotate(res: dict, n_words: int, language: str) -> dict:
         "language": language,
         "supported_languages": ["id", "en"],
         "components": components,
-        "llm_skipped_reason": (
-            "LLM tidak dipakai untuk teks Indonesia (terukur sering salah menuduh tulisan "
-            "akademik manusia)." if language == "id" else None
-        ),
+        "llm_skipped_reason": _llm_skipped_reason(language, res.get("llm_probability")),
         "binoculars": (
             "dipakai" if stacked else
             "tidak tersedia saat ini (layanan/GPU sibuk); skor dari model lain"

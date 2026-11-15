@@ -265,6 +265,19 @@ def ai_detector_report_html(result: dict, meta: dict | None = None) -> str:
             f"<div class='muted'>{note}</div>"
         )
 
+    warn_items = [str(w) for w in (result.get("warnings") or []) if w]
+    reason = (result.get("report") or {}).get("llm_skipped_reason")
+    warn_html = ""
+    if warn_items:
+        lis = "".join(f"<li style='margin-bottom:4px'>{_esc(w)}</li>" for w in warn_items)
+        warn_html += (
+            "<div class='note' style='border-left:3px solid #f59e0b'>"
+            "<strong>Peringatan</strong>"
+            f"<ul style='margin:6px 0 0 16px;padding:0'>{lis}</ul></div>"
+        )
+    if reason:
+        warn_html += f"<div class='note'>{_esc(reason)}</div>"
+
     body = f"""
   <div class="cards">
     <div class="card"><div class="k">Probabilitas AI</div>
@@ -276,6 +289,8 @@ def ai_detector_report_html(result: dict, meta: dict | None = None) -> str:
   </div>
 
   {f'<div class="note" style="border-left:3px solid {BRAND}">{_esc(result.get("verdict_explanation"))}</div>' if result.get("verdict_explanation") else ""}
+
+  {warn_html}
 
   {bd_html}
 
