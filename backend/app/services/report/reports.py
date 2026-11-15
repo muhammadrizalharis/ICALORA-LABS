@@ -55,6 +55,13 @@ def _shell(title: str, subtitle: str, body: str) -> str:
   .bar > span {{ display: block; height: 100%; background: {BRAND}; }}
   .note {{ margin-top: 20px; padding: 10px 12px; border-left: 3px solid {BRAND};
            background: #f6f7fb; border-radius: 6px; color: {_MUTE}; font-size: 9.5px; }}
+  .doc {{ border: 1px solid {_LINE}; border-radius: 8px; padding: 12px;
+          white-space: pre-wrap; word-wrap: break-word; font-size: 10px;
+          line-height: 1.65; margin-top: 6px; }}
+  .doc span {{ border-radius: 3px; padding: 0 1px; }}
+  .legend {{ font-size: 9.5px; color: {_MUTE}; margin: 2px 0 2px; }}
+  .legend b {{ padding: 1px 7px; border-radius: 4px; font-weight: 700;
+               color: {_INK}; margin-right: 4px; }}
   .foot {{ margin-top: 26px; border-top: 1px solid {_LINE}; padding-top: 8px;
            color: {_MUTE}; font-size: 9px; display: flex; justify-content: space-between; }}
 </style></head><body>
@@ -75,6 +82,105 @@ def _verdict_tone(prob: float) -> str:
     if prob >= 50:
         return "background:#fef3c7;color:#b45309;"
     return "background:#dcfce7;color:#15803d;"
+
+
+_SEG_BG = {"ai": "#fee2e2", "mixed": "#fef3c7", "human": "#ecfdf5"}
+_SEG_NAME = {"ai": "AI", "mixed": "Campuran", "human": "Manusia"}
+
+
+def _seg_tone(label: str) -> str:
+    return f"background:{_SEG_BG.get(label, '#ecfdf5')};"
+
+
+def _ai_highlight_html(result: dict) -> str:
+    """Bagian 'Teks Dianalisis & Peta Segmen': teks penuh dengan sorotan per
+    segmen (merah=AI, kuning=campuran, hijau=manusia) + tabel rincian segmen.
+
+    Teks penuh hanya tersedia bila ``input_text`` tersimpan (analisis baru).
+    Untuk riwayat lama, tampilkan tabel segmen dari cuplikan yang tersimpan.
+    """
+    segments = result.get("segments") or []
+    if not segments:
+        return ""
+
+    legend = (
+        "<div class='legend'>Sorotan: "
+        "<b style='background:#fee2e2'>AI</b>"
+        "<b style='background:#fef3c7'>Campuran</b>"
+        "<b style='background:#ecfdf5'>Manusia</b></div>"
+    )
+
+    input_text = result.get("input_text")
+    doc_html = ""
+    if isinstance(input_text, str) and input_text.strip():
+        cap = 60_000
+        txt = input_text[:cap]
+        ordered = sorted(
+            (s for s in segments if s.get("start") is not None),
+            key=lambda s: int(s.get("start") or 0),
+        )
+        parts: list[str] = []
+        cursor = 0
+        for s in ordered:
+            st = int(s.get("start") or 0)
+            en = min(int(s.get("end") or 0), len(txt))
+            if st >= len(txt):
+                break
+            if st > cursor:
+                parts.append(_esc(txt[cursor:st]))
+            label = str(s.get("label") or "human")
+            ap = s.get("ai_probability")
+            title = f"{_SEG_NAME.get(label, label)}"
+            if ap is not None:
+                title += f" · AI {float(ap):.0f}%"
+            parts.append(
+                f"<span style='{_seg_tone(label)}' title='{_esc(title)}'>"
+                f"{_esc(txt[st:en])}</span>"
+            )
+            cursor = max(cursor, en)
+        if cursor < len(txt):
+            parts.append(_esc(txt[cursor:]))
+        trunc = (
+            "<div class='muted' style='margin-top:4px'>"
+            "Teks dipangkas pada 60.000 karakter untuk laporan.</div>"
+            if len(input_text) > cap
+            else ""
+        )
+        doc_html = (
+            "<h2>Teks Dianalisis &amp; Sorotan Segmen</h2>"
+            f"{legend}<div class='doc'>{''.join(parts)}</div>{trunc}"
+        )
+
+    seg_rows = []
+    for s in segments[:150]:
+        label = str(s.get("label") or "human")
+        ap = s.get("ai_probability")
+        apx = f"{float(ap):.1f}%" if ap is not None else "—"
+        prev = _esc(str(s.get("preview") or s.get("text") or "")[:160])
+        seg_rows.append(
+            "<tr>"
+            f"<td style='width:5%'>{_esc(s.get('index'))}</td>"
+            f"<td style='width:14%'><span class='pill' style='{_seg_tone(label)};color:{_INK}'>"
+            f"{_esc(_SEG_NAME.get(label, label))}</span></td>"
+            f"<td style='width:9%;text-align:right'>{_esc(s.get('words') or '—')}</td>"
+            f"<td style='width:9%;text-align:right;font-weight:700'>{apx}</td>"
+            f"<td class='muted'>{prev}{'…' if prev else ''}</td>"
+            "</tr>"
+        )
+    seg_tbl = (
+        "<h2>Rincian Segmen Dokumen</h2>"
+        "<table><tr><th>#</th><th>Label</th><th>Kata</th><th>AI%</th><th>Cuplikan</th></tr>"
+        + "".join(seg_rows)
+        + "</table>"
+    )
+    hint = (
+        ""
+        if doc_html
+        else "<div class='muted' style='margin-top:4px'>Sorotan teks penuh "
+        "tersedia untuk analisis baru (teks asli riwayat lama tidak tersimpan). "
+        "Jalankan ulang analisis untuk laporan dengan sorotan lengkap.</div>"
+    )
+    return doc_html + seg_tbl + hint
 
 
 def ai_detector_report_html(result: dict, meta: dict | None = None) -> str:
@@ -172,6 +278,8 @@ def ai_detector_report_html(result: dict, meta: dict | None = None) -> str:
   {f'<div class="note" style="border-left:3px solid {BRAND}">{_esc(result.get("verdict_explanation"))}</div>' if result.get("verdict_explanation") else ""}
 
   {bd_html}
+
+  {_ai_highlight_html(result)}
 
   <h2>Rincian Sinyal Deteksi</h2>
   {comp}
