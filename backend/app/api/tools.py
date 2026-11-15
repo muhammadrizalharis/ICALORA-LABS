@@ -60,6 +60,11 @@ router = APIRouter(prefix="/tools", tags=["tools"])
 # ekstrem — setara buku/tesis sangat panjang (~340rb kata). Analisis semantik
 # memakai embedding per-jendela, jadi seluruh isi dokumen tetap diperiksa.
 MAX_CHARS = 2_000_000
+# MIME peran untuk laporan overlay AI yang sudah dibangun & di-cache pada
+# riwayat (dibedakan dari PDF asli "application/pdf"). Laporan dibangun sekali
+# di latar belakang saat deteksi (bisa ~1 mnt) lalu disajikan seketika agar
+# unduhan tidak melewati batas waktu proxy (Cloudflare 524).
+AI_REPORT_MIME = "application/x-icalora-ai-report"
 # Batas waktu transkripsi (detik) agar tidak menahan worker pada berkas panjang.
 TRANSCRIBE_TIMEOUT = int(os.environ.get("WHISPER_TIMEOUT", "900"))
 settings = get_settings()
@@ -660,24 +665,41 @@ def _pdf_response(pdf: bytes, name: str, dl: int) -> Response:
 
 @router.get("/ai-detect-report/{history_id}")
 def ai_detect_report_ep(history_id: int, request: Request, dl: int = 0) -> Response:
-    """Laporan PDF hasil deteksi AI dari riwayat pengguna. Jika berkas PDF asli
-    tersimpan, hasilkan laporan berformat identik (sorotan segmen di atas dokumen
-    asli); jika tidak, gunakan laporan HTML untuk teks tempel."""
+    """Laporan PDF hasil deteksi AI dari riwayat pengguna.
+
+    Urutan: (1) sajikan laporan overlay yang sudah di-cache (instan, dibangun
+    saat deteksi) bila ada; (2) bila hanya PDF asli tersimpan, bangun overlay
+    on-demand lalu cache untuk unduhan berikutnya; (3) bila tak ada PDF, pakai
+    laporan HTML untuk teks tempel.
+    """
     item = _report_history(request, history_id, "ai-detector")
     result = item.get("result") or {}
     user = optional_user_from_request(request)
-    f = get_tool_file_by_history(user["id"], history_id) if user else None
-    if f and f.get("data"):
+    uid = user["id"] if user else None
+
+    cached = get_tool_file_by_history(uid, history_id, AI_REPORT_MIME) if uid else None
+    if cached and cached.get("data"):
+        base = (cached.get("filename") or "laporan").rsplit(".", 1)[0]
+        return _pdf_response(cached["data"], f"laporan-ai-detector-{base}.pdf", dl)
+
+    orig = get_tool_file_by_history(uid, history_id, "application/pdf") if uid else None
+    if orig and orig.get("data"):
         try:
-            pdf = build_ai_report_pdf(
-                f["data"], result, {"title": item.get("title")}
-            )
+            pdf = build_ai_report_pdf(orig["data"], result, {"title": item.get("title")})
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(
                 status_code=502, detail=f"Render laporan gagal: {exc}"
             ) from exc
-        base = (f.get("filename") or "laporan").rsplit(".", 1)[0]
+        if uid:
+            try:
+                save_tool_file(
+                    uid, history_id, orig.get("filename"), AI_REPORT_MIME, pdf, None
+                )
+            except Exception:  # noqa: BLE001, S110
+                pass
+        base = (orig.get("filename") or "laporan").rsplit(".", 1)[0]
         return _pdf_response(pdf, f"laporan-ai-detector-{base}.pdf", dl)
+
     try:
         html = ai_detector_report_html(result, {"title": item.get("title")})
         pdf = render_pdf(html)
@@ -805,6 +827,15 @@ def _store_ai_file_result(
         )
         if hist_id and is_pdf:
             save_tool_file(user_id, hist_id, filename, "application/pdf", data, None)
+            # Bangun laporan overlay SEKARANG (di latar belakang job, bebas batas
+            # proxy) lalu cache — agar unduhan nanti instan & tak kena 524.
+            try:
+                report_pdf = build_ai_report_pdf(data, logged, {"title": filename})
+                save_tool_file(
+                    user_id, hist_id, filename, AI_REPORT_MIME, report_pdf, None
+                )
+            except Exception:  # noqa: BLE001, S110
+                pass  # gagal-aman: endpoint laporan akan membangun on-demand
     return res, hist_id
 
 

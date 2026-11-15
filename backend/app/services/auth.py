@@ -491,19 +491,32 @@ def save_tool_file(
     return int(row.id) if row else None
 
 
-def get_tool_file_by_history(user_id: int, history_id: int) -> dict | None:
-    """Ambil berkas asli untuk sebuah riwayat (hanya dalam masa retensi)."""
+def get_tool_file_by_history(
+    user_id: int, history_id: int, mime: str | None = None
+) -> dict | None:
+    """Ambil berkas untuk sebuah riwayat (hanya dalam masa retensi).
+
+    ``mime`` opsional memfilter peran berkas — mis. membedakan PDF asli
+    (``application/pdf``) dari laporan overlay yang di-cache
+    (``application/x-icalora-ai-report``) saat keduanya disimpan pada satu
+    riwayat.
+    """
     ensure_file_schema()
     days = max(1, int(settings.history_retention_days))
+    clause = ""
+    params: dict = {"uid": user_id, "hid": history_id, "days": days}
+    if mime is not None:
+        clause = "AND mime = :mime "
+        params["mime"] = mime
     with engine.connect() as c:
         r = c.execute(
             text(
                 "SELECT filename, mime, byte_size, data, compression FROM tool_file "
-                "WHERE user_id = :uid AND history_id = :hid "
-                "AND created_at >= now() - make_interval(days => :days) "
+                "WHERE user_id = :uid AND history_id = :hid " + clause
+                + "AND created_at >= now() - make_interval(days => :days) "
                 "ORDER BY id DESC LIMIT 1"
             ),
-            {"uid": user_id, "hid": history_id, "days": days},
+            params,
         ).first()
     if not r:
         return None
