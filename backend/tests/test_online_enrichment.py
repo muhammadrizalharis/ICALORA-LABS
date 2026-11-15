@@ -200,3 +200,27 @@ def test_cache_key_prefers_doi():
     assert online_cache.cache_key("10.1/AbC", "https://x") == "doi:10.1/abc"
     assert online_cache.cache_key(None, "https://x").startswith("url:")
     assert online_cache.cache_key("", "") is None
+
+
+def test_pdf_url_from_html_citation_meta():
+    """Meta citation_pdf_url (standar OJS/penerbit) → URL PDF artikel asli."""
+    html = (
+        '<html><head><title>Judul</title>'
+        '<meta name="citation_title" content="Paper">'
+        '<meta name="citation_pdf_url" '
+        'content="https://jurnal.example.or.id/index.php/J/article/download/1/2"/>'
+        '</head><body>landing</body></html>'
+    )
+    url = online_mod._pdf_url_from_html(html, "https://doi.org/10.1234/abc")
+    assert url == "https://jurnal.example.or.id/index.php/J/article/download/1/2"
+
+
+def test_pdf_url_from_html_ojs_download_fallback():
+    """Tanpa meta, pola galley OJS /article/download/ dipakai (relatif → absolut)."""
+    html = '<a href="/index.php/J/article/download/7420/1377">PDF</a>'
+    url = online_mod._pdf_url_from_html(html, "https://jurnal.example.or.id/x")
+    assert url == "https://jurnal.example.or.id/index.php/J/article/download/7420/1377"
+
+
+def test_pdf_url_from_html_none_when_absent():
+    assert online_mod._pdf_url_from_html("<html><body>no pdf</body></html>", "https://x/") is None

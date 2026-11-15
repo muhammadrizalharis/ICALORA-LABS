@@ -18,7 +18,8 @@ import asyncio
 import hashlib
 import re
 from datetime import datetime, timezone
-from urllib.parse import quote_plus
+from html import unescape as _html_unescape
+from urllib.parse import quote_plus, urljoin
 from xml.etree import ElementTree as ET
 
 import httpx
@@ -228,7 +229,44 @@ async def _crawl4ai_markdown(client: httpx.AsyncClient, url: str) -> str:
     return _clean(md or "")
 
 
-async def _fetch_fulltext(client: httpx.AsyncClient, url: str | None) -> str:
+# Meta Highwire/Google-Scholar `citation_pdf_url` menunjuk PDF artikel ASLI.
+# Dipakai hampir semua OJS (mis. Jurnal RESTI) & banyak penerbit. Tanpa ini,
+# fetcher hanya mengambil HALAMAN LANDING (judul+abstrak+navigasi) dan salah
+# mengira itu "teks penuh" → cakupan pencocokan anjlok (mis. paper SENDIRI
+# hanya 6.8% padahal ~semua katanya ada di PDF resmi).
+_CIT_PDF_RE = re.compile(
+    r"<meta[^>]+?name=[\"']citation_pdf_url[\"'][^>]+?content=[\"']([^\"']+)[\"']",
+    re.I,
+)
+_CIT_PDF_RE2 = re.compile(
+    r"<meta[^>]+?content=[\"']([^\"']+)[\"'][^>]+?name=[\"']citation_pdf_url[\"']",
+    re.I,
+)
+_OJS_DL_RE = re.compile(
+    r"href=[\"']([^\"']*/article/download/[^\"']+)[\"']", re.I
+)
+
+
+def _pdf_url_from_html(html: str, base_url: str) -> str | None:
+    """URL PDF artikel asli yang diiklankan halaman landing (bila ada).
+
+    Prioritas: meta `citation_pdf_url` (standar), lalu pola unduh galley OJS.
+    """
+    if not html or len(html) > 4_000_000:
+        html = (html or "")[:4_000_000]
+    for rx in (_CIT_PDF_RE, _CIT_PDF_RE2):
+        m = rx.search(html)
+        if m:
+            return urljoin(base_url, _html_unescape(m.group(1)).strip())
+    m = _OJS_DL_RE.search(html)
+    if m:
+        return urljoin(base_url, _html_unescape(m.group(1)).strip())
+    return None
+
+
+async def _fetch_fulltext(
+    client: httpx.AsyncClient, url: str | None, _depth: int = 0
+) -> str:
     """Ambil teks-PENUH open-access (PDF/HTML) secara ephemeral.
 
     Tidak menyimpan apa pun ke disk/DB — byte diproses di memori lalu dibuang.
@@ -238,6 +276,7 @@ async def _fetch_fulltext(client: httpx.AsyncClient, url: str | None) -> str:
     if not url or not settings.online_fulltext_enabled:
         return ""
     cap = settings.online_fulltext_max_bytes
+    final_url = url
     try:
         async with client.stream(
             "GET", url, headers={"User-Agent": "Mozilla/5.0 (ICALORA-LABS)"}
@@ -246,6 +285,7 @@ async def _fetch_fulltext(client: httpx.AsyncClient, url: str | None) -> str:
                 # Halaman yang menolak unduh langsung (403/JS-wall) sering masih
                 # bisa dirender Crawl4AI — coba sebagai cadangan terakhir.
                 return await _crawl4ai_markdown(client, url)
+            final_url = str(resp.url) or url
             ctype = (resp.headers.get("content-type") or "").lower()
             buf = bytearray()
             async for chunk in resp.aiter_bytes():
@@ -256,13 +296,21 @@ async def _fetch_fulltext(client: httpx.AsyncClient, url: str | None) -> str:
     except Exception:  # noqa: BLE001
         return await _crawl4ai_markdown(client, url)
     if "html" in ctype and b"%PDF" not in data[:1024]:
-        # Jalur CEPAT: penjungkiran tag murah dulu. Mayoritas halaman penerbit/
-        # arXiv sudah memuat teks artikel di HTML mentah → tak perlu Crawl4AI
-        # yang lambat. Hanya halaman TIPIS/JS-wall yang diselamatkan Crawl4AI.
         try:
             html = data.decode("utf-8", "ignore")
         except Exception:  # noqa: BLE001
             html = ""
+        # PRIORITAS: ikuti PDF artikel asli yang diiklankan halaman landing
+        # (citation_pdf_url / galley OJS). Tanpa ini, landing page sering lolos
+        # ambang `min_strip_chars` dan DISALAHARTIKAN sebagai teks penuh.
+        if _depth < 1:
+            pdf_url = _pdf_url_from_html(html, final_url)
+            if pdf_url and pdf_url != url and pdf_url != final_url:
+                pdf_text = await _fetch_fulltext(client, pdf_url, _depth + 1)
+                if len(pdf_text) >= settings.crawl4ai_min_strip_chars:
+                    return pdf_text
+        # Jalur CEPAT: penjungkiran tag murah. Mayoritas halaman penerbit/arXiv
+        # memuat teks artikel di HTML mentah → tak perlu Crawl4AI yang lambat.
         stripped = _clean(_TAG_RE.sub(" ", html))
         if len(stripped) >= settings.crawl4ai_min_strip_chars:
             return stripped
@@ -273,6 +321,7 @@ async def _fetch_fulltext(client: httpx.AsyncClient, url: str | None) -> str:
     except Exception:  # noqa: BLE001
         return ""
     return _clean(text)
+
 
 
 async def _fetch_fulltext_resilient(client: httpx.AsyncClient, url: str | None) -> str:
