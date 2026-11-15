@@ -136,6 +136,29 @@ def ai_detector_report_html(result: dict, meta: dict | None = None) -> str:
         )
         flag_html = f"<h2>Kalimat yang Ditandai</h2><ul style='padding-left:16px'>{items}</ul>"
 
+    bd = result.get("breakdown") or {}
+    bd_html = ""
+    if isinstance(bd, dict) and bd.get("ai") is not None:
+        ai_p = max(0.0, min(100.0, float(bd.get("ai") or 0)))
+        unc_p = max(0.0, min(100.0, float(bd.get("uncertain") or 0)))
+        hum_p = max(0.0, min(100.0, float(bd.get("human") or 0)))
+        heading = "Komposisi Teks" if bd.get("basis") == "segmen" else "Tingkat Keyakinan"
+        seg = "".join(
+            f"<span style='display:inline-block;height:14px;width:{p:.1f}%;background:{c}'></span>"
+            for p, c in ((ai_p, "#ef4444"), (unc_p, "#f59e0b"), (hum_p, "#10b981"))
+            if p > 0
+        )
+        note = _esc(bd.get("note") or "")
+        bd_html = (
+            f"<h2>{heading}</h2>"
+            f"<div style='display:flex;width:100%;border-radius:6px;overflow:hidden;margin-bottom:6px'>{seg}</div>"
+            f"<div class='muted' style='margin-bottom:6px'>"
+            f"<span style='color:#ef4444'>&#9679;</span> AI {ai_p:.1f}% &nbsp; "
+            f"<span style='color:#f59e0b'>&#9679;</span> tidak pasti {unc_p:.1f}% &nbsp; "
+            f"<span style='color:#10b981'>&#9679;</span> manusia {hum_p:.1f}%</div>"
+            f"<div class='muted'>{note}</div>"
+        )
+
     body = f"""
   <div class="cards">
     <div class="card"><div class="k">Probabilitas AI</div>
@@ -145,6 +168,10 @@ def ai_detector_report_html(result: dict, meta: dict | None = None) -> str:
     <div class="card"><div class="k">Bahasa / Kata</div>
       <div class="v" style="font-size:16px">{_esc(lang)} · {_esc(words)}</div></div>
   </div>
+
+  {f'<div class="note" style="border-left:3px solid {BRAND}">{_esc(result.get("verdict_explanation"))}</div>' if result.get("verdict_explanation") else ""}
+
+  {bd_html}
 
   <h2>Rincian Sinyal Deteksi</h2>
   {comp}
