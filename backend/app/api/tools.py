@@ -394,31 +394,33 @@ async def _run_plagiarism_merged(
     extra: list[dict] = []
     providers: dict = {}
     if settings.online_check_enabled:
-
-        async def _broad() -> tuple[list[dict], dict]:
-            try:
-                return await asyncio.wait_for(
-                    online_candidates(text, title_hint),
-                    timeout=max(30, settings.online_budget_seconds),
-                )
-            except Exception:  # noqa: BLE001
-                return [], {}
-
-        async def _identity() -> list[dict]:
-            # Pass identitas RINGAN berjalan paralel: menjamin paper terbit milik
-            # dokumen tetap tercocok meski pencarian luas kehabisan waktu.
-            try:
-                return await asyncio.wait_for(
-                    identity_candidates(text, title_hint),
-                    timeout=max(30, settings.online_identity_budget_seconds),
-                )
-            except Exception:  # noqa: BLE001
-                return []
-
-        (extra, providers), ident = await asyncio.gather(_broad(), _identity())
-        # Gabungkan kandidat identitas (dijamin) dengan hasil pencarian luas.
-        # Dedup per DOI/judul; pertahankan teks-penuh TERPANJANG agar cakupan
-        # pencocokan maksimal (paper terbit sering hanya lengkap dari pass ini).
+        # 1) PASS IDENTITAS DULU (cepat, ~9–60 dtk): resolusi judul/DOI + unduh
+        #    teks-penuh paper dokumen itu sendiri. WAJIB dijalankan SEBELUM
+        #    pencarian luas, karena pencarian luas membanjiri Crossref/OpenAlex
+        #    dengan ribuan permintaan → kueri identitas kena rate-limit (429)
+        #    dan paper terbit milik user tak ditemukan. Mendahulukannya menjamin
+        #    kandidat identitas selalu tertangkap, lalu digabung ke hasil luas.
+        ident: list[dict] = []
+        try:
+            ident = await asyncio.wait_for(
+                identity_candidates(text, title_hint),
+                timeout=max(30, settings.online_identity_budget_seconds),
+            )
+        except Exception:  # noqa: BLE001
+            ident = []
+        # 2) Pencarian luas per-kalimat dengan sisa anggaran. Bila timeout, hasil
+        #    identitas di atas tetap dipakai (laporan tak pernah kehilangan paper
+        #    terbit hanya karena fase luas lambat).
+        try:
+            extra, providers = await asyncio.wait_for(
+                online_candidates(text, title_hint),
+                timeout=max(30, settings.online_budget_seconds),
+            )
+        except Exception:  # noqa: BLE001
+            extra, providers = [], {}
+        # Gabungkan: dedup per DOI/judul, pertahankan teks-penuh TERPANJANG agar
+        # cakupan pencocokan maksimal (paper terbit sering hanya lengkap dari
+        # pass identitas).
         merged: dict[str, dict] = {}
         for cand in list(extra) + list(ident):
             if not cand.get("_fulltext") or not cand.get("title"):
