@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from app.core.config import get_settings
 from app.services import admin as admin_svc
 from app.services.ai_detector import detect_ai
+from app.services.ai_detector.report_pdf import build_ai_report_pdf
 from app.services.auth import (
     get_history_item,
     get_tool_file_by_history,
@@ -83,6 +84,8 @@ _FEATURE_BY_PATH: dict[str, str] = {
     "resume": "resume-builder",
     "citations": "citation-finder",
     "ai-detect": "ai-detector",
+    "ai-detect-file": "ai-detector",
+    "ai-detect-file-async": "ai-detector",
     "authorship": "authorship",
     "toc": "toc-generator",
     "improve": "document-improver",
@@ -652,10 +655,26 @@ def _pdf_response(pdf: bytes, name: str, dl: int) -> Response:
 
 @router.get("/ai-detect-report/{history_id}")
 def ai_detect_report_ep(history_id: int, request: Request, dl: int = 0) -> Response:
-    """Laporan PDF hasil deteksi AI dari riwayat pengguna."""
+    """Laporan PDF hasil deteksi AI dari riwayat pengguna. Jika berkas PDF asli
+    tersimpan, hasilkan laporan berformat identik (sorotan segmen di atas dokumen
+    asli); jika tidak, gunakan laporan HTML untuk teks tempel."""
     item = _report_history(request, history_id, "ai-detector")
+    result = item.get("result") or {}
+    user = optional_user_from_request(request)
+    f = get_tool_file_by_history(user["id"], history_id) if user else None
+    if f and f.get("data"):
+        try:
+            pdf = build_ai_report_pdf(
+                f["data"], result, {"title": item.get("title")}
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=502, detail=f"Render laporan gagal: {exc}"
+            ) from exc
+        base = (f.get("filename") or "laporan").rsplit(".", 1)[0]
+        return _pdf_response(pdf, f"laporan-ai-detector-{base}.pdf", dl)
     try:
-        html = ai_detector_report_html(item.get("result") or {}, {"title": item.get("title")})
+        html = ai_detector_report_html(result, {"title": item.get("title")})
         pdf = render_pdf(html)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Render laporan gagal: {exc}") from exc
@@ -758,11 +777,101 @@ def ai_detect_ep(body: TextIn, request: Request) -> dict:
     _guard(body.text)
     try:
         res = detect_ai(body.text)
-        logged = {**res, "input_text": body.text[:300_000]}
+        logged = {**res, "input_text": body.text}
         _log(request, "ai-detector", "AI Detector", body.text[:200], logged)
         return res
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Deteksi AI gagal: {exc}") from exc
+
+
+def _store_ai_file_result(
+    user_id: int | None, text: str, data: bytes, filename: str | None, is_pdf: bool,
+) -> tuple[dict, int | None]:
+    """Jalankan deteksi AI pada teks penuh, simpan hasil + PDF asli (untuk laporan
+    berformat identik dengan sorotan segmen). Mengembalikan (hasil, history_id)."""
+    res = detect_ai(text)
+    res["has_original_pdf"] = is_pdf
+    res["source_filename"] = filename
+    logged = {**res, "input_text": text}
+    hist_id = None
+    if user_id is not None:
+        hist_id = record_history(
+            user_id, "ai-detector", filename or "AI Detector", text[:200], logged
+        )
+        if hist_id and is_pdf:
+            save_tool_file(user_id, hist_id, filename, "application/pdf", data, None)
+    return res, hist_id
+
+
+async def _read_pdf_upload(file: UploadFile) -> tuple[bytes, str]:
+    """Baca unggahan PDF, validasi, ekstrak teks penuh (tanpa pemotongan)."""
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Berkas kosong.")
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413, detail=f"Berkas melebihi {MAX_UPLOAD_BYTES // (1024 * 1024)} MB."
+        )
+    _require_pdf_upload(file.filename)
+    try:
+        text = extract_text(file.filename or "", data).strip()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not text:
+        raise HTTPException(status_code=422, detail="Tidak ada teks yang dapat diekstrak.")
+    _guard(text)
+    return data, text
+
+
+@router.post("/ai-detect-file")
+async def ai_detect_file_ep(  # noqa: B008
+    request: Request,
+    file: UploadFile = File(...),  # noqa: B008
+) -> dict:
+    """Deteksi AI dari BERKAS PDF asli; simpan PDF untuk laporan berformat identik
+    (sorotan segmen di atas dokumen asli, seperti cek plagiarisme)."""
+    data, text = await _read_pdf_upload(file)
+    is_pdf = (file.filename or "").lower().endswith(".pdf")
+    try:
+        user = optional_user_from_request(request)
+        uid = user["id"] if user else None
+        res, _ = await run_in_threadpool(
+            _store_ai_file_result, uid, text, data, file.filename, is_pdf
+        )
+        return res
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Deteksi AI gagal: {exc}") from exc
+
+
+async def _job_run_ai_file(
+    job_id: str, user_id: int | None, text: str, data: bytes, filename: str | None,
+    is_pdf: bool,
+) -> None:
+    try:
+        _, hist_id = await run_in_threadpool(
+            _store_ai_file_result, user_id, text, data, filename, is_pdf
+        )
+        complete_job(job_id, hist_id)
+    except Exception as exc:  # noqa: BLE001
+        fail_job(job_id, str(exc))
+
+
+@router.post("/ai-detect-file-async")
+async def ai_detect_file_async_ep(  # noqa: B008
+    request: Request,
+    file: UploadFile = File(...),  # noqa: B008
+) -> dict:
+    """Versi async deteksi AI dari berkas; kembalikan `job_id` segera (aman dari
+    timeout proxy untuk dokumen besar)."""
+    data, text = await _read_pdf_upload(file)
+    is_pdf = (file.filename or "").lower().endswith(".pdf")
+    user = optional_user_from_request(request)
+    uid = user["id"] if user else None
+    job_id = create_job(uid, "ai-detector", file.filename or "AI Detector")
+    _spawn(_job_run_ai_file(job_id, uid, text, data, file.filename, is_pdf))
+    return {"job_id": job_id, "status": "processing"}
 
 
 @router.post("/authorship")

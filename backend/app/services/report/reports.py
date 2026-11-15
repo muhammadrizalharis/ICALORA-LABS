@@ -113,7 +113,8 @@ def _ai_highlight_html(result: dict) -> str:
     input_text = result.get("input_text")
     doc_html = ""
     if isinstance(input_text, str) and input_text.strip():
-        cap = 60_000
+        # Tanpa pemotongan: tampilkan seluruh teks (hingga batas keamanan input 2M).
+        cap = 2_000_000
         txt = input_text[:cap]
         ordered = sorted(
             (s for s in segments if s.get("start") is not None),
