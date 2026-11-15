@@ -158,10 +158,48 @@ def _text_metrics(text: str) -> dict:
 _WRITING_CATEGORIES = {"Ketepatan", "Kejelasan", "Keterlibatan", "Penyampaian"}
 
 
-def _normalize_issue(raw: dict) -> dict | None:
+def _norm_for_match(s: str) -> str:
+    """Normalisasi untuk pencocokan toleran: lipat spasi, huruf kecil, buang
+    tanda kutip tipografis yang sering diubah LLM."""
+    s = s.replace("\u2019", "'").replace("\u2018", "'")
+    s = s.replace("\u201c", '"').replace("\u201d", '"')
+    s = s.replace("\u2013", "-").replace("\u2014", "-")
+    return re.sub(r"\s+", " ", s).strip().lower()
+
+
+def _original_in_text(original: str, text_norm: str) -> bool:
+    """True jika potongan 'original' dari LLM benar-benar ada di teks pengguna.
+    Mencegah issue halusinasi (menuduh kesalahan yang tak pernah ditulis user)."""
+    o = _norm_for_match(original)
+    if not o:
+        return False
+    if o in text_norm:
+        return True
+    # Toleran terhadap perbedaan tanda baca (LLM sering menghilangkan tanda kutip/
+    # koma): bandingkan versi yang hanya menyisakan kata & spasi.
+    def _alnum(s: str) -> str:
+        return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", s)).strip()
+
+    o_alnum = _alnum(o)
+    text_alnum = _alnum(text_norm)
+    if o_alnum and o_alnum in text_alnum:
+        return True
+    # Toleransi: jika LLM memberi potongan panjang, cek sub-frasa inti (>=6 kata)
+    words = o_alnum.split()
+    if len(words) >= 6:
+        core = " ".join(words[:6])
+        return core in text_alnum
+    return False
+
+
+def _normalize_issue(raw: dict, text_norm: str | None = None) -> dict | None:
     original = str(raw.get("original") or "").strip()
     suggestion = str(raw.get("suggestion") or "").strip()
     if not original and not suggestion:
+        return None
+    # Verifikasi deterministik: buang issue yang 'original'-nya tidak ada di teks
+    # (halusinasi LLM). Hanya diterapkan bila original non-kosong & teks diberikan.
+    if text_norm is not None and original and not _original_in_text(original, text_norm):
         return None
     category = str(raw.get("category") or "").strip().title()
     if category not in _WRITING_CATEGORIES:
@@ -200,13 +238,14 @@ def grammar_check(text: str) -> dict:
 
     corrected = text
     issues: list[dict] = []
+    text_norm = _norm_for_match(text)
     try:
         data = _extract_json(raw)
         if isinstance(data, dict):
             corrected = str(data.get("corrected") or "").strip() or text
             for item in data.get("issues") or []:
                 if isinstance(item, dict):
-                    norm = _normalize_issue(item)
+                    norm = _normalize_issue(item, text_norm)
                     if norm:
                         issues.append(norm)
     except (json.JSONDecodeError, ValueError):
