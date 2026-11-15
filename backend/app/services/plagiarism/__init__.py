@@ -607,6 +607,14 @@ _EF_SEARCH = 500
 # agar total tetap cepat.
 _EF_SEARCH_MULTI = 200
 
+# Cakupan embedding dokumen untuk tahap semantik. Dulu hanya 12 jendela yang
+# disampel merata — pada tesis/artikel panjang, mayoritas isi tak ter-embed
+# sehingga kandidat sumber terlewat dan skor terlalu rendah (bukan "teks penuh").
+# Dengan 64 jendela (×2000 char) seluruh isi dokumen hingga ~128rb karakter
+# ter-embed penuh; dokumen lebih panjang tetap disampel merata namun 5× lebih
+# rapat. Uji live: 160 jendela ter-embed ~2 dtk, jadi 64 sangat aman.
+_FULLTEXT_WINDOWS = 64
+
 
 def _set_ef_search(conn, value: int = _EF_SEARCH) -> None:
     """Atur ef_search untuk transaksi ini agar menelusuri korpus lebih luas."""
@@ -673,7 +681,7 @@ def check_plagiarism(
     # Embed SELURUH dokumen per-jendela, lalu cari tetangga terdekat untuk tiap
     # jendela dan gabungkan — agar penyalinan di bagian mana pun (bukan hanya
     # pembuka) ikut tertangkap. Jumlah sumber akhir tetap `top_k` teratas.
-    qvecs = embed_chunks(llm, doc, max_chunks=12) or [llm.embed(doc[:2000])]
+    qvecs = embed_chunks(llm, doc, max_chunks=_FULLTEXT_WINDOWS) or [llm.embed(doc[:2000])]
     # Satu jendela: pakai ef_search penuh. Banyak jendela: ef_search lebih kecil
     # per pencarian karena gabungan antar-jendela sudah memperluas recall.
     ef = _EF_SEARCH if len(qvecs) <= 1 else _EF_SEARCH_MULTI

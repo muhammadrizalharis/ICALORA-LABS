@@ -50,8 +50,15 @@ _TIMEOUT = httpx.Timeout(22.0, connect=8.0)
 # penemuan sumber lebih teliti. Tetap dalam anggaran waktu pemeriksaan (5–10 mnt).
 _SENT_BASE = 60  # minimum kalimat kueri (dokumen pendek)
 _SENT_CAP = 220  # plafon kalimat kueri (dokumen sangat tebal)
-_PER_PROVIDER = 12  # kandidat teratas per kalimat per provider
+_PER_PROVIDER = 18  # kandidat teratas per kalimat per provider (lebih banyak hasil)
 _CONCURRENCY = 32  # batasi koneksi serempak agar provider tidak menolak
+# Batas unduhan teks-penuh OA yang berjalan serempak. Tanpa batas, menaikkan
+# jumlah kandidat termirip bisa memicu puluhan unduhan PDF sekaligus → membebani
+# jaringan & server penerbit. Semaphore ini "memperlambat" dengan sehat: lebih
+# banyak sumber diperiksa, tetapi laju unduh tetap terkendali (dalam anggaran
+# 5–10 mnt job latar belakang).
+_FULLTEXT_FETCH_CONC = 12
+_FT_FETCH_SEM: asyncio.Semaphore | None = None
 _MAILTO = "noreply@icalora-labs.local"  # OpenAlex/Crossref "polite pool"
 
 
@@ -177,6 +184,13 @@ def _crawl4ai_sem() -> asyncio.Semaphore:
     if _CRAWL4AI_SEM is None:
         _CRAWL4AI_SEM = asyncio.Semaphore(max(1, settings.crawl4ai_concurrency))
     return _CRAWL4AI_SEM
+
+
+def _ft_fetch_sem() -> asyncio.Semaphore:
+    global _FT_FETCH_SEM
+    if _FT_FETCH_SEM is None:
+        _FT_FETCH_SEM = asyncio.Semaphore(max(1, _FULLTEXT_FETCH_CONC))
+    return _FT_FETCH_SEM
 
 
 async def _crawl4ai_markdown(client: httpx.AsyncClient, url: str) -> str:
@@ -431,8 +445,13 @@ async def _enrich_fulltext(
             return cached
         return best
 
+    async def _guarded_fulltext(c: dict) -> str:
+        # Batasi unduhan teks-penuh serempak lewat semaphore bersama.
+        async with _ft_fetch_sem():
+            return await _best_fulltext(c)
+
     results = await asyncio.gather(
-        *(_best_fulltext(c) for c in targets),
+        *(_guarded_fulltext(c) for c in targets),
         return_exceptions=True,
     )
     for c, full in zip(targets, results, strict=False):
