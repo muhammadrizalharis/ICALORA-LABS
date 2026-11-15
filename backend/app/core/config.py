@@ -96,6 +96,12 @@ class Settings(BaseSettings):
     # real-time. OpenAlex/Crossref/arXiv/Wikipedia bebas; CORE perlu key +
     # aktif hanya bila lisensi mengizinkan (lihat ToS CORE).
     online_check_enabled: bool = Field(default=True)
+    # Anggaran waktu maksimum (detik) untuk fase pengumpulan sumber DARING pada
+    # satu pemeriksaan. Bila terlampaui, fase daring dibatalkan dan laporan tetap
+    # dibuat dari korpus lokal (gagal-aman) — mencegah pemeriksaan menggantung
+    # melewati batas waktu klien. Disetel di bawah batas polling frontend (20
+    # mnt) agar selalu menyisakan waktu untuk pencocokan korpus lokal.
+    online_budget_seconds: int = Field(default=720)
     core_api_key: str = Field(default="")
     core_enabled: bool = Field(default=True)
     # Ambil teks-PENUH open-access (PDF/HTML) untuk paper yang teridentifikasi

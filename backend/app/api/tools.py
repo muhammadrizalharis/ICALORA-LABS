@@ -386,8 +386,13 @@ async def _run_plagiarism_merged(
     providers: dict = {}
     if settings.online_check_enabled:
         try:
-            extra, providers = await online_candidates(text, title_hint)
-        except Exception:  # noqa: BLE001, S110
+            extra, providers = await asyncio.wait_for(
+                online_candidates(text, title_hint),
+                timeout=max(30, settings.online_budget_seconds),
+            )
+        except Exception:  # noqa: BLE001
+            # Batas waktu/galat daring tidak membatalkan laporan: turun ke korpus
+            # lokal agar hasil tetap akurat dan tak pernah menggantung.
             extra, providers = [], {}
     res = await run_in_threadpool(check_plagiarism, text, top_k, extra, exclude)
     res["online_merged"] = bool(extra)

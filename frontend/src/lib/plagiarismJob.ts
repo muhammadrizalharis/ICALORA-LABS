@@ -12,7 +12,7 @@ interface JobState {
 }
 
 const POLL_INTERVAL_MS = 2000;
-const MAX_POLL_MS = 15 * 60 * 1000; // beri ruang hingga 15 menit untuk tugas berat
+const MAX_POLL_MS = 20 * 60 * 1000; // dokumen besar + sumber daring: beri ruang 20 menit
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
