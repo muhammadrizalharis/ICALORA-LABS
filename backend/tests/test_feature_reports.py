@@ -32,6 +32,46 @@ def test_ai_report_escapes_html():
     assert "&lt;script&gt;" in html
 
 
+def test_ai_report_highlights_full_text_with_segments():
+    result = {
+        "ai_probability": 70,
+        "verdict": "campuran",
+        "signals": {},
+        "input_text": "Kalimat manusia biasa. Kalimat buatan AI jelas sekali.",
+        "segments": [
+            {"index": 0, "label": "human", "start": 0, "end": 22,
+             "words": 3, "ai_probability": 8.0, "preview": "Kalimat manusia"},
+            {"index": 1, "label": "ai", "start": 22, "end": 54,
+             "words": 5, "ai_probability": 92.0, "preview": "Kalimat buatan AI"},
+        ],
+    }
+    html = ai_detector_report_html(result, {"title": "Tes"})
+    assert "Teks Dianalisis" in html
+    assert "Rincian Segmen Dokumen" in html
+    assert "class='doc'" in html
+    assert "Sorotan:" in html
+    assert "#fee2e2" in html  # sorotan AI (merah)
+    assert "#ecfdf5" in html  # sorotan manusia (hijau)
+
+
+def test_ai_report_segment_table_without_full_text():
+    """Riwayat lama tanpa input_text tetap menampilkan tabel segmen + petunjuk."""
+    result = {
+        "ai_probability": 40,
+        "verdict": "campuran",
+        "signals": {},
+        "segments": [
+            {"index": 0, "label": "mixed", "words": 50, "ai_probability": 65.0,
+             "preview": "Cuplikan segmen uji"},
+        ],
+    }
+    html = ai_detector_report_html(result)
+    assert "Rincian Segmen Dokumen" in html
+    assert "Cuplikan segmen uji" in html
+    assert "class='doc'" not in html
+    assert "riwayat lama tidak tersimpan" in html
+
+
 def test_grammar_report_lists_issues():
     result = {
         "score": 78,

@@ -758,7 +758,8 @@ def ai_detect_ep(body: TextIn, request: Request) -> dict:
     _guard(body.text)
     try:
         res = detect_ai(body.text)
-        _log(request, "ai-detector", "AI Detector", body.text[:200], res)
+        logged = {**res, "input_text": body.text[:300_000]}
+        _log(request, "ai-detector", "AI Detector", body.text[:200], logged)
         return res
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Deteksi AI gagal: {exc}") from exc
