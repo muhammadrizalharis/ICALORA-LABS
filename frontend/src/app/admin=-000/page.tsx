@@ -868,6 +868,61 @@ function SettingsTab() {
 
       <section className="rounded-xl border border-c surface p-5">
         <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-neutral-500">
+          Proteksi Penyalahgunaan
+        </h2>
+        <p className="mb-4 text-xs text-neutral-500">
+          Pagar anti-abuse. Default nonaktif agar tidak mengganggu pengguna. Super
+          Admin selalu dikecualikan.
+        </p>
+        <div className="space-y-4">
+          <ToggleRow
+            label="Batas Laju (Rate Limit)"
+            desc="Batasi jumlah permintaan fitur per menit untuk tiap pengguna/IP."
+            checked={s.rate_limit_enabled}
+            disabled={saving}
+            onChange={(v) => save({ rate_limit_enabled: v })}
+          />
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="font-medium text-neutral-900 dark:text-neutral-50">
+                Permintaan / Menit
+              </div>
+              <div className="text-xs text-neutral-500">
+                Maksimum permintaan fitur per menit per identitas.
+              </div>
+            </div>
+            <TokenEditor
+              value={s.rate_limit_per_min}
+              onSave={(v) => save({ rate_limit_per_min: v })}
+            />
+          </div>
+          <ToggleRow
+            label="Potong Token per Pemakaian"
+            desc="Jika aktif, setiap analisis memotong saldo token pengguna; saldo habis = ditolak."
+            checked={s.token_enforcement}
+            disabled={saving}
+            onChange={(v) => save({ token_enforcement: v })}
+            danger
+          />
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="font-medium text-neutral-900 dark:text-neutral-50">
+                Biaya Token Default
+              </div>
+              <div className="text-xs text-neutral-500">
+                Token yang dipotong tiap pemakaian fitur (bila pemotongan aktif).
+              </div>
+            </div>
+            <TokenEditor
+              value={s.default_tool_cost}
+              onSave={(v) => save({ default_tool_cost: v })}
+            />
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-c surface p-5">
+        <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-neutral-500">
           On/Off Fitur
         </h2>
         <p className="mb-4 text-xs text-neutral-500">

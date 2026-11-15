@@ -27,6 +27,11 @@ export interface AppSettings {
   default_token_grant: number;
   feature_flags: Record<string, boolean>;
   feature_slugs: string[];
+  rate_limit_enabled: boolean;
+  rate_limit_per_min: number;
+  token_enforcement: boolean;
+  default_tool_cost: number;
+  tool_costs: Record<string, number>;
 }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {

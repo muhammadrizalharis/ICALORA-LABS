@@ -52,6 +52,12 @@ _DEFAULTS: dict[str, Any] = {
     "registration_open": True,
     "default_token_grant": 0,
     "feature_flags": {},  # slug -> bool; absen = aktif
+    # --- Proteksi penyalahgunaan (default OFF agar tidak memutus situs) ---
+    "rate_limit_enabled": False,
+    "rate_limit_per_min": 20,  # maks permintaan tool / menit / identitas
+    "token_enforcement": False,  # bila ON, saldo token dipotong tiap pemakaian
+    "default_tool_cost": 1,  # biaya token default per analisis
+    "tool_costs": {},  # slug -> int; absen = default_tool_cost
 }
 
 _schema_ready = False
@@ -140,6 +146,22 @@ def update_settings(patch: dict[str, Any]) -> dict[str, Any]:
             value = bool(value)
         elif key == "default_token_grant":
             value = max(0, int(value))
+        elif key in ("rate_limit_enabled", "token_enforcement"):
+            value = bool(value)
+        elif key == "rate_limit_per_min":
+            value = max(1, min(10_000, int(value)))
+        elif key == "default_tool_cost":
+            value = max(0, int(value))
+        elif key == "tool_costs":
+            if not isinstance(value, dict):
+                continue
+            clean: dict[str, int] = {}
+            for k, v in value.items():
+                try:
+                    clean[str(k)] = max(0, int(v))
+                except (TypeError, ValueError):
+                    continue
+            value = clean
         elif key == "feature_flags":
             if not isinstance(value, dict):
                 continue
@@ -171,6 +193,57 @@ def feature_enabled(slug: str) -> bool:
     if isinstance(flags, dict):
         return bool(flags.get(slug, True))
     return True
+
+
+def rate_limit_enabled() -> bool:
+    return bool(get_setting("rate_limit_enabled", False))
+
+
+def rate_limit_per_min() -> int:
+    try:
+        return max(1, int(get_setting("rate_limit_per_min", 20)))
+    except Exception:  # noqa: BLE001
+        return 20
+
+
+def token_enforcement_enabled() -> bool:
+    return bool(get_setting("token_enforcement", False))
+
+
+def tool_cost(slug: str) -> int:
+    """Biaya token untuk suatu fitur (override per-slug, jika ada)."""
+    costs = get_setting("tool_costs", {}) or {}
+    if isinstance(costs, dict) and slug in costs:
+        try:
+            return max(0, int(costs[slug]))
+        except (TypeError, ValueError):
+            pass
+    try:
+        return max(0, int(get_setting("default_tool_cost", 1)))
+    except Exception:  # noqa: BLE001
+        return 1
+
+
+def charge_tokens(user_id: int, amount: int) -> bool:
+    """Potong `amount` token secara atomik. True bila berhasil.
+
+    False bila saldo tidak cukup (tanpa mengubah saldo). Tidak memotong
+    jika amount <= 0.
+    """
+    if amount <= 0:
+        return True
+    ensure_settings_schema()
+    with engine.begin() as c:
+        row = c.execute(
+            text(
+                "UPDATE users SET token_balance = token_balance - :amt "
+                "WHERE id = :uid AND token_balance >= :amt "
+                "RETURNING token_balance"
+            ),
+            {"amt": amount, "uid": user_id},
+        ).first()
+    return row is not None
+
 
 
 # ---- manajemen pengguna ----

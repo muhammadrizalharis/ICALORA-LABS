@@ -2,6 +2,9 @@
 
 import asyncio
 import os
+import threading
+import time
+from collections import defaultdict, deque
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
@@ -111,6 +114,66 @@ def _access_guard(request: Request) -> None:
     if slug and not admin_svc.feature_enabled(slug):
         raise HTTPException(
             status_code=403, detail="Fitur ini sedang dinonaktifkan oleh admin."
+        )
+    # --- Proteksi penyalahgunaan (hanya aktif bila di-ON-kan admin) ---
+    if slug:
+        _enforce_rate_limit(request, user)
+        _enforce_token_cost(request, user, slug)
+
+
+# Rate limiter in-memory sederhana (sliding window per identitas).
+# Cukup untuk 1 proses; default OFF, hanya pagar anti-abuse bila di-ON-kan.
+_RL_LOCK = threading.Lock()
+_RL_HITS: dict[str, deque[float]] = defaultdict(deque)
+
+
+def _client_identity(request: Request, user: dict | None) -> str:
+    if user and user.get("id") is not None:
+        return f"u:{user['id']}"
+    xff = request.headers.get("x-forwarded-for", "")
+    ip = xff.split(",")[0].strip() if xff else (
+        request.client.host if request.client else "?"
+    )
+    return f"ip:{ip}"
+
+
+def _enforce_rate_limit(request: Request, user: dict | None) -> None:
+    if not admin_svc.rate_limit_enabled():
+        return
+    limit = admin_svc.rate_limit_per_min()
+    key = _client_identity(request, user)
+    now = time.monotonic()
+    window = 60.0
+    with _RL_LOCK:
+        hits = _RL_HITS[key]
+        while hits and now - hits[0] > window:
+            hits.popleft()
+        if len(hits) >= limit:
+            retry = max(1, int(window - (now - hits[0])))
+            raise HTTPException(
+                status_code=429,
+                detail=f"Terlalu banyak permintaan. Coba lagi dalam {retry} detik.",
+                headers={"Retry-After": str(retry)},
+            )
+        hits.append(now)
+
+
+def _enforce_token_cost(request: Request, user: dict | None, slug: str) -> None:
+    if not admin_svc.token_enforcement_enabled():
+        return
+    if not user or user.get("id") is None:
+        # Tanpa akun tidak bisa dipotong token; rate-limit sudah menjaga.
+        return
+    cost = admin_svc.tool_cost(slug)
+    if cost <= 0:
+        return
+    if not admin_svc.charge_tokens(int(user["id"]), cost):
+        raise HTTPException(
+            status_code=402,
+            detail=(
+                "Saldo token Anda tidak mencukupi untuk menjalankan fitur ini. "
+                "Hubungi admin untuk menambah saldo."
+            ),
         )
 
 

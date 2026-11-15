@@ -46,6 +46,11 @@ class AdminSettingsIn(BaseModel):
     registration_open: bool | None = None
     default_token_grant: int | None = None
     feature_flags: dict[str, bool] | None = None
+    rate_limit_enabled: bool | None = None
+    rate_limit_per_min: int | None = None
+    token_enforcement: bool | None = None
+    default_tool_cost: int | None = None
+    tool_costs: dict[str, int] | None = None
 
 GOOGLE_AUTH = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN = "https://oauth2.googleapis.com/token"  # noqa: S105
