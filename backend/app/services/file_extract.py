@@ -22,6 +22,19 @@ def _dehyphenate(text: str) -> str:
     return _HYPHEN_BREAK_RE.sub(r"\1\2", text or "")
 
 
+# Karakter kontrol C0 (kecuali tab/baris-baru/carriage-return) kerap muncul
+# sebagai sampah dari ekstraksi PDF rusak. NUL (\x00) KHUSUSNYA tidak bisa
+# disimpan Postgres di kolom text/jsonb ("unsupported Unicode escape \u0000"),
+# sehingga riwayat tool GAGAL disimpan. Buang semua agar teks aman diproses
+# maupun disimpan, tanpa mengubah konten yang bermakna.
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
+def sanitize_text(text: str) -> str:
+    """Buang NUL & karakter kontrol C0 non-cetak dari teks hasil ekstraksi."""
+    return _CONTROL_CHARS_RE.sub("", text or "")
+
+
 def _tika_extract(data: bytes, content_type: str) -> str:
     """Ekstrak teks via Apache Tika lokal (PDFBox) sebagai cadangan tangguh.
 
@@ -98,20 +111,20 @@ def extract_text(filename: str, data: bytes) -> str:
     if any(name.endswith(ext) for ext in _TXT_EXT):
         for enc in ("utf-8", "latin-1"):
             try:
-                return data.decode(enc)
+                return sanitize_text(data.decode(enc))
             except UnicodeDecodeError:
                 continue
         raise ValueError("Encoding berkas teks tidak dikenali.")
 
     if name.endswith(".pdf"):
         try:
-            return _extract_pdf(data)
+            return sanitize_text(_extract_pdf(data))
         except Exception as exc:  # noqa: BLE001
             raise ValueError(f"Gagal membaca PDF: {exc}") from exc
 
     if name.endswith(".docx"):
         try:
-            return _extract_docx(data)
+            return sanitize_text(_extract_docx(data))
         except Exception as exc:  # noqa: BLE001
             raise ValueError(f"Gagal membaca DOCX: {exc}") from exc
 
