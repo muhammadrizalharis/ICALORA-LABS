@@ -99,3 +99,19 @@ def test_citation_entry_shape():
     assert e["url"] == "https://doi.org/10.x/y"
     assert "apa" in e and "bibtex" in e and "ris" in e
     assert "2020" in e["apa"]
+
+
+def test_async_transform_endpoints_are_coroutines():
+    """Regresi: endpoint *-async memanggil _spawn (asyncio.create_task) sehingga
+    WAJIB `async def`; bila sync, FastAPI menjalankannya di threadpool tanpa event
+    loop -> RuntimeError 'no running event loop' saat submit."""
+    import inspect
+
+    from app.api import tools
+
+    for name in (
+        "paraphrase_async_ep", "humanize_async_ep", "rewrite_async_ep",
+        "improve_async_ep", "toc_async_ep",
+    ):
+        fn = getattr(tools, name)
+        assert inspect.iscoroutinefunction(fn), f"{name} harus 'async def'"

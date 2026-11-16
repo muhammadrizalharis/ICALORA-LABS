@@ -565,7 +565,7 @@ async def _launch_transform_file(
 
 
 @router.post("/paraphrase-async")
-def paraphrase_async_ep(body: ParaphraseIn, request: Request) -> dict:
+async def paraphrase_async_ep(body: ParaphraseIn, request: Request) -> dict:
     return _launch_transform_text(request, "paraphrase", body.text, {"style": body.style})
 
 
@@ -579,7 +579,7 @@ async def paraphrase_file_async_ep(  # noqa: B008
 
 
 @router.post("/humanize-async")
-def humanize_async_ep(body: TextIn, request: Request) -> dict:
+async def humanize_async_ep(body: TextIn, request: Request) -> dict:
     return _launch_transform_text(request, "humanize", body.text, {})
 
 
@@ -592,7 +592,7 @@ async def humanize_file_async_ep(  # noqa: B008
 
 
 @router.post("/rewrite-async")
-def rewrite_async_ep(body: RewriteIn, request: Request) -> dict:
+async def rewrite_async_ep(body: RewriteIn, request: Request) -> dict:
     return _launch_transform_text(request, "rewrite", body.text, {"tone": body.tone})
 
 
@@ -606,7 +606,7 @@ async def rewrite_file_async_ep(  # noqa: B008
 
 
 @router.post("/improve-async")
-def improve_async_ep(body: ImproveIn, request: Request) -> dict:
+async def improve_async_ep(body: ImproveIn, request: Request) -> dict:
     return _launch_transform_text(request, "improve", body.text, {"goal": body.goal})
 
 
@@ -1349,7 +1349,7 @@ async def _job_run_toc(
 
 
 @router.post("/toc-async")
-def toc_async_ep(body: TextIn, request: Request) -> dict:
+async def toc_async_ep(body: TextIn, request: Request) -> dict:
     _guard(body.text)
     user = optional_user_from_request(request)
     uid = user["id"] if user else None
