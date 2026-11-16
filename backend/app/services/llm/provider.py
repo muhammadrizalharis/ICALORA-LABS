@@ -49,6 +49,8 @@ class LLMProvider(Protocol):
         temperature: float = 0.2,
         max_tokens: int | None = None,
         think: bool | None = None,
+        num_ctx: int | None = None,
+        timeout: float | None = None,
     ) -> str: ...
 
     def embed(self, text: str) -> list[float]: ...
@@ -91,10 +93,17 @@ class OllamaProvider:
         temperature: float = 0.2,
         max_tokens: int | None = None,
         think: bool | None = None,
+        num_ctx: int | None = None,
+        timeout: float | None = None,
     ) -> str:
         options: dict = {"temperature": temperature}
         if max_tokens:
             options["num_predict"] = max_tokens
+        # num_ctx: tanpa ini Ollama memakai jendela default (~4k token) sehingga
+        # dokumen panjang DIPOTONG diam-diam. Set eksplisit agar seluruh teks
+        # terbaca (sampai batas model, mis. 32k untuk qwen2.5).
+        if num_ctx:
+            options["num_ctx"] = num_ctx
         payload = {
             "model": self.model,
             "messages": messages,
@@ -108,7 +117,9 @@ class OllamaProvider:
         effective_think = think if think is not None else self.think
         if effective_think is not None:
             payload["think"] = effective_think
-        with httpx.Client(timeout=self.timeout) as client:
+        # timeout per-panggilan menimpa default provider (berguna untuk tugas yang
+        # toleran lambat seperti grammar chunk saat model dingin di GPU bersama).
+        with httpx.Client(timeout=timeout or self.timeout) as client:
             resp = _post_with_retry(client, f"{self.base_url}/api/chat", payload)
             return resp.json()["message"]["content"].strip()
 

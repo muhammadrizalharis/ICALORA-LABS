@@ -216,43 +216,141 @@ def _normalize_issue(raw: dict, text_norm: str | None = None) -> dict | None:
     }
 
 
-def grammar_check(text: str) -> dict:
-    llm = get_llm()
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                "Anda editor bahasa akademik. Perbaiki ejaan, tata bahasa, dan tanda "
-                "baca tanpa mengubah makna atau bahasa asli teks. Balas HANYA JSON valid "
-                "dengan bentuk: {\"corrected\": \"<teks hasil perbaikan lengkap>\", "
-                "\"issues\": [{\"category\": \"Ketepatan|Kejelasan|Keterlibatan|Penyampaian\", "
-                "\"severity\": \"critical|advanced\", \"original\": \"<potongan asli>\", "
-                "\"suggestion\": \"<perbaikan>\", \"explanation\": \"<alasan singkat>\"}]}. "
-                "Gunakan 'critical' untuk kesalahan yang mengubah makna/ejaan fatal, "
-                "'advanced' untuk perbaikan gaya. Jangan tambahkan teks di luar JSON."
-            ),
-        },
-        {"role": "user", "content": text},
-    ]
-    raw = llm.chat(messages, temperature=0.1)
+_GRAMMAR_SYSTEM = (
+    "Anda editor bahasa akademik. Perbaiki ejaan, tata bahasa, dan tanda "
+    "baca tanpa mengubah makna atau bahasa asli teks. Periksa SELURUH bagian "
+    "yang diberikan secara teliti dan laporkan SEMUA kesalahan yang Anda temukan "
+    "(jangan berhenti setelah beberapa). Balas HANYA JSON valid dengan bentuk: "
+    "{\"corrected\": \"<teks hasil perbaikan lengkap>\", "
+    "\"issues\": [{\"category\": \"Ketepatan|Kejelasan|Keterlibatan|Penyampaian\", "
+    "\"severity\": \"critical|advanced\", \"original\": \"<potongan asli>\", "
+    "\"suggestion\": \"<perbaikan>\", \"explanation\": \"<alasan singkat>\"}]}. "
+    "Gunakan 'critical' untuk kesalahan yang mengubah makna/ejaan fatal, "
+    "'advanced' untuk perbaikan gaya. Jangan tambahkan teks di luar JSON."
+)
 
-    corrected = text
+# Satu chunk ditahan cukup kecil agar model fokus dan recall-nya tinggi (model
+# cenderung under-report bila diberi teks sangat panjang sekaligus).
+_GRAMMAR_CHUNK_CHARS = 6000
+# num_ctx TETAP untuk semua chunk: chunk <=6000 char (~2000 token) + output muat
+# nyaman di 8192. Memakai nilai tetap mencegah Ollama memuat-ulang model tiap
+# panggilan (reload terjadi bila num_ctx berubah antar-panggilan).
+_GRAMMAR_NUM_CTX = 8192
+# Timeout per panggilan chunk (detik). Longgar agar tahan cold-load model di GPU
+# bersama; job async punya deadline keseluruhan sendiri (20 menit).
+_GRAMMAR_CALL_TIMEOUT = 300.0
+# Batas atas issue yang disimpan (praktis tak terbatas; hanya pengaman payload).
+_GRAMMAR_ISSUE_CAP = 2000
+
+
+def _grammar_chunks(text: str, limit: int = _GRAMMAR_CHUNK_CHARS) -> list[str]:
+    """Pecah teks menjadi segmen <= limit karakter pada batas paragraf/kalimat,
+    tanpa membuang apa pun (seluruh dokumen diperiksa)."""
+    if len(text) <= limit:
+        return [text] if text.strip() else []
+    # Unit dasar: paragraf; paragraf yang terlalu besar dipecah per kalimat.
+    units: list[str] = []
+    for para in re.split(r"\n\s*\n", text):
+        if len(para) <= limit:
+            units.append(para)
+            continue
+        buf = ""
+        for sent in re.split(r"(?<=[.!?])\s+", para):
+            if len(sent) > limit:
+                # Kalimat raksasa (mis. tabel/daftar) — pecah keras per limit.
+                for i in range(0, len(sent), limit):
+                    units.append(sent[i : i + limit])
+                continue
+            if len(buf) + len(sent) + 1 > limit:
+                if buf:
+                    units.append(buf)
+                buf = sent
+            else:
+                buf = f"{buf} {sent}".strip()
+        if buf:
+            units.append(buf)
+    # Gabungkan unit kecil hingga mendekati limit agar jumlah panggilan minimal.
+    chunks: list[str] = []
+    cur = ""
+    for u in units:
+        if len(cur) + len(u) + 2 > limit:
+            if cur.strip():
+                chunks.append(cur)
+            cur = u
+        else:
+            cur = f"{cur}\n\n{u}" if cur else u
+    if cur.strip():
+        chunks.append(cur)
+    return chunks
+
+
+def _grammar_check_chunk(llm, chunk: str) -> tuple[str, list[dict]]:
+    """Periksa satu chunk; kembalikan (teks_terkoreksi, daftar_issue).
+
+    Memakai num_ctx tetap agar model tidak dimuat-ulang antar-panggilan. Bila
+    panggilan gagal (mis. timeout saat model dingin), coba ulang sekali; bila
+    tetap gagal, kembalikan teks asli chunk tanpa issue agar seluruh job tidak
+    ikut gagal hanya karena satu bagian.
+    """
+    messages = [
+        {"role": "system", "content": _GRAMMAR_SYSTEM},
+        {"role": "user", "content": chunk},
+    ]
+    max_out = max(1024, min(6144, int(len(chunk) // 3 * 1.8) + 512))
+    raw = ""
+    for attempt in range(2):
+        try:
+            raw = llm.chat(
+                messages, temperature=0.1, max_tokens=max_out,
+                num_ctx=_GRAMMAR_NUM_CTX, timeout=_GRAMMAR_CALL_TIMEOUT,
+            )
+            break
+        except Exception:  # noqa: BLE001 — timeout/5xx sesaat; coba ulang lalu lewati
+            if attempt == 0:
+                continue
+            return chunk, []
+
+    corrected = chunk
     issues: list[dict] = []
-    text_norm = _norm_for_match(text)
+    chunk_norm = _norm_for_match(chunk)
     try:
         data = _extract_json(raw)
         if isinstance(data, dict):
-            corrected = str(data.get("corrected") or "").strip() or text
+            corrected = str(data.get("corrected") or "").strip() or chunk
             for item in data.get("issues") or []:
                 if isinstance(item, dict):
-                    norm = _normalize_issue(item, text_norm)
+                    norm = _normalize_issue(item, chunk_norm)
                     if norm:
                         issues.append(norm)
     except (json.JSONDecodeError, ValueError):
-        # LLM tidak mengembalikan JSON valid — pakai balasannya sebagai teks perbaikan.
-        corrected = raw.strip() or text
+        corrected = raw.strip() or chunk
+    return corrected, issues
 
-    issues = issues[:40]
+
+def grammar_check(text: str) -> dict:
+    """Pemeriksaan tata bahasa menyeluruh. Dokumen panjang dipecah menjadi
+    beberapa chunk agar tidak dipotong/under-report, lalu hasilnya digabung."""
+    llm = get_llm()
+    chunks = _grammar_chunks(text)
+
+    corrected_parts: list[str] = []
+    issues: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for chunk in chunks:
+        c_corr, c_issues = _grammar_check_chunk(llm, chunk)
+        corrected_parts.append(c_corr)
+        for it in c_issues:
+            key = (it["original"].lower(), it["suggestion"].lower())
+            if key in seen:
+                continue
+            seen.add(key)
+            issues.append(it)
+            if len(issues) >= _GRAMMAR_ISSUE_CAP:
+                break
+        if len(issues) >= _GRAMMAR_ISSUE_CAP:
+            break
+
+    corrected = "\n\n".join(corrected_parts).strip() or text
     metrics = _text_metrics(text)
     critical = sum(1 for i in issues if i["severity"] == "critical")
     advanced = len(issues) - critical
@@ -272,6 +370,7 @@ def grammar_check(text: str) -> dict:
             "critical": critical,
             "advanced": advanced,
         },
+        "chunks": len(chunks),
     }
 
 
