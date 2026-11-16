@@ -422,21 +422,54 @@ PARAPHRASE_STYLES = {
     "standar": "standar dan netral",
     "formal": "formal dan baku",
     "akademik": "akademik dan ilmiah",
+    "akademik_q1": "akademik tingkat jurnal internasional Q1–Q2",
     "sederhana": "sederhana dan mudah dipahami",
     "kreatif": "kreatif dan bervariasi",
 }
+
+# Standar "Extreme Q1 Academic Writing" (lihat docs/standar_role_akademik_
+# paraphrasing.md): peran gabungan + parafrase struktural + pemadatan padat +
+# anti-pola-AI, TANPA mengubah makna/angka/istilah/sitasi/batasan penelitian.
+_PARAPHRASE_Q1_SYSTEM = (
+    "Anda bertindak sebagai gabungan Senior Professor, reviewer jurnal Scopus "
+    "Q1–Q2, Scientific Language Editor, Academic Paraphrasing Specialist, dan "
+    "Manuscript Condensation Specialist. Parafrasekan teks pengguna ke mutu "
+    "penulisan akademik Q1 dengan aturan ketat:\n"
+    "1. Parafrase struktural: ubah konstruksi sintaksis dan urutan informasi, "
+    "bukan sekadar mengganti sinonim.\n"
+    "2. Pertahankan makna ilmiah: JANGAN mengubah interpretasi, arah hubungan "
+    "antarvariabel, angka, variabel, istilah teknis, sitasi, atau batasan/"
+    "kondisi penelitian.\n"
+    "3. Diksi akademik presisi: hindari kata informal dan frasa berlebihan; "
+    "pilih istilah sesuai konteks disiplin.\n"
+    "4. Padatkan dengan kepadatan informasi tinggi: hilangkan redundansi dan "
+    "gabungkan gagasan berulang tanpa menghilangkan substansi.\n"
+    "5. Hindari pola penulisan AI generik: tanpa transisi mekanis (Furthermore, "
+    "Moreover, Additionally), tanpa struktur kalimat seragam, tanpa nominalisasi "
+    "berlebihan, tanpa klaim tak didukung bukti, tanpa menjelaskan ulang hal "
+    "yang sudah jelas.\n"
+    "6. Pertahankan bahasa asli teks (Indonesia tetap Indonesia, Inggris tetap "
+    "Inggris) serta koherensi dan alur argumentasi.\n"
+    "Balas HANYA hasil parafrase akhir — tanpa penjelasan editorial, tanpa "
+    "kalimat pembuka atau penutup."
+)
+# Prompt sistem & suhu khusus per-gaya (menimpa template generik bila ada).
+_PARAPHRASE_SYSTEMS = {"akademik_q1": _PARAPHRASE_Q1_SYSTEM}
+_PARAPHRASE_TEMPS = {"akademik_q1": 0.35}
 
 
 def paraphrase(text: str, style: str = "standar") -> dict:
     key = (style or "").strip().lower()
     if key not in PARAPHRASE_STYLES:
         key = "standar"
-    desc = PARAPHRASE_STYLES[key]
-    system = (
-        f"Parafrasekan teks pengguna dengan gaya {desc}, pertahankan makna "
-        "dan bahasa aslinya. Balas HANYA hasil parafrase."
-    )
-    result = _llm_transform_long(system, text, temperature=0.7)
+    system = _PARAPHRASE_SYSTEMS.get(key)
+    if system is None:
+        desc = PARAPHRASE_STYLES[key]
+        system = (
+            f"Parafrasekan teks pengguna dengan gaya {desc}, pertahankan makna "
+            "dan bahasa aslinya. Balas HANYA hasil parafrase."
+        )
+    result = _llm_transform_long(system, text, temperature=_PARAPHRASE_TEMPS.get(key, 0.7))
     return {"result": result, "style": key}
 
 

@@ -6,6 +6,7 @@ const STYLES = [
   { value: "standar", label: "Standar" },
   { value: "formal", label: "Formal" },
   { value: "akademik", label: "Akademik" },
+  { value: "akademik_q1", label: "Akademik Q1 (jurnal internasional)" },
   { value: "sederhana", label: "Sederhana" },
   { value: "kreatif", label: "Kreatif" },
 ];

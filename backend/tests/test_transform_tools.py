@@ -53,6 +53,27 @@ def test_paraphrase_uses_transform(monkeypatch):
     assert res["result"] == "TEKS PENDEK"
 
 
+def test_paraphrase_akademik_q1_uses_standard(monkeypatch):
+    """Gaya akademik_q1 harus memakai system prompt standar Q1 & suhu rendah."""
+    captured = {}
+
+    class _CaptureLLM:
+        def chat(self, messages, temperature=0.0, **kwargs):
+            captured["system"] = messages[0]["content"]
+            captured["temperature"] = temperature
+            return messages[-1]["content"]
+
+    _patch(monkeypatch, _CaptureLLM())
+    res = paraphrase("Teks uji akademik.", "akademik_q1")
+    assert res["style"] == "akademik_q1"
+    assert "Q1" in captured["system"]
+    assert "Scopus" in captured["system"]
+    assert captured["temperature"] == 0.35
+    # Gaya lain tetap memakai template generik (tanpa penanda Scopus).
+    res2 = paraphrase("Teks uji.", "standar")
+    assert res2["style"] == "standar"
+
+
 def test_word_tokens_roundtrip_no_loss():
     s = "Saya  pergi ke\nsekolah."
     assert "".join(_word_tokens(s)) == s
