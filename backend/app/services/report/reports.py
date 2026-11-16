@@ -6,7 +6,9 @@ Dipakai AI-Detector dan Grammar Checker. Di-render ke PDF oleh
 
 from __future__ import annotations
 
+import difflib
 import html
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -374,3 +376,128 @@ def grammar_report_html(result: dict, meta: dict | None = None) -> str:
 """
     subtitle = meta.get("title") or "Laporan Pemeriksaan Tata Bahasa"
     return _shell("Laporan Grammar Checker", str(subtitle), body)
+
+
+# --- Laporan alat transformasi (parafrase/humanize/rewrite/perbaikan) ---------
+# Alat transformasi menghasilkan teks baru, jadi "sorotan" yang bermakna adalah
+# perbedaan antara teks asli dan hasil: bagian yang dihapus (merah, coret) dan
+# yang ditambah/diubah (hijau). Pengguna bisa langsung melihat apa yang berubah.
+
+def _word_tokens(text: str) -> list[str]:
+    """Pecah jadi token kata + spasi (spasi dipertahankan agar diff rapi)."""
+    return re.findall(r"\S+|\s+", text or "")
+
+
+def _diff_html(original: str, result: str) -> tuple[str, int, int]:
+    """Bangun HTML diff kata-per-kata; kembalikan (html, kata_diubah, kata_hasil)."""
+    a = _word_tokens(original)
+    b = _word_tokens(result)
+    sm = difflib.SequenceMatcher(a=a, b=b, autojunk=False)
+    parts: list[str] = []
+    changed_words = 0
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        old = _esc("".join(a[i1:i2]))
+        new = _esc("".join(b[j1:j2]))
+        if tag == "equal":
+            parts.append(new)
+        elif tag == "insert":
+            parts.append(f"<span style='background:#dcfce7;color:#166534'>{new}</span>")
+            changed_words += len([t for t in b[j1:j2] if t.strip()])
+        elif tag == "delete":
+            parts.append(
+                f"<span style='background:#fee2e2;color:#b91c1c;"
+                f"text-decoration:line-through'>{old}</span>"
+            )
+            changed_words += len([t for t in a[i1:i2] if t.strip()])
+        else:  # replace
+            parts.append(
+                f"<span style='background:#fee2e2;color:#b91c1c;"
+                f"text-decoration:line-through'>{old}</span>"
+                f"<span style='background:#dcfce7;color:#166534'>{new}</span>"
+            )
+            changed_words += len([t for t in b[j1:j2] if t.strip()])
+    result_words = len([t for t in b if t.strip()])
+    return "".join(parts), changed_words, result_words
+
+
+def transform_report_html(
+    original: str, result: str, meta: dict | None = None
+) -> str:
+    """Laporan transformasi: diff bersorotan (asli vs hasil) + hasil penuh."""
+    meta = meta or {}
+    tool_label = str(meta.get("tool_label") or "Transformasi Teks")
+    original = original or ""
+    result = result or ""
+    orig_words = len([t for t in _word_tokens(original) if t.strip()])
+    diff_html, changed_words, result_words = _diff_html(original, result)
+    pct = round(100 * changed_words / max(1, max(orig_words, result_words)), 1)
+
+    legend = (
+        "<div class='legend'>"
+        "<b style='background:#fee2e2'>Dihapus</b> teks asli yang diganti/dibuang "
+        "&nbsp; <b style='background:#dcfce7'>Ditambah</b> teks baru hasil olahan</div>"
+    )
+    body = f"""
+  <div class="cards">
+    <div class="card"><div class="k">Kata Asli</div>
+      <div class="v">{_esc(orig_words)}</div></div>
+    <div class="card"><div class="k">Kata Hasil</div>
+      <div class="v">{_esc(result_words)}</div></div>
+    <div class="card"><div class="k">Bagian Diubah</div>
+      <div class="v" style="color:{BRAND}">{_esc(pct)}%</div></div>
+  </div>
+
+  <h2>Perubahan (Asli vs Hasil)</h2>
+  {legend}
+  <div class="doc">{diff_html}</div>
+
+  <h2>Teks Hasil Lengkap</h2>
+  <div class="doc">{_esc(result)}</div>
+
+  <div class="note">Hasil olahan otomatis. Tinjau setiap perubahan agar makna,
+    data, dan gaya tetap sesuai maksud penulis.</div>
+"""
+    subtitle = meta.get("title") or tool_label
+    return _shell(f"Laporan {tool_label}", str(subtitle), body)
+
+
+def toc_report_html(result: dict, meta: dict | None = None) -> str:
+    """Laporan PDF Daftar Isi Otomatis: entri berjenjang (bab/sub-bab)."""
+    meta = meta or {}
+    entries = result.get("entries") or []
+    rows = []
+    for e in entries:
+        if not isinstance(e, dict):
+            continue
+        lvl = e.get("level", 1)
+        try:
+            lvl = max(1, min(3, int(lvl)))
+        except (TypeError, ValueError):
+            lvl = 1
+        indent = (lvl - 1) * 18
+        number = _esc(e.get("number") or "")
+        title = _esc(e.get("title") or "")
+        weight = "700" if lvl == 1 else "400"
+        rows.append(
+            f"<div style='margin:3px 0;padding-left:{indent}px;font-weight:{weight}'>"
+            f"<span class='muted'>{number}</span> {title}</div>"
+        )
+    listing = "".join(rows) or "<div class='muted'>Tidak ada struktur yang terdeteksi.</div>"
+    markdown = str(result.get("markdown") or "").strip()
+    md_block = (
+        f"<h2>Markdown</h2><div class='doc'>{_esc(markdown)}</div>" if markdown else ""
+    )
+    body = f"""
+  <div class="cards">
+    <div class="card"><div class="k">Jumlah Entri</div>
+      <div class="v" style="color:{BRAND}">{_esc(len(entries))}</div></div>
+  </div>
+  <h2>Daftar Isi</h2>
+  {listing}
+  {md_block}
+  <div class="note">Daftar isi dibangun otomatis dari struktur dokumen. Tinjau
+    penomoran dan judul agar sesuai format yang diinginkan.</div>
+"""
+    subtitle = meta.get("title") or "Daftar Isi Otomatis"
+    return _shell("Laporan Daftar Isi", str(subtitle), body)
+

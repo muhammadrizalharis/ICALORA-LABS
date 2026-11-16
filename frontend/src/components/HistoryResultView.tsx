@@ -119,6 +119,11 @@ function CopyButton({ text }: { text: string }) {
 const PDF_REPORT_ENDPOINT: Record<string, string> = {
   "ai-detector": "ai-detect-report",
   "grammar-checker": "grammar-report",
+  paraphraser: "transform-report",
+  humanizer: "transform-report",
+  "ai-rewriter": "transform-report",
+  "perbaikan-dokumen": "transform-report",
+  "daftar-isi": "toc-report",
 };
 
 export default function HistoryResultView({ item }: { item: HistoryItemFull }) {
