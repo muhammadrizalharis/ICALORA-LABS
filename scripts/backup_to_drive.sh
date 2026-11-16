@@ -62,7 +62,9 @@ done
 [ "$waited" -gt 0 ] && log "menunggu $waited menit"
 
 dump() {  # $@ = opsi pg_dump tambahan
-  docker run --rm -e PGPASSWORD="$PGPASS" "$PG_IMAGE" \
+  # --log-driver none: stdout sudah di-pipe ke zstd; tanpa ini Docker json-file
+  # menyalin seluruh dump mentah (~ratusan GB) ke /var/lib/docker sampai container exit.
+  docker run --rm --log-driver none -e PGPASSWORD="$PGPASS" "$PG_IMAGE" \
     pg_dump -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" \
     --no-owner --no-privileges "$@"
 }
