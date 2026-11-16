@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import re
 
+import httpx
 from sqlalchemy import text
 
 from app.core.clients import corpus_size, engine
+from app.core.config import get_settings
 from app.services.embedding import embed_document
 from app.services.llm.provider import get_llm
 
@@ -139,8 +141,80 @@ def _format_ris(
     return "\n".join(lines)
 
 
+def _citation_entry(
+    *, doc_id, source, external_id, title, pub_year, doi,
+    relevance: float | None, online: bool = False,
+) -> dict:
+    """Bangun satu entri sitasi lengkap (semua gaya) dari metadata publik."""
+    return {
+        "doc_id": doc_id,
+        "source": source,
+        "external_id": external_id,
+        "title": title,
+        "pub_year": pub_year,
+        "doi": doi,
+        "url": f"https://doi.org/{doi}" if doi else None,
+        "relevance": relevance,
+        "online": online,
+        "apa": _format_apa(title, pub_year, doi, source),
+        "bibtex": _format_bibtex(title, pub_year, doi, source, doc_id or 0),
+        "ieee": _format_ieee(title, pub_year, doi, source),
+        "mla": _format_mla(title, pub_year, doi, source),
+        "harvard": _format_harvard(title, pub_year, doi, source),
+        "vancouver": _format_vancouver(title, pub_year, doi, source),
+        "ris": _format_ris(title, pub_year, doi, source),
+    }
+
+
+def _crossref_fallback(query: str, need: int) -> list[dict]:
+    """Ambil kandidat sitasi langsung dari Crossref bila korpus lokal kurang.
+
+    Dipakai sebagai pelengkap agar pengguna tetap mendapat sumber relevan
+    walau topiknya belum ada di korpus. Hanya metadata publik (judul, tahun,
+    DOI) — aman hak cipta. Gagal-aman: error jaringan -> daftar kosong.
+    """
+    if need <= 0:
+        return []
+    mailto = (get_settings().contact_email or "").strip() or "noreply@icalora-labs.local"
+    params = {
+        "query.bibliographic": query[:250],
+        "rows": min(20, max(need, 5)),
+        "select": "DOI,title,issued",
+        "mailto": mailto,
+    }
+    headers = {"User-Agent": f"ICALORA-LABS/1.0 (mailto:{mailto})"}
+    try:
+        with httpx.Client(timeout=httpx.Timeout(15.0, connect=6.0)) as client:
+            resp = client.get(
+                "https://api.crossref.org/works", params=params, headers=headers
+            )
+            resp.raise_for_status()
+            items = resp.json().get("message", {}).get("items", [])
+    except (httpx.HTTPError, ValueError):
+        return []
+    out: list[dict] = []
+    for it in items:
+        title = " ".join(it.get("title") or []).strip()
+        doi = it.get("DOI")
+        if not title or not doi:
+            continue
+        year = None
+        try:
+            year = (it.get("issued", {}).get("date-parts") or [[None]])[0][0]
+        except (IndexError, TypeError, KeyError):
+            year = None
+        out.append(
+            _citation_entry(
+                doc_id=None, source="crossref", external_id=doi, title=title,
+                pub_year=year, doi=doi, relevance=None, online=True,
+            )
+        )
+    return out
+
+
 def find_citations(query: str, top_k: int = 15, min_similarity: float = 0.35) -> dict:
-    """Cari kandidat sitasi untuk `query` dari korpus."""
+    """Cari kandidat sitasi untuk `query` dari korpus lokal; bila hasil relevan
+    kurang dari `top_k`, lengkapi dengan pencarian langsung ke Crossref."""
     query = query.strip()
     if not query:
         return {"query": "", "count": 0, "citations": []}
@@ -153,33 +227,37 @@ def find_citations(query: str, top_k: int = 15, min_similarity: float = 0.35) ->
         rows = conn.execute(_NEAREST, {"qvec": _vec_literal(qvec), "k": top_k}).all()
 
     citations: list[dict] = []
+    seen_doi: set[str] = set()
     for r in rows:
         sim = float(r.cos_sim) if r.cos_sim is not None else 0.0
         if sim < min_similarity:
             continue
+        if r.doi:
+            seen_doi.add(r.doi.lower())
         citations.append(
-            {
-                "doc_id": r.id,
-                "source": r.source,
-                "external_id": r.external_id,
-                "title": r.title,
-                "pub_year": r.pub_year,
-                "doi": r.doi,
-                "url": f"https://doi.org/{r.doi}" if r.doi else None,
-                "relevance": round(sim * 100, 1),
-                "apa": _format_apa(r.title, r.pub_year, r.doi, r.source),
-                "bibtex": _format_bibtex(r.title, r.pub_year, r.doi, r.source, r.id),
-                "ieee": _format_ieee(r.title, r.pub_year, r.doi, r.source),
-                "mla": _format_mla(r.title, r.pub_year, r.doi, r.source),
-                "harvard": _format_harvard(r.title, r.pub_year, r.doi, r.source),
-                "vancouver": _format_vancouver(r.title, r.pub_year, r.doi, r.source),
-                "ris": _format_ris(r.title, r.pub_year, r.doi, r.source),
-            }
+            _citation_entry(
+                doc_id=r.id, source=r.source, external_id=r.external_id,
+                title=r.title, pub_year=r.pub_year, doi=r.doi,
+                relevance=round(sim * 100, 1), online=False,
+            )
         )
+
+    # Pelengkap online: hanya bila korpus lokal belum memenuhi top_k.
+    if len(citations) < top_k:
+        for entry in _crossref_fallback(query, top_k - len(citations)):
+            doi = (entry.get("doi") or "").lower()
+            if doi and doi in seen_doi:
+                continue
+            if doi:
+                seen_doi.add(doi)
+            citations.append(entry)
+            if len(citations) >= top_k:
+                break
 
     return {
         "query": query,
         "count": len(citations),
         "citations": citations,
         "corpus_size": corpus_size(),
+        "min_similarity": min_similarity,
     }

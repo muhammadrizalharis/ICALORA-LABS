@@ -6,7 +6,7 @@ import threading
 import time
 from collections import defaultdict, deque
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
@@ -50,7 +50,12 @@ from app.services.plagiarism.online import (
 from app.services.plagiarism.report_pdf import build_report_pdf
 from app.services.publikasi import recommend_journals
 from app.services.report import MAX_HTML_BYTES, render_pdf
-from app.services.report.reports import ai_detector_report_html, grammar_report_html
+from app.services.report.reports import (
+    ai_detector_report_html,
+    grammar_report_html,
+    toc_report_html,
+    transform_report_html,
+)
 from app.services.text_tools import analyze_text
 from app.services.transkrip import (
     MAX_AUDIO_BYTES,
@@ -71,6 +76,11 @@ MAX_CHARS = 2_000_000
 # unduhan tidak melewati batas waktu proxy (Cloudflare 524).
 AI_REPORT_MIME = "application/x-icalora-ai-report"
 GRAMMAR_REPORT_MIME = "application/x-icalora-grammar-report"
+# MIME laporan alat transformasi (parafrase/humanize/rewrite/perbaikan): laporan
+# diff bersorotan (asli vs hasil) yang dibangun & di-cache saat job selesai.
+TRANSFORM_REPORT_MIME = "application/x-icalora-transform-report"
+# MIME laporan Daftar Isi Otomatis (struktur bab/sub-bab ber-jenjang).
+TOC_REPORT_MIME = "application/x-icalora-toc-report"
 # Batas waktu transkripsi (detik) agar tidak menahan worker pada berkas panjang.
 TRANSCRIBE_TIMEOUT = int(os.environ.get("WHISPER_TIMEOUT", "900"))
 settings = get_settings()
@@ -84,8 +94,18 @@ _FEATURE_BY_PATH: dict[str, str] = {
     "grammar-check-async": "grammar-checker",
     "grammar-check-file-async": "grammar-checker",
     "paraphrase": "paraphraser",
+    "paraphrase-async": "paraphraser",
+    "paraphrase-file-async": "paraphraser",
     "humanize": "humanizer",
+    "humanize-async": "humanizer",
+    "humanize-file-async": "humanizer",
     "rewrite": "ai-rewriter",
+    "rewrite-async": "ai-rewriter",
+    "rewrite-file-async": "ai-rewriter",
+    "improve-async": "perbaikan-dokumen",
+    "improve-file-async": "perbaikan-dokumen",
+    "toc-async": "daftar-isi",
+    "toc-file-async": "daftar-isi",
     "plagiarism": "plagiarism-checker",
     "plagiarism-online": "plagiarism-checker",
     "plagiarism-file": "plagiarism-checker",
@@ -434,6 +454,207 @@ def humanize_ep(body: TextIn, request: Request) -> dict:
         return res
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"LLM gagal: {exc}") from exc
+
+
+# --- Alat transformasi: versi async + unggah PDF + laporan diff bersorotan -----
+# paraphrase/humanize/rewrite/improve berbagi bentuk: teks masuk -> teks hasil.
+# Versi async aman dari timeout proxy untuk dokumen panjang (diproses per-chunk).
+
+# tool_key -> (slug_riwayat, label_tampilan)
+_TRANSFORM_META: dict[str, tuple[str, str]] = {
+    "paraphrase": ("paraphraser", "Parafrase"),
+    "humanize": ("humanizer", "Humanize"),
+    "rewrite": ("ai-rewriter", "AI Rewriter"),
+    "improve": ("perbaikan-dokumen", "Perbaikan Dokumen"),
+}
+_TRANSFORM_SLUGS = {slug for slug, _ in _TRANSFORM_META.values()}
+
+
+def _run_transform(tool: str, text: str, opts: dict) -> tuple[dict, str]:
+    """Jalankan satu alat transformasi; kembalikan (hasil_dict, teks_hasil)."""
+    if tool == "paraphrase":
+        res = paraphrase(text, opts.get("style") or "standar")
+        return res, res.get("result") or ""
+    if tool == "humanize":
+        res = humanize(text)
+        return res, res.get("result") or ""
+    if tool == "rewrite":
+        res = rewrite(text, opts.get("tone") or "formal")
+        return res, res.get("result") or ""
+    if tool == "improve":
+        res = improve_document(text, opts.get("goal"))
+        return res, res.get("improved") or ""
+    raise ValueError(f"alat transformasi tak dikenal: {tool}")
+
+
+def _store_transform_result(
+    user_id: int | None, tool: str, title: str, original_text: str,
+    data: bytes | None, filename: str | None, is_pdf: bool, opts: dict,
+) -> tuple[dict, int | None]:
+    """Jalankan transformasi, simpan riwayat + PDF asli (bila ada), lalu bangun &
+    cache laporan diff bersorotan (asli vs hasil)."""
+    slug, label = _TRANSFORM_META[tool]
+    res, result_text = _run_transform(tool, original_text, opts)
+    res["original_text"] = original_text
+    res["result_text"] = result_text
+    res["tool_label"] = label
+    res["has_original_pdf"] = is_pdf
+    res["source_filename"] = filename
+    hist_id = None
+    if user_id is not None:
+        hist_id = record_history(user_id, slug, title, original_text[:200], res)
+        if hist_id:
+            if is_pdf and data is not None:
+                save_tool_file(user_id, hist_id, filename, "application/pdf", data, None)
+            try:
+                report_pdf = render_pdf(
+                    transform_report_html(
+                        original_text, result_text,
+                        {"tool_label": label, "title": title},
+                    )
+                )
+                save_tool_file(
+                    user_id, hist_id, filename, TRANSFORM_REPORT_MIME, report_pdf, None
+                )
+            except Exception:  # noqa: BLE001, S110
+                pass  # gagal-aman: laporan dibangun on-demand di endpoint
+    return res, hist_id
+
+
+async def _job_run_transform(
+    job_id: str, user_id: int | None, tool: str, title: str, text: str,
+    data: bytes | None, filename: str | None, is_pdf: bool, opts: dict,
+) -> None:
+    try:
+        _, hist_id = await run_in_threadpool(
+            _store_transform_result, user_id, tool, title, text, data, filename,
+            is_pdf, opts,
+        )
+        complete_job(job_id, hist_id)
+    except Exception as exc:  # noqa: BLE001
+        fail_job(job_id, str(exc))
+
+
+def _launch_transform_text(
+    request: Request, tool: str, text: str, opts: dict,
+) -> dict:
+    _guard(text)
+    slug, label = _TRANSFORM_META[tool]
+    user = optional_user_from_request(request)
+    uid = user["id"] if user else None
+    title = text[:60].strip() or label
+    job_id = create_job(uid, slug, title)
+    _spawn(_job_run_transform(job_id, uid, tool, title, text, None, None, False, opts))
+    return {"job_id": job_id, "status": "processing"}
+
+
+async def _launch_transform_file(
+    request: Request, tool: str, file: UploadFile, opts: dict,
+) -> dict:
+    data, text = await _read_pdf_upload(file)
+    is_pdf = (file.filename or "").lower().endswith(".pdf")
+    slug, label = _TRANSFORM_META[tool]
+    user = optional_user_from_request(request)
+    uid = user["id"] if user else None
+    title = file.filename or label
+    job_id = create_job(uid, slug, title)
+    _spawn(
+        _job_run_transform(job_id, uid, tool, title, text, data, file.filename, is_pdf, opts)
+    )
+    return {"job_id": job_id, "status": "processing"}
+
+
+@router.post("/paraphrase-async")
+async def paraphrase_async_ep(body: ParaphraseIn, request: Request) -> dict:
+    return _launch_transform_text(request, "paraphrase", body.text, {"style": body.style})
+
+
+@router.post("/paraphrase-file-async")
+async def paraphrase_file_async_ep(  # noqa: B008
+    request: Request,
+    file: UploadFile = File(...),  # noqa: B008
+    style: str = Form("standar"),  # noqa: B008
+) -> dict:
+    return await _launch_transform_file(request, "paraphrase", file, {"style": style})
+
+
+@router.post("/humanize-async")
+async def humanize_async_ep(body: TextIn, request: Request) -> dict:
+    return _launch_transform_text(request, "humanize", body.text, {})
+
+
+@router.post("/humanize-file-async")
+async def humanize_file_async_ep(  # noqa: B008
+    request: Request,
+    file: UploadFile = File(...),  # noqa: B008
+) -> dict:
+    return await _launch_transform_file(request, "humanize", file, {})
+
+
+@router.post("/rewrite-async")
+async def rewrite_async_ep(body: RewriteIn, request: Request) -> dict:
+    return _launch_transform_text(request, "rewrite", body.text, {"tone": body.tone})
+
+
+@router.post("/rewrite-file-async")
+async def rewrite_file_async_ep(  # noqa: B008
+    request: Request,
+    file: UploadFile = File(...),  # noqa: B008
+    tone: str = Form("formal"),  # noqa: B008
+) -> dict:
+    return await _launch_transform_file(request, "rewrite", file, {"tone": tone})
+
+
+@router.post("/improve-async")
+async def improve_async_ep(body: ImproveIn, request: Request) -> dict:
+    return _launch_transform_text(request, "improve", body.text, {"goal": body.goal})
+
+
+@router.post("/improve-file-async")
+async def improve_file_async_ep(  # noqa: B008
+    request: Request,
+    file: UploadFile = File(...),  # noqa: B008
+    goal: str | None = Form(None),  # noqa: B008
+) -> dict:
+    return await _launch_transform_file(request, "improve", file, {"goal": goal})
+
+
+@router.get("/transform-report/{history_id}")
+def transform_report_ep(history_id: int, request: Request, dl: int = 0) -> Response:
+    """Laporan PDF diff bersorotan untuk alat transformasi: sajikan cache bila
+    ada, jika tidak bangun on-demand dari teks asli + hasil di riwayat."""
+    user = optional_user_from_request(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Perlu login.")
+    uid = user["id"]
+    item = get_history_item(uid, history_id)
+    if not item or item.get("tool") not in _TRANSFORM_SLUGS:
+        raise HTTPException(status_code=404, detail="Riwayat tidak ditemukan.")
+    result = item.get("result") or {}
+
+    cached = get_tool_file_by_history(uid, history_id, TRANSFORM_REPORT_MIME)
+    if cached and cached.get("data"):
+        base = (cached.get("filename") or "laporan").rsplit(".", 1)[0]
+        return _pdf_response(cached["data"], f"laporan-{base}.pdf", dl)
+
+    original = result.get("original_text") or ""
+    result_text = result.get("result_text") or result.get("result") or result.get("improved") or ""
+    label = result.get("tool_label") or "Transformasi Teks"
+    try:
+        pdf = render_pdf(
+            transform_report_html(
+                original, result_text, {"tool_label": label, "title": item.get("title")}
+            )
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Render laporan gagal: {exc}") from exc
+    try:
+        save_tool_file(
+            uid, history_id, result.get("source_filename"), TRANSFORM_REPORT_MIME, pdf, None
+        )
+    except Exception:  # noqa: BLE001, S110
+        pass
+    return _pdf_response(pdf, f"laporan-{history_id}.pdf", dl)
 
 
 def _require_pdf_upload(filename: str | None) -> None:
@@ -1087,6 +1308,95 @@ def toc_ep(body: TextIn, request: Request) -> dict:
         return res
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"LLM gagal: {exc}") from exc
+
+
+def _store_toc_result(
+    user_id: int | None, text: str, data: bytes | None, filename: str | None, is_pdf: bool,
+) -> tuple[dict, int | None]:
+    """Susun Daftar Isi, simpan riwayat + PDF asli (bila ada), bangun & cache
+    laporan Daftar Isi PDF."""
+    res = generate_toc(text)
+    res["has_original_pdf"] = is_pdf
+    res["source_filename"] = filename
+    title = filename or "Daftar Isi Otomatis"
+    hist_id = None
+    if user_id is not None:
+        hist_id = record_history(user_id, "daftar-isi", title, text[:200], res)
+        if hist_id:
+            if is_pdf and data is not None:
+                save_tool_file(user_id, hist_id, filename, "application/pdf", data, None)
+            try:
+                report_pdf = render_pdf(toc_report_html(res, {"title": title}))
+                save_tool_file(
+                    user_id, hist_id, filename, TOC_REPORT_MIME, report_pdf, None
+                )
+            except Exception:  # noqa: BLE001, S110
+                pass
+    return res, hist_id
+
+
+async def _job_run_toc(
+    job_id: str, user_id: int | None, text: str, data: bytes | None,
+    filename: str | None, is_pdf: bool,
+) -> None:
+    try:
+        _, hist_id = await run_in_threadpool(
+            _store_toc_result, user_id, text, data, filename, is_pdf
+        )
+        complete_job(job_id, hist_id)
+    except Exception as exc:  # noqa: BLE001
+        fail_job(job_id, str(exc))
+
+
+@router.post("/toc-async")
+async def toc_async_ep(body: TextIn, request: Request) -> dict:
+    _guard(body.text)
+    user = optional_user_from_request(request)
+    uid = user["id"] if user else None
+    job_id = create_job(uid, "daftar-isi", body.text[:60].strip() or "Daftar Isi Otomatis")
+    _spawn(_job_run_toc(job_id, uid, body.text, None, None, False))
+    return {"job_id": job_id, "status": "processing"}
+
+
+@router.post("/toc-file-async")
+async def toc_file_async_ep(  # noqa: B008
+    request: Request,
+    file: UploadFile = File(...),  # noqa: B008
+) -> dict:
+    data, text = await _read_pdf_upload(file)
+    is_pdf = (file.filename or "").lower().endswith(".pdf")
+    user = optional_user_from_request(request)
+    uid = user["id"] if user else None
+    job_id = create_job(uid, "daftar-isi", file.filename or "Daftar Isi Otomatis")
+    _spawn(_job_run_toc(job_id, uid, text, data, file.filename, is_pdf))
+    return {"job_id": job_id, "status": "processing"}
+
+
+@router.get("/toc-report/{history_id}")
+def toc_report_ep(history_id: int, request: Request, dl: int = 0) -> Response:
+    """Laporan PDF Daftar Isi: sajikan cache bila ada, jika tidak bangun on-demand."""
+    item = _report_history(request, history_id, "daftar-isi")
+    result = item.get("result") or {}
+    user = optional_user_from_request(request)
+    uid = user["id"] if user else None
+
+    cached = get_tool_file_by_history(uid, history_id, TOC_REPORT_MIME) if uid else None
+    if cached and cached.get("data"):
+        base = (cached.get("filename") or "daftar-isi").rsplit(".", 1)[0]
+        return _pdf_response(cached["data"], f"laporan-daftar-isi-{base}.pdf", dl)
+
+    try:
+        pdf = render_pdf(toc_report_html(result, {"title": item.get("title")}))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Render laporan gagal: {exc}") from exc
+    if uid:
+        try:
+            save_tool_file(
+                uid, history_id, result.get("source_filename"), TOC_REPORT_MIME, pdf, None
+            )
+        except Exception:  # noqa: BLE001, S110
+            pass
+    return _pdf_response(pdf, f"laporan-daftar-isi-{history_id}.pdf", dl)
 
 
 @router.post("/improve")

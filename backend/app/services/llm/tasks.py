@@ -374,49 +374,112 @@ def grammar_check(text: str) -> dict:
     }
 
 
+# --- Transformasi teks panjang (parafrase/humanize/rewrite/perbaikan) ---------
+# Alat transformasi menghasilkan teks baru sepanjang input. Sama seperti grammar,
+# tanpa chunking + num_ctx dokumen panjang DIPOTONG diam-diam (input ~4k token)
+# dan output pun terpotong. Di sini dokumen dipecah, tiap bagian ditransformasi,
+# lalu hasilnya dirangkai urut tanpa kehilangan teks.
+_TRANSFORM_CHUNK_CHARS = 4000  # input+output per chunk harus muat di num_ctx
+_TRANSFORM_NUM_CTX = 8192      # tetap antar-panggilan agar model tak dimuat-ulang
+_TRANSFORM_CALL_TIMEOUT = 300.0
+
+
+def _transform_chunk(llm, system: str, chunk: str, temperature: float) -> str:
+    """Transformasi satu chunk; num_ctx tetap, timeout longgar, 1 retry lalu
+    kembalikan teks asli chunk bila gagal agar seluruh job tak ikut gagal."""
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": chunk},
+    ]
+    # Output bisa sedikit lebih panjang dari input; beri ruang num_predict cukup.
+    max_out = max(1024, min(6144, int(len(chunk) // 3 * 1.9) + 512))
+    for attempt in range(2):
+        try:
+            out = llm.chat(
+                messages, temperature=temperature, max_tokens=max_out,
+                num_ctx=_TRANSFORM_NUM_CTX, timeout=_TRANSFORM_CALL_TIMEOUT,
+            )
+            return out.strip() or chunk
+        except Exception:  # noqa: BLE001 — timeout/5xx sesaat; coba ulang lalu lewati
+            if attempt == 0:
+                continue
+            return chunk
+    return chunk
+
+
+def _llm_transform_long(system: str, text: str, *, temperature: float) -> str:
+    """Transformasi teks panjang menyeluruh (dipecah per-chunk, tanpa kehilangan
+    teks). Dokumen pendek tetap satu panggilan."""
+    llm = get_llm()
+    chunks = _grammar_chunks(text, limit=_TRANSFORM_CHUNK_CHARS)
+    if not chunks:
+        return ""
+    parts = [_transform_chunk(llm, system, c, temperature) for c in chunks]
+    return "\n\n".join(parts).strip()
+
+
 PARAPHRASE_STYLES = {
     "standar": "standar dan netral",
     "formal": "formal dan baku",
     "akademik": "akademik dan ilmiah",
+    "akademik_q1": "akademik tingkat jurnal internasional Q1–Q2",
     "sederhana": "sederhana dan mudah dipahami",
     "kreatif": "kreatif dan bervariasi",
 }
 
+# Standar "Extreme Q1 Academic Writing" (lihat docs/standar_role_akademik_
+# paraphrasing.md): peran gabungan + parafrase struktural + pemadatan padat +
+# anti-pola-AI, TANPA mengubah makna/angka/istilah/sitasi/batasan penelitian.
+_PARAPHRASE_Q1_SYSTEM = (
+    "Anda bertindak sebagai gabungan Senior Professor, reviewer jurnal Scopus "
+    "Q1–Q2, Scientific Language Editor, Academic Paraphrasing Specialist, dan "
+    "Manuscript Condensation Specialist. Parafrasekan teks pengguna ke mutu "
+    "penulisan akademik Q1 dengan aturan ketat:\n"
+    "1. Parafrase struktural: ubah konstruksi sintaksis dan urutan informasi, "
+    "bukan sekadar mengganti sinonim.\n"
+    "2. Pertahankan makna ilmiah: JANGAN mengubah interpretasi, arah hubungan "
+    "antarvariabel, angka, variabel, istilah teknis, sitasi, atau batasan/"
+    "kondisi penelitian.\n"
+    "3. Diksi akademik presisi: hindari kata informal dan frasa berlebihan; "
+    "pilih istilah sesuai konteks disiplin.\n"
+    "4. Padatkan dengan kepadatan informasi tinggi: hilangkan redundansi dan "
+    "gabungkan gagasan berulang tanpa menghilangkan substansi.\n"
+    "5. Hindari pola penulisan AI generik: tanpa transisi mekanis (Furthermore, "
+    "Moreover, Additionally), tanpa struktur kalimat seragam, tanpa nominalisasi "
+    "berlebihan, tanpa klaim tak didukung bukti, tanpa menjelaskan ulang hal "
+    "yang sudah jelas.\n"
+    "6. Pertahankan bahasa asli teks (Indonesia tetap Indonesia, Inggris tetap "
+    "Inggris) serta koherensi dan alur argumentasi.\n"
+    "Balas HANYA hasil parafrase akhir — tanpa penjelasan editorial, tanpa "
+    "kalimat pembuka atau penutup."
+)
+# Prompt sistem & suhu khusus per-gaya (menimpa template generik bila ada).
+_PARAPHRASE_SYSTEMS = {"akademik_q1": _PARAPHRASE_Q1_SYSTEM}
+_PARAPHRASE_TEMPS = {"akademik_q1": 0.35}
+
 
 def paraphrase(text: str, style: str = "standar") -> dict:
-    llm = get_llm()
     key = (style or "").strip().lower()
     if key not in PARAPHRASE_STYLES:
         key = "standar"
-    desc = PARAPHRASE_STYLES[key]
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                f"Parafrasekan teks pengguna dengan gaya {desc}, pertahankan makna "
-                "dan bahasa aslinya. Balas HANYA hasil parafrase."
-            ),
-        },
-        {"role": "user", "content": text},
-    ]
-    result = llm.chat(messages, temperature=0.7)
+    system = _PARAPHRASE_SYSTEMS.get(key)
+    if system is None:
+        desc = PARAPHRASE_STYLES[key]
+        system = (
+            f"Parafrasekan teks pengguna dengan gaya {desc}, pertahankan makna "
+            "dan bahasa aslinya. Balas HANYA hasil parafrase."
+        )
+    result = _llm_transform_long(system, text, temperature=_PARAPHRASE_TEMPS.get(key, 0.7))
     return {"result": result, "style": key}
 
 
 def humanize(text: str) -> dict:
-    llm = get_llm()
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                "Tulis ulang teks agar terdengar lebih alami dan manusiawi: variasikan "
-                "panjang kalimat, kurangi pola kaku, pertahankan makna dan bahasa asli. "
-                "Balas HANYA hasil tulisan ulang."
-            ),
-        },
-        {"role": "user", "content": text},
-    ]
-    result = llm.chat(messages, temperature=0.8)
+    system = (
+        "Tulis ulang teks agar terdengar lebih alami dan manusiawi: variasikan "
+        "panjang kalimat, kurangi pola kaku, pertahankan makna dan bahasa asli. "
+        "Balas HANYA hasil tulisan ulang."
+    )
+    result = _llm_transform_long(system, text, temperature=0.8)
     return {"result": result}
 
 
@@ -437,18 +500,11 @@ def rewrite(text: str, tone: str = "formal") -> dict:
     if key not in REWRITE_TONES:
         key = "formal"
     desc = REWRITE_TONES[key]
-    llm = get_llm()
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                f"Tulis ulang teks pengguna dengan gaya {desc}. Pertahankan makna inti "
-                "dan bahasa asli teks. Balas HANYA hasil tulisan ulang tanpa penjelasan."
-            ),
-        },
-        {"role": "user", "content": text},
-    ]
-    result = llm.chat(messages, temperature=0.7)
+    system = (
+        f"Tulis ulang teks pengguna dengan gaya {desc}. Pertahankan makna inti "
+        "dan bahasa asli teks. Balas HANYA hasil tulisan ulang tanpa penjelasan."
+    )
+    result = _llm_transform_long(system, text, temperature=0.7)
     return {"result": result, "tone": tone}
 
 
@@ -589,7 +645,7 @@ def build_resume(info: str, target_role: str | None = None) -> dict:
     return {"resume_markdown": result, "target_role": target_role}
 
 
-def _toc_source(text: str, max_chars: int = 14000) -> str:
+def _toc_source(text: str, max_chars: int = 24000) -> str:
     """Padatkan dokumen panjang menjadi sumber TOC (baris-baris judul).
 
     Dokumen bisa puluhan ribu karakter; mengirim utuh ke LLM lambat/timeout.
@@ -640,7 +696,7 @@ def generate_toc(text: str) -> dict:
         },
         {"role": "user", "content": source},
     ]
-    raw = llm.chat(messages, temperature=0.2, max_tokens=1200)
+    raw = llm.chat(messages, temperature=0.2, max_tokens=1200, num_ctx=_TRANSFORM_NUM_CTX)
     try:
         data = _extract_json(raw)
     except json.JSONDecodeError:
@@ -667,20 +723,13 @@ def generate_toc(text: str) -> dict:
 
 def improve_document(text: str, goal: str | None = None) -> dict:
     """Perbaikan Dokumen: sunting dokumen agar lebih jelas, rapi, dan baku."""
-    llm = get_llm()
     goal_line = f" Fokus perbaikan: {goal}." if goal else ""
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                "Anda editor akademik profesional. Perbaiki dokumen pengguna: tata bahasa, "
-                "kejelasan, alur, dan gaya baku — tanpa mengubah makna, data, atau bahasa "
-                "asli." + goal_line + " Balas HANYA teks dokumen hasil perbaikan."
-            ),
-        },
-        {"role": "user", "content": text},
-    ]
-    improved = llm.chat(messages, temperature=0.3, max_tokens=2048)
+    system = (
+        "Anda editor akademik profesional. Perbaiki dokumen pengguna: tata bahasa, "
+        "kejelasan, alur, dan gaya baku — tanpa mengubah makna, data, atau bahasa "
+        "asli." + goal_line + " Balas HANYA teks dokumen hasil perbaikan."
+    )
+    improved = _llm_transform_long(system, text, temperature=0.3)
     return {"improved": improved, "goal": goal}
 
 
