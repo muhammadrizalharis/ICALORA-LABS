@@ -25,6 +25,7 @@ from app.services.auth import (
 from app.services.authorship import analyze_authorship
 from app.services.citation import find_citations
 from app.services.file_extract import MAX_UPLOAD_BYTES, extract_text
+from app.services.grammar.report_pdf import build_grammar_report_pdf
 from app.services.hidden_text import check_hidden_text
 from app.services.jobs import complete_job, create_job, fail_job, get_job
 from app.services.llm.tasks import (
@@ -69,6 +70,7 @@ MAX_CHARS = 2_000_000
 # di latar belakang saat deteksi (bisa ~1 mnt) lalu disajikan seketika agar
 # unduhan tidak melewati batas waktu proxy (Cloudflare 524).
 AI_REPORT_MIME = "application/x-icalora-ai-report"
+GRAMMAR_REPORT_MIME = "application/x-icalora-grammar-report"
 # Batas waktu transkripsi (detik) agar tidak menahan worker pada berkas panjang.
 TRANSCRIBE_TIMEOUT = int(os.environ.get("WHISPER_TIMEOUT", "900"))
 settings = get_settings()
@@ -79,6 +81,8 @@ _FEATURE_BY_PATH: dict[str, str] = {
     "word-count": "word-count",
     "extract-text": "extract-text",
     "grammar-check": "grammar-checker",
+    "grammar-check-async": "grammar-checker",
+    "grammar-check-file-async": "grammar-checker",
     "paraphrase": "paraphraser",
     "humanize": "humanizer",
     "rewrite": "ai-rewriter",
@@ -325,6 +329,89 @@ def grammar(body: TextIn, request: Request) -> dict:
         return res
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"LLM gagal: {exc}") from exc
+
+
+def _store_grammar_file_result(
+    user_id: int | None, text: str, data: bytes, filename: str | None, is_pdf: bool,
+) -> tuple[dict, int | None]:
+    """Jalankan grammar check pada teks penuh, simpan hasil + PDF asli, lalu
+    bangun & cache laporan overlay (sorotan masalah di atas dokumen asli).
+    Mengembalikan (hasil, history_id)."""
+    res = grammar_check(text)
+    res["has_original_pdf"] = is_pdf
+    res["source_filename"] = filename
+    hist_id = None
+    if user_id is not None:
+        hist_id = record_history(
+            user_id, "grammar-checker", filename or "Grammar Check", text[:200], res
+        )
+        if hist_id and is_pdf:
+            save_tool_file(user_id, hist_id, filename, "application/pdf", data, None)
+            try:
+                report_pdf = build_grammar_report_pdf(data, res, {"title": filename})
+                save_tool_file(
+                    user_id, hist_id, filename, GRAMMAR_REPORT_MIME, report_pdf, None
+                )
+            except Exception:  # noqa: BLE001, S110
+                pass  # gagal-aman: endpoint laporan akan membangun on-demand
+    return res, hist_id
+
+
+async def _job_run_grammar_text(
+    job_id: str, user_id: int | None, text: str, title: str,
+) -> None:
+    try:
+        res = await run_in_threadpool(grammar_check, text)
+        hist_id = None
+        if user_id is not None:
+            hist_id = await run_in_threadpool(
+                record_history, user_id, "grammar-checker", title, text[:200], res
+            )
+        complete_job(job_id, hist_id)
+    except Exception as exc:  # noqa: BLE001
+        fail_job(job_id, str(exc))
+
+
+async def _job_run_grammar_file(
+    job_id: str, user_id: int | None, text: str, data: bytes, filename: str | None,
+    is_pdf: bool,
+) -> None:
+    try:
+        _, hist_id = await run_in_threadpool(
+            _store_grammar_file_result, user_id, text, data, filename, is_pdf
+        )
+        complete_job(job_id, hist_id)
+    except Exception as exc:  # noqa: BLE001
+        fail_job(job_id, str(exc))
+
+
+@router.post("/grammar-check-async")
+async def grammar_async_ep(body: TextIn, request: Request) -> dict:
+    """Versi async grammar check untuk teks tempel; kembalikan `job_id` segera
+    (aman dari timeout proxy untuk dokumen besar yang dipecah per-chunk)."""
+    _guard(body.text)
+    user = optional_user_from_request(request)
+    uid = user["id"] if user else None
+    title = body.text[:60].strip() or "Grammar Check"
+    job_id = create_job(uid, "grammar-checker", title)
+    _spawn(_job_run_grammar_text(job_id, uid, body.text, title))
+    return {"job_id": job_id, "status": "processing"}
+
+
+@router.post("/grammar-check-file-async")
+async def grammar_file_async_ep(  # noqa: B008
+    request: Request,
+    file: UploadFile = File(...),  # noqa: B008
+) -> dict:
+    """Versi async grammar check dari BERKAS PDF; kembalikan `job_id` segera.
+    Menyimpan PDF asli agar laporan berformat identik dengan sorotan masalah."""
+    data, text = await _read_pdf_upload(file)
+    is_pdf = (file.filename or "").lower().endswith(".pdf")
+    user = optional_user_from_request(request)
+    uid = user["id"] if user else None
+    job_id = create_job(uid, "grammar-checker", file.filename or "Grammar Check")
+    _spawn(_job_run_grammar_file(job_id, uid, text, data, file.filename, is_pdf))
+    return {"job_id": job_id, "status": "processing"}
 
 
 @router.post("/paraphrase")
@@ -743,10 +830,47 @@ def ai_detect_report_ep(history_id: int, request: Request, dl: int = 0) -> Respo
 
 @router.get("/grammar-report/{history_id}")
 def grammar_report_ep(history_id: int, request: Request, dl: int = 0) -> Response:
-    """Laporan PDF hasil pemeriksaan tata bahasa dari riwayat pengguna."""
+    """Laporan PDF hasil pemeriksaan tata bahasa dari riwayat pengguna.
+
+    Urutan sama seperti deteksi AI: (1) sajikan laporan overlay ber-cache
+    (instan) bila ada; (2) bila hanya PDF asli tersimpan, bangun overlay
+    on-demand lalu cache; (3) bila tak ada PDF, pakai laporan HTML untuk teks
+    tempel.
+    """
     item = _report_history(request, history_id, "grammar-checker")
+    result = item.get("result") or {}
+    user = optional_user_from_request(request)
+    uid = user["id"] if user else None
+
+    cached = (
+        get_tool_file_by_history(uid, history_id, GRAMMAR_REPORT_MIME) if uid else None
+    )
+    if cached and cached.get("data"):
+        base = (cached.get("filename") or "laporan").rsplit(".", 1)[0]
+        return _pdf_response(cached["data"], f"laporan-grammar-{base}.pdf", dl)
+
+    orig = get_tool_file_by_history(uid, history_id, "application/pdf") if uid else None
+    if orig and orig.get("data"):
+        try:
+            pdf = build_grammar_report_pdf(
+                orig["data"], result, {"title": item.get("title")}
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=502, detail=f"Render laporan gagal: {exc}"
+            ) from exc
+        if uid:
+            try:
+                save_tool_file(
+                    uid, history_id, orig.get("filename"), GRAMMAR_REPORT_MIME, pdf, None
+                )
+            except Exception:  # noqa: BLE001, S110
+                pass
+        base = (orig.get("filename") or "laporan").rsplit(".", 1)[0]
+        return _pdf_response(pdf, f"laporan-grammar-{base}.pdf", dl)
+
     try:
-        html = grammar_report_html(item.get("result") or {}, {"title": item.get("title")})
+        html = grammar_report_html(result, {"title": item.get("title")})
         pdf = render_pdf(html)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Render laporan gagal: {exc}") from exc

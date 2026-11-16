@@ -323,7 +323,7 @@ def grammar_report_html(result: dict, meta: dict | None = None) -> str:
     issues = result.get("issues") or []
 
     rows = []
-    for it in issues[:60]:
+    for it in issues:
         sev = str(it.get("severity") or "advanced")
         rows.append(
             "<tr>"
@@ -349,7 +349,7 @@ def grammar_report_html(result: dict, meta: dict | None = None) -> str:
             "<h2>Teks Hasil Perbaikan</h2>"
             f"<div style='white-space:pre-wrap;border:1px solid {_LINE};"
             "border-radius:8px;padding:12px'>"
-            f"{_esc(corrected[:8000])}</div>"
+            f"{_esc(corrected)}</div>"
         )
 
     body = f"""

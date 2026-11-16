@@ -8,7 +8,7 @@ class _FakeLLM:
     def __init__(self, reply: str):
         self._reply = reply
 
-    def chat(self, messages, temperature=0.0):
+    def chat(self, messages, temperature=0.0, **kwargs):
         return self._reply
 
 
