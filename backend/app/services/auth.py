@@ -396,8 +396,16 @@ def _bounded_json(result: dict, max_chars: int = 1_500_000) -> str:
     hasil terlalu besar, kita pangkas di level **data** — memotong string panjang
     dan membatasi jumlah elemen list secara rekursif — lalu serialisasi ulang,
     sehingga hasil akhir tetap JSON yang sah.
+
+    Catatan: Postgres jsonb/text TIDAK bisa menyimpan NUL (\\u0000). json.dumps
+    meng-escape NUL menjadi urutan 6-karakter "\\u0000" yang tetap ditolak jsonb,
+    maka escape itu dibuang dari hasil akhir agar penyimpanan riwayat tak gagal.
     """
-    dumped = json.dumps(result, ensure_ascii=False)
+
+    def _dump(obj) -> str:
+        return json.dumps(obj, ensure_ascii=False).replace("\\u0000", "")
+
+    dumped = _dump(result)
     if len(dumped) <= max_chars:
         return dumped
 
@@ -415,15 +423,12 @@ def _bounded_json(result: dict, max_chars: int = 1_500_000) -> str:
 
     # Pangkas makin agresif sampai muat.
     for str_cap, list_cap in ((2000, 200), (800, 80), (300, 30), (120, 10)):
-        candidate = json.dumps(
-            _trim(result, str_cap, list_cap), ensure_ascii=False
-        )
+        candidate = _dump(_trim(result, str_cap, list_cap))
         if len(candidate) <= max_chars:
             return candidate
     # Cadangan terakhir: tetap JSON valid.
-    return json.dumps(
+    return _dump(
         {"_truncated": True, "note": "Hasil terlalu besar untuk disimpan penuh."},
-        ensure_ascii=False,
     )
 
 

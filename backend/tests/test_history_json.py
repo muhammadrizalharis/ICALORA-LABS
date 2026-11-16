@@ -42,3 +42,15 @@ def test_quote_near_old_truncation_boundary_not_corrupted():
     tricky = {"items": ["x" * 199_995 + '"cited"']}
     out = _bounded_json(tricky)
     assert _valid(out)
+
+
+def test_nul_byte_stripped_so_jsonb_insert_cannot_fail():
+    # Postgres jsonb/text TIDAK bisa menyimpan NUL (\u0000); json.dumps
+    # meng-escape-nya menjadi "\\u0000" yang tetap ditolak jsonb. Harus dibuang
+    # agar penyimpanan riwayat tak pernah "Gagal" (UntranslatableCharacter).
+    data = {"text": "abc\x00def", "sources": [{"m": "x\x00y"}]}
+    out = _bounded_json(data)
+    assert _valid(out)
+    assert "\\u0000" not in out
+    assert "\x00" not in out
+    assert json.loads(out)["text"] == "abcdef"
