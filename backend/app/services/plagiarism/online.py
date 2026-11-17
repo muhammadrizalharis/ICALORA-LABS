@@ -459,15 +459,31 @@ async def _enrich_fulltext(
             return 0.0
         return len(ssh & doc_sh) / len(ssh)
 
+    def _title_in_doc(c: dict) -> float:
+        # Kandidat TANPA abstrak (paper baru, abstrak belum terindeks) tak bisa
+        # dinilai lewat abstrak. Ukur seberapa banyak kata isi JUDUL kandidat
+        # termuat di dokumen: judul paper yang menjadi dokumen ini hampir
+        # selalu termuat utuh. Hanya sebagai gerbang pengunduhan teks penuh —
+        # skor akhir tetap ditentukan pencocokan baris-per-baris.
+        if len(_WORD_RE.findall(c.get("_fulltext") or "")) >= 40:
+            return 0.0
+        tw = {w.lower() for w in re.findall(r"[A-Za-z]{4,}", c.get("title") or "")}
+        tw -= _GENERIC_TERMS
+        if len(tw) < 5:
+            return 0.0
+        dw = {w.lower() for w in re.findall(r"[A-Za-z]{4,}", doc)}
+        return len(tw & dw) / len(tw)
+
     def _rank(c: dict) -> float:
         base = 1.0 if (c.get("doi") or "").lower() in own_dois else 0.0
-        return base + _title_sim(c) + _abs_containment(c)
+        return base + _title_sim(c) + _abs_containment(c) + _title_in_doc(c)
 
     def _passes_gate(c: dict) -> bool:
         return (
             (c.get("doi") or "").lower() in own_dois
             or _title_sim(c) >= 0.6
             or _abs_containment(c) >= 0.5
+            or _title_in_doc(c) >= 0.9
         )
 
     identity = [c for c in cands if _passes_gate(c)]
@@ -1180,6 +1196,77 @@ async def _q_crossref_doi(client: httpx.AsyncClient, doi: str) -> dict | None:
     }
 
 
+_KEYWORDS_RE = re.compile(r"(?im)^\s*(?:keywords?|kata\s+kunci)\s*[:\-–]\s*(.+)$")
+_ABSTRACT_HEAD_RE = re.compile(r"(?im)^\s*(?:abstract|abstrak)\b[\s:.\-–]*")
+_SENT_SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z])")
+
+
+_GENERIC_TERMS = frozenset(
+    "about above after between because during under using study studies results result "
+    "which these those their there where while through paper research analysis based "
+    "method methods approach conditions condition measured evaluated evaluates indicate "
+    "indicates provides proposed present presents found shows showed different several "
+    "should within without major higher lower under over from this that with have been "
+    "were what when also than more most both each other such into onto only very yang "
+    "dengan untuk dalam pada dari adalah penelitian hasil metode".split()
+)
+_HYPHEN_TERM_RE = re.compile(r"\b[A-Za-z]{3,}-[A-Za-z]{3,}\b")
+
+
+def _distinct_term_queries(doc: str) -> list[str]:
+    """Query SINGKAT berisi istilah paling khas dari abstrak.
+
+    OpenAlex/Crossref menilai relevansi kata-kunci terhadap JUDUL (abstrak
+    sering kosong untuk paper baru). Kalimat panjang mengencerkan istilah
+    khas; beberapa kata paling sering muncul (mis. "porous-net scour bridge
+    pier") justru menempatkan paper terbit di peringkat teratas.
+    """
+    head = (doc or "").strip()[:4000]
+    m = _ABSTRACT_HEAD_RE.search(head)
+    body = head[m.end():] if m else head
+    words = [w.lower() for w in re.findall(r"[A-Za-z]{5,}", body)]
+    freq: dict[str, int] = {}
+    for w in words:
+        if w not in _GENERIC_TERMS:
+            freq[w] = freq.get(w, 0) + 1
+    top = [w for w, _ in sorted(freq.items(), key=lambda kv: (-kv[1], kv[0]))[:6]]
+    compounds: dict[str, int] = {}
+    for h in _HYPHEN_TERM_RE.findall(body):
+        compounds[h.lower()] = compounds.get(h.lower(), 0) + 1
+    comp = [c for c, _ in sorted(compounds.items(), key=lambda kv: (-kv[1], kv[0]))[:1]]
+    queries: list[str] = []
+    if len(top) >= 3:
+        queries.append(" ".join(top[:4]))
+        if comp:
+            queries.append(" ".join(comp + top[:2]))
+    return queries
+
+
+def _abstract_queries(doc: str) -> list[str]:
+    """Query cadangan untuk menemukan paper terbit saat JUDUL tak ada.
+
+    Banyak pengguna menghapus header/judul/penulis sebelum mengunggah, sehingga
+    dokumen dimulai dari "Abstract". Judul tak bisa diekstrak (dan nama berkas
+    tak informatif), padahal paper tersebut terindeks. Mesin cari OpenAlex/
+    Crossref mencocokkan judul+abstrak, jadi kalimat awal abstrak dan baris
+    Keywords efektif sebagai kueri identitas.
+    """
+    head = (doc or "").strip()[:6000]
+    queries: list[str] = []
+    kw = _KEYWORDS_RE.search(head)
+    if kw:
+        words = _clean(kw.group(1))
+        if len(_WORD_RE.findall(words)) >= 3:
+            queries.append(words[:200])
+    m = _ABSTRACT_HEAD_RE.search(head)
+    body = head[m.end():] if m else head
+    body = _clean(body)
+    sents = [s for s in _SENT_SPLIT_RE.split(body) if len(_WORD_RE.findall(s)) >= 6]
+    for i in range(min(2, len(sents))):
+        queries.append(" ".join(sents[i : i + 2])[:300])
+    return queries
+
+
 async def _q_title(client: httpx.AsyncClient, title: str) -> list[dict]:
     """Temukan paper terbit yang judulnya paling cocok (OpenAlex + Crossref).
     Mengembalikan kandidat dengan abstrak — dipakai untuk mendeteksi bahwa
@@ -1215,6 +1302,8 @@ async def _resolve_publication(
     hint = _clean(title_hint or "")
     if hint and len(_WORD_RE.findall(hint)) >= 4:
         queries.add(hint)
+    queries.update(_abstract_queries(doc))
+    queries.update(_distinct_term_queries(doc))
     for q in queries:
         if q:
             tasks.append(_q_title(client, q))
