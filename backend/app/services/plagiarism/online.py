@@ -638,11 +638,19 @@ def _openalex_abstract(inv: dict | None) -> str:
     return " ".join(w for _, w in positions)
 
 
+def _oa_params(params: dict) -> dict:
+    """Parameter standar OpenAlex: mailto (polite pool) + api_key bila ada."""
+    out = {**params, "mailto": _MAILTO}
+    if settings.openalex_api_key:
+        out["api_key"] = settings.openalex_api_key
+    return out
+
+
 async def _q_openalex(client: httpx.AsyncClient, sentence: str) -> list[dict]:
     r = await _get_json(
         client,
         "https://api.openalex.org/works",
-        {"search": sentence[:250], "per_page": _PER_PROVIDER, "mailto": _MAILTO},
+        _oa_params({"search": sentence[:250], "per_page": _PER_PROVIDER}),
     )
     if r is None:
         return []
@@ -1160,7 +1168,7 @@ def _active_providers() -> list:
 
 
 async def _q_openalex_doi(client: httpx.AsyncClient, doi: str) -> dict | None:
-    r = await _get_json(client, f"https://api.openalex.org/works/doi:{doi}", {"mailto": _MAILTO})
+    r = await _get_json(client, f"https://api.openalex.org/works/doi:{doi}", _oa_params({}))
     if r is None:
         return None
     w = r.json()
@@ -1208,23 +1216,22 @@ _GENERIC_TERMS = frozenset(
     "indicates provides proposed present presents found shows showed different several "
     "should within without major higher lower under over from this that with have been "
     "were what when also than more most both each other such into onto only very yang "
-    "dengan untuk dalam pada dari adalah penelitian hasil metode".split()
+    "dengan untuk dalam pada dari adalah penelitian hasil metode figure figures table "
+    "tables equation equations value values shown shows could would increase decrease "
+    "number total effect effects often however therefore thus data model models "
+    "will used same then they them high some like make made many much must well "
+    "case cases time part parts well also into over".split()
 )
 _HYPHEN_TERM_RE = re.compile(r"\b[A-Za-z]{3,}-[A-Za-z]{3,}\b")
 
 
-def _distinct_term_queries(doc: str) -> list[str]:
-    """Query SINGKAT berisi istilah paling khas dari abstrak.
+_REFS_HEAD_RE = re.compile(
+    r"(?im)^\s*(?:\d+\.?\s*)?(?:references|daftar\s+pustaka|bibliography)\s*$"
+)
 
-    OpenAlex/Crossref menilai relevansi kata-kunci terhadap JUDUL (abstrak
-    sering kosong untuk paper baru). Kalimat panjang mengencerkan istilah
-    khas; beberapa kata paling sering muncul (mis. "porous-net scour bridge
-    pier") justru menempatkan paper terbit di peringkat teratas.
-    """
-    head = (doc or "").strip()[:4000]
-    m = _ABSTRACT_HEAD_RE.search(head)
-    body = head[m.end():] if m else head
-    words = [w.lower() for w in re.findall(r"[A-Za-z]{5,}", body)]
+
+def _term_query_sets(body: str) -> list[str]:
+    words = [w.lower() for w in re.findall(r"[A-Za-z]{4,}", body)]
     freq: dict[str, int] = {}
     for w in words:
         if w not in _GENERIC_TERMS:
@@ -1234,12 +1241,45 @@ def _distinct_term_queries(doc: str) -> list[str]:
     for h in _HYPHEN_TERM_RE.findall(body):
         compounds[h.lower()] = compounds.get(h.lower(), 0) + 1
     comp = [c for c, _ in sorted(compounds.items(), key=lambda kv: (-kv[1], kv[0]))[:1]]
-    queries: list[str] = []
+    out: list[str] = []
     if len(top) >= 3:
-        queries.append(" ".join(top[:4]))
+        out.append(" ".join(top[:4]))
         if comp:
-            queries.append(" ".join(comp + top[:2]))
-    return queries
+            out.append(" ".join(comp + top[:2]))
+        # Pencarian OpenAlex bersifat AND atas judul: satu kata ekstra yang
+        # tak ada di judul membuat paper hilang. Pasangan 2 kata lebih tahan.
+        lead = comp or top[:1]
+        for t in top[: 4 if comp else 3]:
+            if t != lead[0]:
+                out.append(f"{lead[0]} {t}")
+        if not comp:
+            out.append(f"{top[1]} {top[2]}")
+    return out
+
+
+def _distinct_term_queries(doc: str) -> list[str]:
+    """Query SINGKAT berisi istilah paling khas dokumen.
+
+    OpenAlex/Crossref menilai relevansi kata-kunci terhadap JUDUL (abstrak
+    sering kosong untuk paper baru). Kalimat panjang mengencerkan istilah
+    khas; beberapa kata paling sering muncul (mis. "porous-net scour bridge
+    pier") justru menempatkan paper terbit di peringkat teratas.
+
+    Dua sudut pandang: (1) awal dokumen (abstrak) dan (2) SELURUH isi tanpa
+    daftar pustaka. Yang kedua penting untuk makalah yang diunggah mulai dari
+    Pendahuluan: Pendahuluan hanya memuat istilah umum, sedangkan istilah
+    khas penelitian (mis. nama metode/perangkat) baru dominan di Metode/Hasil.
+    """
+    doc = (doc or "").strip()
+    head = doc[:4000]
+    m = _ABSTRACT_HEAD_RE.search(head)
+    queries = _term_query_sets(head[m.end():] if m else head)
+    refs = list(_REFS_HEAD_RE.finditer(doc))
+    full = doc[: refs[-1].start()] if refs and refs[-1].start() > len(doc) * 0.4 else doc
+    for q in _term_query_sets(full):
+        if q not in queries:
+            queries.append(q)
+    return queries[:12]
 
 
 def _abstract_queries(doc: str) -> list[str]:
@@ -1283,6 +1323,27 @@ async def _q_title(client: httpx.AsyncClient, title: str) -> list[dict]:
     return out
 
 
+_IDENTITY_SEM: asyncio.Semaphore | None = None
+
+
+async def _q_title_throttled(client: httpx.AsyncClient, title: str) -> list[dict]:
+    """`_q_title` dengan batas konkurensi BERSAMA antar-job + satu retry.
+
+    Banyak user mengunggah serentak → belasan query identitas per job memicu
+    429 (rate-limit Crossref/OpenAlex) dan paper terbit tak ditemukan. Semaphore
+    tingkat-proses meratakan beban; hasil kosong dicoba ulang sekali setelah jeda.
+    """
+    global _IDENTITY_SEM
+    if _IDENTITY_SEM is None:
+        _IDENTITY_SEM = asyncio.Semaphore(4)
+    async with _IDENTITY_SEM:
+        res = await _q_title(client, title)
+        if not res:
+            await asyncio.sleep(2.0)
+            res = await _q_title(client, title)
+        return res
+
+
 async def _resolve_publication(
     client: httpx.AsyncClient, doc: str, title_hint: str = ""
 ) -> list[dict]:
@@ -1306,7 +1367,7 @@ async def _resolve_publication(
     queries.update(_distinct_term_queries(doc))
     for q in queries:
         if q:
-            tasks.append(_q_title(client, q))
+            tasks.append(_q_title_throttled(client, q))
     results = await asyncio.gather(*tasks, return_exceptions=True)
     out: list[dict] = []
     for res in results:

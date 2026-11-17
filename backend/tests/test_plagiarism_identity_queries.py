@@ -30,3 +30,32 @@ def test_distinct_term_queries_are_short_and_pick_specific_terms():
 def test_no_queries_for_empty_doc():
     assert _abstract_queries("") == []
     assert _distinct_term_queries("") == []
+
+
+_INTRO_ONLY = (
+    "1. INTRODUCTION\n"
+    "Rice distribution is critical for food security across provinces. "
+    "The rice-distribution network depends on logistics performance. "
+    "Rice production differs across provinces and rice logistics varies.\n"
+    "2. METHODS\nWe cluster rice distribution data with rice-distribution indicators.\n"
+    "References\n[1] Someone-Else-Name, Unrelated-Hyphen. 2020.\n"
+)
+
+
+def test_term_queries_use_whole_doc_pairs_and_four_letter_terms():
+    qs = _distinct_term_queries(_INTRO_ONLY)
+    assert any(q.split()[0] == "rice-distribution" and len(q.split()) == 2 for q in qs)
+    assert any("rice" in q.split() for q in qs)
+    assert len(qs) <= 12
+    # daftar pustaka tidak boleh mencemari istilah khas
+    assert not any("someone" in q for q in qs)
+
+
+def test_openalex_params_include_key_only_when_configured(monkeypatch):
+    from app.services.plagiarism import online
+
+    monkeypatch.setattr(online.settings, "openalex_api_key", "")
+    assert "api_key" not in online._oa_params({"search": "x"})
+    monkeypatch.setattr(online.settings, "openalex_api_key", "k123")
+    p = online._oa_params({"search": "x"})
+    assert p["api_key"] == "k123" and p["search"] == "x" and "mailto" in p

@@ -111,6 +111,9 @@ class Settings(BaseSettings):
     # (identitas + luas + korpus lokal) tetap aman di bawah polling frontend.
     online_identity_budget_seconds: int = Field(default=180)
     core_api_key: str = Field(default="")
+    # OpenAlex tanpa key memakai kuota harian gratis yang DIBAGI per-IP (bisa habis
+    # → 429 untuk semua). Key gratis dari openalex.org memberi kuota sendiri.
+    openalex_api_key: str = Field(default="")
     core_enabled: bool = Field(default=True)
     # Ambil teks-PENUH open-access (PDF/HTML) untuk paper yang teridentifikasi
     # sebagai publikasi dokumen (DOI/judul sendiri). Diproses ephemeral di
