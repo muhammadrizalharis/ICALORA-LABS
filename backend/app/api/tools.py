@@ -755,11 +755,13 @@ async def _run_plagiarism_merged(
         #    dan paper terbit milik user tak ditemukan. Mendahulukannya menjamin
         #    kandidat identitas selalu tertangkap, lalu digabung ke hasil luas.
         ident: list[dict] = []
+        ident_ok = False
         try:
             ident = await asyncio.wait_for(
                 identity_candidates(text, title_hint),
                 timeout=max(30, settings.online_identity_budget_seconds),
             )
+            ident_ok = True
         except Exception:  # noqa: BLE001
             ident = []
         # 2) Pencarian luas per-kalimat dengan sisa anggaran. Bila timeout, hasil
@@ -767,7 +769,7 @@ async def _run_plagiarism_merged(
         #    terbit hanya karena fase luas lambat).
         try:
             extra, providers = await asyncio.wait_for(
-                online_candidates(text, title_hint),
+                online_candidates(text, title_hint, skip_identity=ident_ok),
                 timeout=max(30, settings.online_budget_seconds),
             )
         except Exception:  # noqa: BLE001
@@ -788,6 +790,7 @@ async def _run_plagiarism_merged(
         extra = list(merged.values())
     res = await run_in_threadpool(check_plagiarism, text, top_k, extra, exclude)
     res["online_merged"] = bool(extra)
+    res["online_openalex_calls"] = int(rate_limited.get("_oa_calls", 0))
     if rate_limited.get(BUDGET_FLAG):
         res["online_budget_exhausted"] = True
     counts = {k: v for k, v in rate_limited.items() if not k.startswith("_")}
