@@ -167,14 +167,28 @@ def pdf_page_count(data: bytes) -> int:
         return 0
 
 
-def is_scanned_pdf(data: bytes, text: str) -> bool:
-    """PDF yang hampir tanpa teks per halaman = hasil pindaian (gambar)."""
+def is_scanned_pdf(data: bytes, text: str = "") -> bool:
+    """PDF yang lapisan teks ASLI-nya hampir kosong per halaman = hasil pindaian.
+
+    Yang dinilai lapisan teks PDF itu sendiri, BUKAN hasil `extract_text`: Tika
+    (cadangan ekstraksi) bisa mengenali gambar halaman sehingga teks tampak ada,
+    padahal PDF asli yang disimpan untuk laporan hanya gambar — tak bisa diberi
+    sorotan. `text` hanya dipakai bila PDF tak bisa dibuka.
+    """
     from app.core.config import get_settings
 
-    pages = pdf_page_count(data)
-    if pages <= 0:
-        return False
-    return len((text or "").strip()) / pages < get_settings().scanned_min_chars_per_page
+    threshold = get_settings().scanned_min_chars_per_page
+    try:
+        import pymupdf
+
+        with pymupdf.open(stream=data, filetype="pdf") as doc:
+            if doc.page_count <= 0:
+                return False
+            native = sum(len(page.get_text().strip()) for page in doc)
+            return native / doc.page_count < threshold
+    except Exception:  # noqa: BLE001
+        pages = pdf_page_count(data)
+        return pages > 0 and len((text or "").strip()) / pages < threshold
 
 
 def ocr_pdf(data: bytes) -> tuple[bytes, str]:
