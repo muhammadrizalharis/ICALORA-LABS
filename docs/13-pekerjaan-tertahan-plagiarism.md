@@ -37,18 +37,21 @@ Cara: ambil 1–2 paper OA per penerbit (OpenAlex filter `doi_starts_with`, `is_
 judul/abstrak, jalankan pass identitas, catat HIT/MISS dan penyebab MISS (PDF tak terunduh,
 gerbang unduh teks penuh, dll).
 
-## Menunggu pihak luar
+## Key Semantic Scholar (cadangan pencarian frasa) — diuji, TIDAK dipasang ke kode
 
-### Key Semantic Scholar (cadangan pencarian frasa)
+Key diterima dan terpasang di `.env` (2026-11-19). Hasil uji pada naskah TEST4 (paper IIETA, terbit
+Agustus 2026), 6 frasa isi 9-kata ke `/graph/v1/snippet/search`, jeda 1,2 dtk + retry bertahap:
 
-Formulir sudah dikirim 2026-11-19; email konfirmasi otomatis diterima, **key belum dikirim**
-(prioritas lembaga akademik/nirlaba, tinjauan satu per satu). Tanpa key, API langsung 429.
+- **Keandalan dari server ini rendah:** 4 dari 6 panggilan gagal (429 atau koneksi diputus) walau
+  memakai key. Penyebabnya (jaringan server atau batas laju) belum dipastikan.
+- **Dua panggilan yang berhasil tidak menemukan paper targetnya** (0/6 frasa). Dugaan: indeks
+  potongan teks Semantic Scholar belum memuat paper yang baru terbit — belum diverifikasi pada
+  paper lama.
+- Catatan teknis: `snippet/search` tidak menerima `fields=paper.title` (400); kolom paper bawaan
+  hanya `corpusId`/`title`/penulis, tanpa DOI (butuh panggilan tambahan untuk memetakan ke DOI).
 
-Setelah key diterima:
-1. Isi `SEMANTIC_SCHOLAR_API_KEY` di `backend/.env` (jangan di-commit).
-2. Hubungkan `/graph/v1/snippet/search` ke pass identitas, **maks 1 permintaan/detik** dengan
-   exponential backoff (janji pada formulir).
-3. Uji pada naskah tanpa judul; **belum terbukti** bisa menemukan paper kita.
+Kesimpulan: **bukan pengganti** OpenAlex `fulltext.search` untuk paper baru terbit. Belum
+dihubungkan ke pass identitas. Bisa diuji ulang pada paper lama bila ada kebutuhan.
 
 ## Batas yang diketahui (belum diputuskan)
 
