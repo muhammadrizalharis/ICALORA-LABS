@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import re
 import threading
 import time
 from collections import defaultdict, deque
@@ -236,6 +237,7 @@ class ExcludeIn(BaseModel):
 class PlagiarismIn(TextIn):
     top_k: int = Field(default=30, ge=1, le=60)
     exclude: ExcludeIn | None = None
+    title: str = Field(default="", max_length=300)  # judul dokumen dari user
 
 
 class RewriteIn(TextIn):
@@ -679,6 +681,13 @@ def _require_pdf_upload(filename: str | None) -> None:
         )
 
 
+def _clean_doc_title(raw: str | None, fallback: str = "") -> str:
+    """Judul dokumen dari input user: buang karakter kontrol/spasi ganda, maks 200."""
+    t = re.sub(r"[\x00-\x1f\x7f]+", " ", raw or "")
+    t = re.sub(r"\s+", " ", t).strip()[:200]
+    return t or fallback
+
+
 def _title_hint_from_filename(filename: str | None) -> str:
     """Judul perkiraan dari nama berkas unggahan (banyak PDF akademik dinamai
     sesuai judulnya). Buang ekstensi & pemisah umum agar jadi query judul."""
@@ -794,6 +803,7 @@ async def plagiarism_file_ep(  # noqa: B008
     exclude_bibliography: bool = False,
     exclude_quotes: bool = False,
     exclude_min_percent: float = 0.0,
+    doc_title: str = "",
 ) -> dict:
     """Cek plagiarisme dari BERKAS asli; simpan PDF asli di VM untuk laporan
     berformat identik (sorotan di atas dokumen asli)."""
@@ -821,14 +831,15 @@ async def plagiarism_file_ep(  # noqa: B008
         raise HTTPException(status_code=502, detail=f"Cek plagiarisme gagal: {exc}") from exc
 
     is_pdf = (file.filename or "").lower().endswith(".pdf")
+    title = _clean_doc_title(doc_title, file.filename or "Cek Plagiarisme")
     res["has_original_pdf"] = is_pdf
     res["source_filename"] = file.filename
+    res["doc_title"] = title
     try:
         user = optional_user_from_request(request)
         if user:
             hist_id = record_history(
-                user["id"], "plagiarism-checker", file.filename or "Cek Plagiarisme",
-                text[:200], res,
+                user["id"], "plagiarism-checker", title, text[:200], res,
             )
             if hist_id and is_pdf:
                 save_tool_file(
@@ -858,6 +869,7 @@ async def _job_run_text(
 ) -> None:
     try:
         res = await _run_plagiarism_merged(text, top_k, exclude=exclude)
+        res["doc_title"] = title
         hist_id = None
         if user_id is not None:
             hist_id = await run_in_threadpool(
@@ -870,19 +882,20 @@ async def _job_run_text(
 
 async def _job_run_file(
     job_id: str, user_id: int | None, text: str, data: bytes, filename: str | None,
-    is_pdf: bool, top_k: int, exclude: dict | None = None,
+    is_pdf: bool, top_k: int, exclude: dict | None = None, doc_title: str = "",
 ) -> None:
     try:
         res = await _run_plagiarism_merged(
             text, top_k, _title_hint_from_filename(filename), exclude
         )
+        title = _clean_doc_title(doc_title, filename or "Cek Plagiarisme")
         res["has_original_pdf"] = is_pdf
         res["source_filename"] = filename
+        res["doc_title"] = title
         hist_id = None
         if user_id is not None:
             hist_id = await run_in_threadpool(
-                record_history, user_id, "plagiarism-checker",
-                filename or "Cek Plagiarisme", text[:200], res,
+                record_history, user_id, "plagiarism-checker", title, text[:200], res,
             )
             if hist_id and is_pdf:
                 await run_in_threadpool(
@@ -900,7 +913,7 @@ async def plagiarism_async_ep(body: PlagiarismIn, request: Request) -> dict:
     _guard(body.text)
     user = optional_user_from_request(request)
     uid = user["id"] if user else None
-    title = body.text[:60].strip() or "Cek Plagiarisme"
+    title = _clean_doc_title(body.title, body.text[:60].strip() or "Cek Plagiarisme")
     ex = body.exclude.model_dump() if body.exclude else None
     job_id = create_job(uid, "plagiarism-checker", title)
     _spawn(_job_run_text(job_id, uid, body.text, body.top_k, title, ex))
@@ -915,6 +928,7 @@ async def plagiarism_file_async_ep(  # noqa: B008
     exclude_bibliography: bool = False,
     exclude_quotes: bool = False,
     exclude_min_percent: float = 0.0,
+    doc_title: str = "",
 ) -> dict:
     """Versi async dari cek berkas; kembalikan `job_id` segera."""
     data = await file.read()
@@ -936,10 +950,12 @@ async def plagiarism_file_async_ep(  # noqa: B008
     uid = user["id"] if user else None
     is_pdf = (file.filename or "").lower().endswith(".pdf")
     ex = _exclude_from_query(exclude_bibliography, exclude_quotes, exclude_min_percent)
-    job_id = create_job(uid, "plagiarism-checker", file.filename or "Cek Plagiarisme")
+    title = _clean_doc_title(doc_title, file.filename or "Cek Plagiarisme")
+    job_id = create_job(uid, "plagiarism-checker", title)
     _spawn(
         _job_run_file(
-            job_id, uid, text, data, file.filename, is_pdf, min(max(top_k, 1), 60), ex
+            job_id, uid, text, data, file.filename, is_pdf, min(max(top_k, 1), 60), ex,
+            title,
         )
     )
     return {"job_id": job_id, "status": "processing"}
@@ -975,7 +991,10 @@ def plagiarism_report_ep(history_id: int, request: Request, dl: int = 0) -> Resp
         pdf = build_report_pdf(f["data"], item["result"] or {})
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Render laporan gagal: {exc}") from exc
-    base = (f.get("filename") or "laporan").rsplit(".", 1)[0]
+    base = (item.get("result") or {}).get("doc_title") or (
+        (f.get("filename") or "laporan").rsplit(".", 1)[0]
+    )
+    base = re.sub(r"[^A-Za-z0-9._-]+", "-", base).strip("-")[:80] or "laporan"
     name = f"laporan-integritas-{base}.pdf"
     disp = "attachment" if dl else "inline"
     return Response(

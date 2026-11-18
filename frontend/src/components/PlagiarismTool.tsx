@@ -26,6 +26,7 @@ export default function PlagiarismTool() {
         submitPlagiarismJob({
           text,
           file: original,
+          title: docTitle.trim(),
           topK: 30,
           exclude: {
             bibliography: exBib,

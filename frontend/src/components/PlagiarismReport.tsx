@@ -9,6 +9,8 @@ import {
   MATCH_GROUP_ORDER,
   buildHighlight,
   buildReportHtml,
+  publicationReason,
+  PUBLICATION_NOTE,
   verdictFor,
   toneForScore,
   type Report,
@@ -153,6 +155,46 @@ export default function PlagiarismReport({ report, documentText, docTitle = "", 
           Laporan mempertahankan tata letak berkas asli; temuan ditandai langsung di atas halaman
           dokumen beserta sampul ringkasan kemiripan.
         </p>
+      )}
+
+      {(docTitle || report.doc_title) && (
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-neutral-400">
+            Judul Dokumen
+          </div>
+          <div className="text-base font-bold text-neutral-900 dark:text-neutral-100">
+            {docTitle || report.doc_title}
+          </div>
+        </div>
+      )}
+
+      {report.publication_match && (
+        <div className="rounded-xl border border-amber-400 bg-amber-50 px-4 py-3 text-xs text-amber-900 dark:border-amber-500/60 dark:bg-amber-500/10 dark:text-amber-100">
+          <div className="text-sm font-extrabold">
+            📌 Dokumen ini identik dengan paper yang sudah terbit
+          </div>
+          <div className="mt-1 text-sm font-semibold">
+            {report.publication_match.url ? (
+              <a
+                href={report.publication_match.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline"
+              >
+                {report.publication_match.title || "Tanpa judul"}
+              </a>
+            ) : (
+              report.publication_match.title || "Tanpa judul"
+            )}
+          </div>
+          <div className="mt-0.5 opacity-80">
+            {report.publication_match.source}
+            {report.publication_match.doi ? ` · DOI ${report.publication_match.doi}` : ""}
+          </div>
+          <div className="mt-1 opacity-90">
+            {publicationReason(report.publication_match)} {PUBLICATION_NOTE}
+          </div>
+        </div>
       )}
 
       {report.report_id && (

@@ -47,12 +47,16 @@ export async function submitPlagiarismJob(opts: {
   file: File | null;
   topK?: number;
   exclude?: ExcludeOpts;
+  /** Judul dokumen yang diisi user; disimpan sebagai judul riwayat & tampil di laporan. */
+  title?: string;
 }): Promise<void> {
   const topK = opts.topK ?? 30;
   const ex = opts.exclude;
+  const docTitle = opts.title?.trim() ?? "";
   const start = opts.file
     ? await apiUpload<JobStart>(
         `/tools/plagiarism-file-async?top_k=${topK}` +
+          (docTitle ? `&doc_title=${encodeURIComponent(docTitle)}` : "") +
           (ex
             ? `&exclude_bibliography=${ex.bibliography}&exclude_quotes=${ex.quotes}` +
               `&exclude_min_percent=${ex.min_source_percent}`
@@ -62,6 +66,7 @@ export async function submitPlagiarismJob(opts: {
     : await apiPost<JobStart>("/tools/plagiarism-async", {
         text: opts.text,
         top_k: topK,
+        ...(docTitle ? { title: docTitle } : {}),
         ...(ex ? { exclude: ex } : {}),
       });
   await pollJob(start.job_id);

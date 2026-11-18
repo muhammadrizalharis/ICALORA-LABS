@@ -99,6 +99,7 @@ _MAX_MATCH_CANDIDATES = 200
 # kemungkinan adalah publikasi terbit itu sendiri (atau turunannya).
 _PUBMATCH_MIN = 0.75        # >= 75% teks sumber termuat di dokumen → cocok publikasi
 _PUBMATCH_MIN_WORDS = 40    # abaikan sumber terlalu pendek (judul/snippet)
+_PUBMATCH_COVER_MIN = 70.0  # >= 70% isi dokumen dijelaskan SATU sumber teks-penuh OA
 _CONTAIN_SHOW = 40.0        # tampilkan sumber ber-containment tinggi walau 0% tersorot
 
 # Bobot kontribusi tiap kategori pada Indeks Integritas (salinan penuh = 1.0,
@@ -649,6 +650,31 @@ def _normalize_exclude(exclude: dict | None) -> dict:
     }
 
 
+def _coverage_publication(online_sources: list[dict]) -> dict | None:
+    """Sumber teks-penuh OA yang menjelaskan >= _PUBMATCH_COVER_MIN% isi dokumen."""
+    best: dict | None = None
+    for s in online_sources:
+        cov = float(s.get("match_percent", 0.0) or 0.0)
+        if (
+            s.get("fulltext_oa")
+            and cov >= _PUBMATCH_COVER_MIN
+            and (best is None or cov > best["doc_coverage"])
+        ):
+            best = {
+                "title": s.get("title"),
+                "doi": s.get("doi"),
+                "url": s.get("url"),
+                "source": s.get("source"),
+                "containment": s.get("source_containment", 0.0),
+                "online": True,
+                "by_doi": False,
+                "by_title": False,
+                "by_coverage": True,
+                "doc_coverage": cov,
+            }
+    return best
+
+
 def check_plagiarism(
     doc: str,
     top_k: int = 30,
@@ -762,6 +788,7 @@ def check_plagiarism(
                 "snippet": body[:320].strip(),
                 "_fulltext": body,
                 "online": True,
+                "fulltext_oa": bool(c.get("fulltext_oa")),
             }
         )
 
@@ -861,6 +888,17 @@ def check_plagiarism(
     for s in sources + online_sources:
         s["match_percent"] = contrib.get(_skey(s), 0.0)
         s["similarity"] = s["match_percent"]
+
+    # Sinyal CAKUPAN: satu sumber teks-PENUH open-access yang menjelaskan sebagian
+    # besar isi DOKUMEN berarti dokumen itu adalah paper tersebut (atau bagiannya,
+    # mis. diunggah mulai dari Pendahuluan tanpa judul/abstrak, sehingga porsi
+    # teks sumber yang termuat kecil). Dipakai bila sinyal DOI/judul/containment
+    # tak terpenuhi.
+    if publication_match is None:
+        publication_match = _coverage_publication(online_sources)
+    if publication_match is not None and "doc_coverage" not in publication_match:
+        pkey = (publication_match.get("doi") or publication_match.get("title") or "")
+        publication_match["doc_coverage"] = contrib.get(pkey.lower().strip(), 0.0)
 
     # Komponen parafrase/leksikal dihitung dari SELURUH kandidat (termasuk yang
     # nanti disembunyikan) agar deteksi parafrase tak hilang saat memfilter.
