@@ -220,6 +220,15 @@ def _cover_html(report: dict) -> str:
         else ""
     )
     pub_block = _publication_block(report.get("publication_match"))
+    rl = report.get("online_rate_limited") or {}
+    if rl:
+        who = ", ".join(f"{_esc(str(k))} ×{int(v)}" for k, v in rl.items())
+        pub_block += (
+            '<div class="note" style="margin:4px 0">Penyedia sumber daring membatasi '
+            f"permintaan saat pemeriksaan ini ({who}); sebagian sumber mungkin tidak "
+            "terjangkau sehingga skor bisa lebih rendah dari seharusnya. Periksa ulang "
+            "bila perlu.</div>"
+        )
     if report.get("ocr_used"):
         pub_block += (
             '<div class="note" style="margin:4px 0">Dokumen ini PDF hasil pindaian; teksnya '

@@ -52,6 +52,8 @@ from app.services.llm.tasks import (
 )
 from app.services.plagiarism import check_plagiarism
 from app.services.plagiarism.online import (
+    RATE_LIMIT_NOTE_MIN,
+    begin_rate_limit_tracking,
     identity_candidates,
     online_candidates,
     online_check,
@@ -741,6 +743,7 @@ async def _run_plagiarism_merged(
     adalah pengaturan Exclude pra-pengecekan yang dikunci pada hasil."""
     extra: list[dict] = []
     providers: dict = {}
+    rate_limited = begin_rate_limit_tracking()
     if settings.online_check_enabled:
         # 1) PASS IDENTITAS DULU (cepat, ~9–60 dtk): resolusi judul/DOI + unduh
         #    teks-penuh paper dokumen itu sendiri. WAJIB dijalankan SEBELUM
@@ -782,6 +785,8 @@ async def _run_plagiarism_merged(
         extra = list(merged.values())
     res = await run_in_threadpool(check_plagiarism, text, top_k, extra, exclude)
     res["online_merged"] = bool(extra)
+    if sum(rate_limited.values()) >= RATE_LIMIT_NOTE_MIN:
+        res["online_rate_limited"] = dict(rate_limited)
     res["online_providers"] = [
         {"name": k, "hits": v} for k, v in sorted(providers.items(), key=lambda kv: -kv[1])
     ]

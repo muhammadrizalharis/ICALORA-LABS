@@ -16,10 +16,12 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import re
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from html import unescape as _html_unescape
-from urllib.parse import quote_plus, urljoin
+from urllib.parse import quote_plus, urljoin, urlparse
 from xml.etree import ElementTree as ET
 
 import httpx
@@ -69,6 +71,65 @@ _FT_FETCH_SEM: asyncio.Semaphore | None = None
 _MAILTO = "noreply@icalora-labs.local"  # OpenAlex/Crossref "polite pool"
 
 
+_log = logging.getLogger(__name__)
+
+# ── Pemantauan batas-laju (HTTP 429) ─────────────────────────────────────────
+# Bila Crossref/OpenAlex membatasi permintaan, pencarian daring diam-diam
+# menghasilkan lebih sedikit sumber sehingga skor bisa lebih rendah dari
+# seharusnya. Hitung per-job (untuk catatan di laporan) dan per-hari di Redis
+# (untuk pemantauan admin), serta catat peringatan di log.
+_RL_JOB: ContextVar[dict | None] = ContextVar("icalora_rate_limited", default=None)
+_RL_NAMES = ("openalex", "crossref", "unpaywall", "arxiv", "core", "other")
+RATE_LIMIT_NOTE_MIN = 20  # ambang 429 per-job sebelum laporan memberi catatan
+
+
+def begin_rate_limit_tracking() -> dict:
+    """Mulai penghitung 429 untuk job ini (diwarisi semua task anak)."""
+    counter: dict = {}
+    _RL_JOB.set(counter)
+    return counter
+
+
+def _provider_name(url: str) -> str:
+    host = (urlparse(url).hostname or "").lower()
+    for name in _RL_NAMES[:-1]:
+        if name in host:
+            return name
+    return "other"
+
+
+def _record_rate_limit(url: str) -> None:
+    name = _provider_name(url)
+    counter = _RL_JOB.get()
+    if counter is not None:
+        counter[name] = counter.get(name, 0) + 1
+    try:
+        r = redis_client()
+        key = f"online:ratelimit:{datetime.now(timezone.utc):%Y-%m-%d}:{name}"
+        n = r.incr(key)
+        if n == 1:
+            r.expire(key, 3 * 24 * 3600)
+        if n in (1, 100, 1000, 10000):
+            _log.warning("Batas-laju (429) dari %s: %d kali hari ini", name, n)
+    except Exception:  # noqa: BLE001, S110
+        pass
+
+
+def rate_limit_usage() -> dict:
+    """Jumlah 429 per penyedia hari ini (UTC) untuk pemantauan."""
+    day = f"{datetime.now(timezone.utc):%Y-%m-%d}"
+    out: dict = {"day": day, "hits": {}}
+    try:
+        r = redis_client()
+        for name in _RL_NAMES:
+            n = int(r.get(f"online:ratelimit:{day}:{name}") or 0)
+            if n:
+                out["hits"][name] = n
+    except Exception:  # noqa: BLE001
+        out["error"] = "redis tidak tersedia"
+    return out
+
+
 async def _get_json(client: httpx.AsyncClient, url: str, params: dict, headers: dict | None = None):
     """GET dengan satu kali percobaan ulang untuk menahan kegagalan sesaat.
 
@@ -80,6 +141,7 @@ async def _get_json(client: httpx.AsyncClient, url: str, params: dict, headers: 
         try:
             r = await client.get(url, params=params, headers=headers)
             if r.status_code == 429:
+                _record_rate_limit(url)
                 ra = r.headers.get("Retry-After")
                 try:
                     delay = float(ra) if ra is not None else 0.0
@@ -476,7 +538,8 @@ async def _enrich_fulltext(
 
     def _rank(c: dict) -> float:
         base = 1.0 if (c.get("doi") or "").lower() in own_dois else 0.0
-        return base + _title_sim(c) + _abs_containment(c) + _title_in_doc(c)
+        ft = min(int(c.get("_ft_hits", 0)), 4) * 0.25
+        return base + _title_sim(c) + _abs_containment(c) + _title_in_doc(c) + ft
 
     def _passes_gate(c: dict) -> bool:
         return (
@@ -484,6 +547,7 @@ async def _enrich_fulltext(
             or _title_sim(c) >= 0.6
             or _abs_containment(c) >= 0.5
             or _title_in_doc(c) >= 0.9
+            or int(c.get("_ft_hits", 0)) >= _FT_MIN_HITS
         )
 
     identity = [c for c in cands if _passes_gate(c)]
@@ -654,7 +718,10 @@ async def _q_openalex(client: httpx.AsyncClient, sentence: str) -> list[dict]:
     )
     if r is None:
         return []
-    data = r.json()
+    return _openalex_items(r.json())
+
+
+def _openalex_items(data: dict) -> list[dict]:
     out = []
     for w in data.get("results", [])[:_PER_PROVIDER]:
         abstract = _clean(_openalex_abstract(w.get("abstract_inverted_index")))
@@ -671,6 +738,94 @@ async def _q_openalex(client: httpx.AsyncClient, sentence: str) -> list[dict]:
             }
         )
     return out
+
+
+_FT_MAX_PHRASES = 6
+_FT_PHRASE_WORDS = 9
+_FT_MIN_HITS = 2  # kandidat dikembalikan >= 2 frasa berbeda = pembagi teks nyata
+_FT_SENT_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z])")
+_FT_REFS_RE = re.compile(
+    r"(?im)^\s*(?:\d+\.?\s*)?(?:references|daftar\s+pustaka|bibliography)\s*$"
+)
+
+
+def _fulltext_phrases(doc: str, n: int = _FT_MAX_PHRASES) -> list[str]:
+    """Frasa 9-kata dari kalimat isi dokumen (tersebar merata, tanpa daftar pustaka).
+
+    Dipakai untuk pencarian TEKS PENUH OpenAlex (`fulltext.search`) — satu-satunya
+    cara menemukan paper terbit dari dokumen yang diunggah tanpa judul/abstrak
+    (mulai dari Pendahuluan), termasuk jurnal lokal yang abstraknya tak informatif.
+    """
+    text = doc or ""
+    refs = list(_FT_REFS_RE.finditer(text))
+    if refs and refs[-1].start() > len(text) * 0.4:
+        text = text[: refs[-1].start()]
+    flat = re.sub(r"\s+", " ", text)
+    eligible: list[str] = []
+    for sent in _FT_SENT_RE.split(flat):
+        if not 80 <= len(sent) <= 240:
+            continue
+        low = sent.lower()
+        if "http" in low or "doi" in low or sum(c.isdigit() for c in sent) > 6:
+            continue
+        words = re.findall(r"[A-Za-z\u00C0-\u024F]{3,}", sent)
+        if len(words) < _FT_PHRASE_WORDS + 3:
+            continue
+        eligible.append(" ".join(words[:_FT_PHRASE_WORDS]))
+    if not eligible:
+        return []
+    step = max(1, len(eligible) // n)
+    out: list[str] = []
+    for phrase in eligible[::step]:
+        if phrase not in out:
+            out.append(phrase)
+        if len(out) >= n:
+            break
+    return out
+
+
+async def _q_openalex_fulltext(client: httpx.AsyncClient, phrase: str) -> list[dict]:
+    """Cari frasa di TEKS PENUH karya OpenAlex (filter `fulltext.search`)."""
+    r = await _get_json(
+        client,
+        "https://api.openalex.org/works",
+        _oa_params({"filter": f'fulltext.search:"{phrase}"', "per_page": 5}),
+    )
+    if r is None:
+        return []
+    return _openalex_items(r.json())
+
+
+async def _q_fulltext_phrases(client: httpx.AsyncClient, doc: str) -> list[dict]:
+    """Kandidat yang muncul untuk >= _FT_MIN_HITS frasa isi dokumen berbeda.
+
+    Menandai `_ft_hits` (jumlah frasa yang cocok) agar gerbang pengunduhan
+    teks-penuh dapat menjadikannya kandidat identitas tanpa perlu judul/abstrak.
+    """
+    phrases = _fulltext_phrases(doc)
+    if not phrases:
+        return []
+    sem = asyncio.Semaphore(3)
+
+    async def _one(ph: str) -> list[dict]:
+        async with sem:
+            try:
+                return await _q_openalex_fulltext(client, ph)
+            except Exception:  # noqa: BLE001
+                return []
+
+    results = await asyncio.gather(*(_one(p) for p in phrases))
+    merged: dict[str, dict] = {}
+    for items in results:
+        seen_here: set[str] = set()
+        for it in items:
+            key = (it.get("doi") or it.get("title") or "").lower().strip()
+            if not key or key in seen_here:
+                continue
+            seen_here.add(key)
+            cur = merged.setdefault(key, it)
+            cur["_ft_hits"] = cur.get("_ft_hits", 0) + 1
+    return [c for c in merged.values() if c.get("_ft_hits", 0) >= _FT_MIN_HITS]
 
 
 async def _q_crossref(client: httpx.AsyncClient, sentence: str) -> list[dict]:
@@ -1368,6 +1523,7 @@ async def _resolve_publication(
     for q in queries:
         if q:
             tasks.append(_q_title_throttled(client, q))
+    tasks.append(_q_fulltext_phrases(client, doc))
     results = await asyncio.gather(*tasks, return_exceptions=True)
     out: list[dict] = []
     for res in results:
@@ -1442,6 +1598,10 @@ async def _gather_candidates(
                 cand["doc_id"] = None
                 seen[key] = cand
             else:
+                if cand.get("_ft_hits"):
+                    seen[key]["_ft_hits"] = max(
+                        int(seen[key].get("_ft_hits", 0)), int(cand["_ft_hits"])
+                    )
                 if not seen[key].get("_oa_url") and cand.get("_oa_url"):
                     seen[key]["_oa_url"] = cand["_oa_url"]
                 if len(cand["_fulltext"]) > len(seen[key].get("_fulltext") or ""):
@@ -1477,6 +1637,21 @@ async def online_candidates(doc: str, title_hint: str = "") -> tuple[list[dict],
     return candidates, provider_hits
 
 
+def _merge_dup(seen: dict[str, dict], key: str, cand: dict) -> None:
+    """Gabung kandidat duplikat: pertahankan teks terpanjang + `_ft_hits` tertinggi."""
+    cur = seen.get(key)
+    if cur is None:
+        seen[key] = cand
+        return
+    hits = max(int(cur.get("_ft_hits", 0)), int(cand.get("_ft_hits", 0)))
+    if len(cand.get("_fulltext") or "") > len(cur.get("_fulltext") or ""):
+        if not cand.get("_oa_url") and cur.get("_oa_url"):
+            cand["_oa_url"] = cur["_oa_url"]
+        seen[key] = cur = cand
+    if hits:
+        cur["_ft_hits"] = hits
+
+
 async def identity_candidates(doc: str, title_hint: str = "") -> list[dict]:
     """Pass RINGAN & CEPAT: temukan paper terbit yang MERUPAKAN dokumen ini
     (via judul/DOI sendiri) lalu perkaya dengan TEKS PENUH open-access.
@@ -1502,10 +1677,7 @@ async def identity_candidates(doc: str, title_hint: str = "") -> list[dict]:
                     continue
                 key = (cand.get("doi") or cand["title"]).lower().strip()
                 cand["doc_id"] = None
-                if key not in seen:
-                    seen[key] = cand
-                elif len(cand.get("_fulltext") or "") > len(seen[key].get("_fulltext") or ""):
-                    seen[key] = cand
+                _merge_dup(seen, key, cand)
             cands = list(seen.values())
             if settings.online_fulltext_enabled:
                 await _enrich_fulltext(client, cands, doc, title_hint)
