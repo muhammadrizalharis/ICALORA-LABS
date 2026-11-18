@@ -119,7 +119,9 @@ def _publication_block(pm: dict | None) -> str:
         '<div style="margin:6px 0 4px;padding:10px 12px;border:1px solid #f59e0b;'
         'background:#fffbeb;border-radius:6px">'
         '<div style="font-weight:800;font-size:12px;color:#92400e">'
-        "📌 Dokumen ini identik dengan paper yang sudah terbit</div>"
+        '<span style="background:#f59e0b;color:#fff;border-radius:3px;padding:0 5px;'
+        'font-size:9px;font-weight:700;margin-right:6px">TERBIT</span>'
+        "Dokumen ini identik dengan paper yang sudah terbit</div>"
         f'<div style="font-weight:700;margin-top:3px">{title}</div>'
         f'<div class="note" style="margin-top:2px">{_esc(str(pm.get("source") or ""))}{ref}</div>'
         f'<div class="note">{_esc(why)} Bila ini karya Anda sendiri, kecocokan tinggi '
@@ -200,7 +202,7 @@ def _cover_html(report: dict) -> str:
         ex_labels.append(f"kecualikan sumber &lt; {float(ex['min_source_percent']):g}%")
     if ex_labels:
         exclude_note = (
-            '<div class="note" style="margin-top:6px">🔒 Pengaturan Exclude (dikunci saat '
+            '<div class="note" style="margin-top:6px">Pengaturan Exclude (dikunci saat '
             f"pemeriksaan): {_esc(', '.join(ex_labels))}.</div>"
         )
 
