@@ -63,3 +63,48 @@ def test_redis_down_is_failsafe(monkeypatch):
     monkeypatch.setattr(online, "redis_client", boom)
     online._record_rate_limit("https://api.openalex.org/works")
     assert "error" in online.rate_limit_usage()
+
+
+def test_daily_budget_429_trips_breaker_and_stops_calls(monkeypatch):
+    fake = _FakeRedis()
+    fake.set = lambda k, v, ex=None: fake.d.__setitem__(k, 1)
+    monkeypatch.setattr(online, "redis_client", lambda: fake)
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        return httpx.Response(
+            429, json={"reason": "daily_budget", "retryAfter": 27553, "dailyRemainingUsd": 0}
+        )
+
+    async def run():
+        counter = online.begin_rate_limit_tracking()
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            a = await online._get_json(client, "https://api.openalex.org/works", {})
+            b = await online._get_json(client, "https://api.openalex.org/works", {})
+            c = await online._get_json(client, "https://api.crossref.org/works", {})
+        return counter, a, b, c
+
+    counter, a, b, c = asyncio.run(run())
+    assert a is None and b is None and c is None
+    # OpenAlex 1x (lalu diputus) + Crossref 1x; panggilan ke-2 OpenAlex tak dikirim.
+    assert calls["n"] == 2
+    assert counter.get(online.BUDGET_FLAG) is True
+    assert online.rate_limit_usage()["openalex_budget_exhausted"] is True
+
+
+def test_plain_429_does_not_trip_breaker(monkeypatch):
+    fake = _FakeRedis()
+    fake.set = lambda k, v, ex=None: fake.d.__setitem__(k, 1)
+    monkeypatch.setattr(online, "redis_client", lambda: fake)
+
+    def handler(request):
+        return httpx.Response(429, json={"reason": "burst"}, headers={"Retry-After": "600"})
+
+    async def run():
+        online.begin_rate_limit_tracking()
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await online._get_json(client, "https://api.openalex.org/works", {})
+
+    assert asyncio.run(run()) is None
+    assert online.rate_limit_usage()["openalex_budget_exhausted"] is False
