@@ -114,6 +114,12 @@ class Settings(BaseSettings):
     # OpenAlex tanpa key memakai kuota harian gratis yang DIBAGI per-IP (bisa habis
     # → 429 untuk semua). Key gratis dari openalex.org memberi kuota sendiri.
     openalex_api_key: str = Field(default="")
+    # Mode hemat: kuota gratis OpenAlex ($1/hari ≈ 1.000 pencarian) dijaga untuk jalur
+    # penting (identitas paper terbit). Pencarian PER-KALIMAT di fase luas — paling
+    # boros dan hasilnya kecil (hanya judul/abstrak) — dimatikan; penyedia lain
+    # (Crossref, Europe PMC, DOAJ, arXiv, web search) tetap menutupnya.
+    openalex_enabled: bool = Field(default=True)  # False = OpenAlex tak dipanggil sama sekali
+    openalex_sentence_search: bool = Field(default=False)
     core_enabled: bool = Field(default=True)
     # Ambil teks-PENUH open-access (PDF/HTML) untuk paper yang teridentifikasi
     # sebagai publikasi dokumen (DOI/judul sendiri). Diproses ephemeral di

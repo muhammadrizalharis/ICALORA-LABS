@@ -90,6 +90,18 @@ def begin_rate_limit_tracking() -> dict:
     return counter
 
 
+def _count_openalex_call() -> None:
+    """Hitung panggilan OpenAlex per job (untuk memantau pemakaian kuota harian)."""
+    counter = _RL_JOB.get()
+    if counter is not None:
+        counter["_oa_calls"] = counter.get("_oa_calls", 0) + 1
+
+
+def _rate_limited_total() -> int:
+    counter = _RL_JOB.get() or {}
+    return sum(v for k, v in counter.items() if not k.startswith("_"))
+
+
 def _is_daily_budget(r: httpx.Response) -> bool:
     try:
         return (r.json() or {}).get("reason") == "daily_budget"
@@ -183,11 +195,15 @@ async def _get_json(client: httpx.AsyncClient, url: str, params: dict, headers: 
     bila nilainya kecil (<=2 dtk); selebihnya menyerah anggun → hasil kosong.
     """
     is_openalex = "openalex.org" in url
+    if is_openalex and not settings.openalex_enabled:
+        return None
     if is_openalex and _openalex_budget_exhausted():
         _mark_budget_exhausted()
         return None
     for attempt in range(2):
         try:
+            if is_openalex:
+                _count_openalex_call()
             r = await client.get(url, params=params, headers=headers)
             if r.status_code == 429:
                 _record_rate_limit(url)
@@ -538,6 +554,22 @@ async def _unpaywall_oa_pdf(client: httpx.AsyncClient, doi: str | None) -> str |
     return loc.get("url_for_pdf") or None
 
 
+def _title_in_doc_score(c: dict, doc: str) -> float:
+    """Kandidat TANPA abstrak (paper baru, abstrak belum terindeks) tak bisa dinilai
+    lewat abstrak. Ukur seberapa banyak kata isi JUDUL kandidat termuat di dokumen:
+    judul paper yang menjadi dokumen ini hampir selalu termuat utuh. Hanya sebagai
+    gerbang pengunduhan teks penuh — skor akhir tetap ditentukan pencocokan
+    baris-per-baris."""
+    if len(_WORD_RE.findall(c.get("_fulltext") or "")) >= 40:
+        return 0.0
+    tw = {w.lower() for w in re.findall(r"[A-Za-z]{4,}", c.get("title") or "")}
+    tw -= _GENERIC_TERMS
+    if len(tw) < 5:
+        return 0.0
+    dw = {w.lower() for w in re.findall(r"[A-Za-z]{4,}", doc)}
+    return len(tw & dw) / len(tw)
+
+
 async def _enrich_fulltext(
     client: httpx.AsyncClient, cands: list[dict], doc: str, title_hint: str = ""
 ) -> None:
@@ -575,19 +607,7 @@ async def _enrich_fulltext(
         return len(ssh & doc_sh) / len(ssh)
 
     def _title_in_doc(c: dict) -> float:
-        # Kandidat TANPA abstrak (paper baru, abstrak belum terindeks) tak bisa
-        # dinilai lewat abstrak. Ukur seberapa banyak kata isi JUDUL kandidat
-        # termuat di dokumen: judul paper yang menjadi dokumen ini hampir
-        # selalu termuat utuh. Hanya sebagai gerbang pengunduhan teks penuh —
-        # skor akhir tetap ditentukan pencocokan baris-per-baris.
-        if len(_WORD_RE.findall(c.get("_fulltext") or "")) >= 40:
-            return 0.0
-        tw = {w.lower() for w in re.findall(r"[A-Za-z]{4,}", c.get("title") or "")}
-        tw -= _GENERIC_TERMS
-        if len(tw) < 5:
-            return 0.0
-        dw = {w.lower() for w in re.findall(r"[A-Za-z]{4,}", doc)}
-        return len(tw & dw) / len(tw)
+        return _title_in_doc_score(c, doc)
 
     def _rank(c: dict) -> float:
         base = 1.0 if (c.get("doi") or "").lower() in own_dois else 0.0
@@ -1365,7 +1385,12 @@ def _provider_plan(budget: int = _SENT_CAP) -> list[tuple]:
     def _slot(weight: float, cap: int) -> int:
         return max(8, min(cap, round(budget * weight)))
 
-    plan = [(fn, conc, _slot(weight, cap)) for fn, conc, weight, cap in _PROVIDER_PLAN]
+    plan = [
+        (fn, conc, _slot(weight, cap))
+        for fn, conc, weight, cap in _PROVIDER_PLAN
+        if fn is not _q_openalex
+        or (settings.openalex_enabled and settings.openalex_sentence_search)
+    ]
     if settings.core_enabled and settings.core_api_key:
         plan.append((_q_core, 4, _slot(1.00, _SENT_CAP)))
     return plan
@@ -1545,8 +1570,11 @@ async def _q_title_throttled(client: httpx.AsyncClient, title: str) -> list[dict
     if _IDENTITY_SEM is None:
         _IDENTITY_SEM = asyncio.Semaphore(4)
     async with _IDENTITY_SEM:
+        before = _rate_limited_total()
         res = await _q_title(client, title)
-        if not res:
+        # Retry hanya bila hasil kosong AKIBAT 429; kosong yang sah tak diulang
+        # (tiap ulang memakan kuota OpenAlex).
+        if not res and _rate_limited_total() > before:
             await asyncio.sleep(2.0)
             res = await _q_title(client, title)
         return res
@@ -1572,12 +1600,26 @@ async def _resolve_publication(
     if hint and len(_WORD_RE.findall(hint)) >= 4:
         queries.add(hint)
     queries.update(_abstract_queries(doc))
-    queries.update(_distinct_term_queries(doc))
     for q in queries:
         if q:
             tasks.append(_q_title_throttled(client, q))
     tasks.append(_q_fulltext_phrases(client, doc))
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+    out = _flatten(await asyncio.gather(*tasks, return_exceptions=True))
+    # Tahap 2 (hemat kuota): query istilah-khas (±12 panggilan) hanya dijalankan bila
+    # tahap 1 belum menemukan kandidat identitas yang meyakinkan.
+    if not _has_identity_hit(out, doc, hint):
+        extra = [q for q in _distinct_term_queries(doc) if q not in queries]
+        out.extend(
+            _flatten(
+                await asyncio.gather(
+                    *(_q_title_throttled(client, q) for q in extra), return_exceptions=True
+                )
+            )
+        )
+    return out
+
+
+def _flatten(results: list) -> list[dict]:
     out: list[dict] = []
     for res in results:
         if isinstance(res, dict):
@@ -1587,8 +1629,29 @@ async def _resolve_publication(
     return out
 
 
+def _has_identity_hit(cands: list[dict], doc: str, title_hint: str = "") -> bool:
+    """Ada kandidat yang meyakinkan sebagai paper terbit dokumen ini?
+
+    Sinyal kuat: DOI sendiri, muncul untuk >= 2 frasa isi, kemiripan judul tinggi,
+    atau semua kata judul kandidat (tanpa abstrak) termuat di dokumen.
+    """
+    own = {d.lower() for d in _extract_own_dois(doc)}
+    titles = [t for t in (_extract_title(doc), _clean(title_hint or "")) if t]
+    for c in cands:
+        if (c.get("doi") or "").lower() in own:
+            return True
+        if int(c.get("_ft_hits", 0)) >= _FT_MIN_HITS:
+            return True
+        ct = c.get("title") or ""
+        if any(_title_jaccard(ct, t) >= 0.6 for t in titles):
+            return True
+        if _title_in_doc_score(c, doc) >= 0.9:
+            return True
+    return False
+
+
 async def _gather_candidates(
-    doc: str, title_hint: str = ""
+    doc: str, title_hint: str = "", skip_identity: bool = False
 ) -> tuple[list[dict], list[str], dict]:
     budget = _sentence_budget(doc)
     sentences = _risky_sentences(doc, budget)
@@ -1608,11 +1671,13 @@ async def _gather_candidates(
             for s in sentences[:sent_budget]:
                 tasks.append(_run(provider, psem, s))
         # Resolusi identitas publikasi (DOI + judul) berjalan paralel.
-        pub_task = asyncio.create_task(
+        # Dilewati bila pass identitas SUDAH dijalankan sebelumnya (hemat kuota:
+        # hasilnya digabung terpisah oleh pemanggil).
+        pub_task = None if skip_identity else asyncio.create_task(
             _resolve_publication(doc=doc, client=client, title_hint=title_hint)
         )
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        pub_results = await pub_task
+        pub_results = await pub_task if pub_task is not None else []
         # Fase VERIFIER web search: HANYA kalimat paling khas. SearXNG lokal
         # (gratis, tanpa kuota) dijalankan PARALEL (cepat); Tavily/Brave (API
         # berbayar/berkuota) tetap serial dengan jeda kecil menghormati batas
@@ -1674,7 +1739,9 @@ async def _gather_candidates(
     return candidates, sentences, provider_hits
 
 
-async def online_candidates(doc: str, title_hint: str = "") -> tuple[list[dict], dict]:
+async def online_candidates(
+    doc: str, title_hint: str = "", skip_identity: bool = False
+) -> tuple[list[dict], dict]:
     """Kumpulkan kandidat sumber daring (tanpa-unduh) untuk digabungkan ke
     pemeriksaan plagiarisme utama. Kembalikan (kandidat, hits-per-penyedia).
     Aman dipanggil opsional: galat jaringan menghasilkan daftar kosong.
@@ -1684,7 +1751,9 @@ async def online_candidates(doc: str, title_hint: str = "") -> tuple[list[dict],
     if not doc or not _active_providers():
         return [], {}
     try:
-        candidates, _sentences, provider_hits = await _gather_candidates(doc, title_hint)
+        candidates, _sentences, provider_hits = await _gather_candidates(
+            doc, title_hint, skip_identity
+        )
     except Exception:  # noqa: BLE001
         return [], {}
     return candidates, provider_hits

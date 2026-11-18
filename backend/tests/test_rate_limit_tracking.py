@@ -45,7 +45,10 @@ def test_429_counted_per_job_and_per_day(monkeypatch):
 
     counter, r1, r2 = asyncio.run(run())
     assert r1 is None and r2 is None
-    assert counter == {"openalex": 1, "crossref": 1}
+    assert {k: v for k, v in counter.items() if not k.startswith("_")} == {
+        "openalex": 1,
+        "crossref": 1,
+    }
     usage = online.rate_limit_usage()
     assert usage["hits"] == {"openalex": 1, "crossref": 1}
 
