@@ -52,6 +52,7 @@ from app.services.llm.tasks import (
 )
 from app.services.plagiarism import check_plagiarism
 from app.services.plagiarism.online import (
+    BUDGET_FLAG,
     RATE_LIMIT_NOTE_MIN,
     begin_rate_limit_tracking,
     identity_candidates,
@@ -787,8 +788,11 @@ async def _run_plagiarism_merged(
         extra = list(merged.values())
     res = await run_in_threadpool(check_plagiarism, text, top_k, extra, exclude)
     res["online_merged"] = bool(extra)
-    if sum(rate_limited.values()) >= RATE_LIMIT_NOTE_MIN:
-        res["online_rate_limited"] = dict(rate_limited)
+    if rate_limited.get(BUDGET_FLAG):
+        res["online_budget_exhausted"] = True
+    counts = {k: v for k, v in rate_limited.items() if not k.startswith("_")}
+    if sum(counts.values()) >= RATE_LIMIT_NOTE_MIN:
+        res["online_rate_limited"] = counts
     res["online_providers"] = [
         {"name": k, "hits": v} for k, v in sorted(providers.items(), key=lambda kv: -kv[1])
     ]

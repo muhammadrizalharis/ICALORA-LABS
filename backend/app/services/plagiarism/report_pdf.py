@@ -220,6 +220,12 @@ def _cover_html(report: dict) -> str:
         else ""
     )
     pub_block = _publication_block(report.get("publication_match"))
+    if report.get("online_budget_exhausted"):
+        pub_block += (
+            '<div class="note" style="margin:4px 0">Kuota harian OpenAlex habis saat '
+            "pemeriksaan ini; sumber dari OpenAlex tidak dapat diperiksa sehingga skor bisa "
+            "lebih rendah dari seharusnya. Periksa ulang setelah kuota di-reset.</div>"
+        )
     rl = report.get("online_rate_limited") or {}
     if rl:
         who = ", ".join(f"{_esc(str(k))} ×{int(v)}" for k, v in rl.items())

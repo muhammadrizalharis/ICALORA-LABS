@@ -91,6 +91,8 @@ export interface Report {
   ocr_used?: boolean;
   /** Jumlah HTTP 429 per penyedia saat pemeriksaan (bila signifikan). */
   online_rate_limited?: Record<string, number>;
+  /** Kuota harian OpenAlex habis saat pemeriksaan. */
+  online_budget_exhausted?: boolean;
   online_merged?: boolean;
   online_providers?: { name: string; hits: number }[];
 }

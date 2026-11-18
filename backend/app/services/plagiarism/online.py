@@ -90,6 +90,20 @@ def begin_rate_limit_tracking() -> dict:
     return counter
 
 
+def _is_daily_budget(r: httpx.Response) -> bool:
+    try:
+        return (r.json() or {}).get("reason") == "daily_budget"
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _retry_after_of(r: httpx.Response) -> float | None:
+    try:
+        return float((r.json() or {}).get("retryAfter"))
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _provider_name(url: str) -> str:
     host = (urlparse(url).hostname or "").lower()
     for name in _RL_NAMES[:-1]:
@@ -115,12 +129,43 @@ def _record_rate_limit(url: str) -> None:
         pass
 
 
+# ── Pemutus-sirkuit kuota harian OpenAlex ────────────────────────────────────
+# Kuota gratis OpenAlex ($1/hari, ±1.000 pencarian) bisa habis. Setelah habis,
+# setiap panggilan pasti 429 sampai reset (tengah malam UTC) — jadi berhenti
+# memanggil (hemat waktu job) dan tandai agar laporan memberi tahu pengguna.
+_OA_BREAKER_KEY = "online:openalex:budget_exhausted"
+BUDGET_FLAG = "_budget_exhausted"
+
+
+def _openalex_budget_exhausted() -> bool:
+    try:
+        return bool(redis_client().get(_OA_BREAKER_KEY))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _trip_openalex_breaker(retry_after: float | int | None) -> None:
+    ttl = int(min(max(float(retry_after or 3600), 60), 86400))
+    try:
+        redis_client().set(_OA_BREAKER_KEY, "1", ex=ttl)
+        _log.warning("Kuota harian OpenAlex habis; panggilan dihentikan %d detik", ttl)
+    except Exception:  # noqa: BLE001, S110
+        pass
+
+
+def _mark_budget_exhausted() -> None:
+    counter = _RL_JOB.get()
+    if counter is not None:
+        counter[BUDGET_FLAG] = True
+
+
 def rate_limit_usage() -> dict:
     """Jumlah 429 per penyedia hari ini (UTC) untuk pemantauan."""
     day = f"{datetime.now(timezone.utc):%Y-%m-%d}"
-    out: dict = {"day": day, "hits": {}}
+    out: dict = {"day": day, "hits": {}, "openalex_budget_exhausted": False}
     try:
         r = redis_client()
+        out["openalex_budget_exhausted"] = bool(r.get(_OA_BREAKER_KEY))
         for name in _RL_NAMES:
             n = int(r.get(f"online:ratelimit:{day}:{name}") or 0)
             if n:
@@ -137,11 +182,19 @@ async def _get_json(client: httpx.AsyncClient, url: str, params: dict, headers: 
     secara membabi-buta (akan 429 lagi). Hormati header `Retry-After` hanya
     bila nilainya kecil (<=2 dtk); selebihnya menyerah anggun → hasil kosong.
     """
+    is_openalex = "openalex.org" in url
+    if is_openalex and _openalex_budget_exhausted():
+        _mark_budget_exhausted()
+        return None
     for attempt in range(2):
         try:
             r = await client.get(url, params=params, headers=headers)
             if r.status_code == 429:
                 _record_rate_limit(url)
+                if is_openalex and _is_daily_budget(r):
+                    _trip_openalex_breaker(_retry_after_of(r))
+                    _mark_budget_exhausted()
+                    return None
                 ra = r.headers.get("Retry-After")
                 try:
                     delay = float(ra) if ra is not None else 0.0
