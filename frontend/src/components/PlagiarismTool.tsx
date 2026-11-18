@@ -64,6 +64,7 @@ export default function PlagiarismTool() {
           onChange={setText}
           onFile={setFile}
           uploadOnly
+          allowScanned
           accept=".pdf"
           acceptHint="Hanya PDF (maks 10 MB) — agar laporan berformat identik bisa dibuat"
           rows={10}

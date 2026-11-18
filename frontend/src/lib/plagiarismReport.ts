@@ -87,6 +87,8 @@ export interface Report {
   has_original_pdf?: boolean;
   source_filename?: string;
   doc_title?: string;
+  /** Teks diperoleh lewat OCR (PDF pindaian). */
+  ocr_used?: boolean;
   online_merged?: boolean;
   online_providers?: { name: string; hits: number }[];
 }

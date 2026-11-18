@@ -25,7 +25,15 @@ from app.services.auth import (
 )
 from app.services.authorship import analyze_authorship
 from app.services.citation import find_citations
-from app.services.file_extract import MAX_UPLOAD_BYTES, extract_text
+from app.services.file_extract import (
+    MAX_UPLOAD_BYTES,
+    OcrUnavailableError,
+    extract_text,
+    is_scanned_pdf,
+    ocr_available,
+    ocr_pdf,
+    pdf_page_count,
+)
 from app.services.grammar.report_pdf import build_grammar_report_pdf
 from app.services.hidden_text import check_hidden_text
 from app.services.jobs import complete_job, create_job, fail_job, get_job
@@ -288,6 +296,16 @@ class PublikasiIn(TextIn):
     top_k: int = Field(default=15, ge=1, le=40)
 
 
+_SCAN_NO_OCR_MSG = (
+    "PDF ini tampaknya hasil pindaian (tidak memuat teks) dan OCR belum tersedia di "
+    "server. Unggah PDF yang memuat teks."
+)
+_SCAN_OTHER_TOOLS_MSG = (
+    "PDF ini tampaknya hasil pindaian (tidak memuat teks). Fitur ini membutuhkan teks: "
+    "gunakan Plagiarism Checker (mendukung OCR) atau unggah PDF yang memuat teks."
+)
+
+
 def _guard(text: str) -> None:
     if len(text) > MAX_CHARS:
         raise HTTPException(
@@ -332,6 +350,19 @@ async def extract_text_ep(file: UploadFile = File(...)) -> dict:  # noqa: B008
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     text = text.strip()
+    is_pdf = (file.filename or "").lower().endswith(".pdf")
+    if is_pdf and is_scanned_pdf(data, text):
+        # PDF pindaian: OCR berjalan di job Plagiarism Checker (terlalu lama untuk
+        # satu request HTTP). Klien diberi tahu agar bisa menampilkan catatan.
+        if not ocr_available():
+            raise HTTPException(status_code=422, detail=_SCAN_NO_OCR_MSG)
+        return {
+            "filename": file.filename,
+            "text": text,
+            "chars": len(text),
+            "scanned": True,
+            "pages": pdf_page_count(data),
+        }
     if not text:
         raise HTTPException(
             status_code=422,
@@ -820,7 +851,14 @@ async def plagiarism_file_ep(  # noqa: B008
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if not text:
-        raise HTTPException(status_code=422, detail="Tidak ada teks yang dapat diekstrak.")
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                _SCAN_OTHER_TOOLS_MSG
+                if is_scanned_pdf(data, text)
+                else "Tidak ada teks yang dapat diekstrak."
+            ),
+        )
     _guard(text)
     ex = _exclude_from_query(exclude_bibliography, exclude_quotes, exclude_min_percent)
     try:
@@ -883,8 +921,24 @@ async def _job_run_text(
 async def _job_run_file(
     job_id: str, user_id: int | None, text: str, data: bytes, filename: str | None,
     is_pdf: bool, top_k: int, exclude: dict | None = None, doc_title: str = "",
+    scanned: bool = False,
 ) -> None:
     try:
+        if scanned:
+            # PDF pindaian: OCR dulu (lama, di thread) -> PDF yang bisa dicari + teks.
+            try:
+                data, text = await run_in_threadpool(ocr_pdf, data)
+            except (OcrUnavailableError, ValueError) as exc:
+                fail_job(job_id, str(exc))
+                return
+            if len(text.strip()) < 200:
+                fail_job(
+                    job_id,
+                    "OCR tidak menemukan teks yang cukup pada PDF pindaian ini. "
+                    "Pastikan pindaian jelas (tidak buram/miring) lalu unggah ulang.",
+                )
+                return
+            _guard(text)
         res = await _run_plagiarism_merged(
             text, top_k, _title_hint_from_filename(filename), exclude
         )
@@ -892,6 +946,8 @@ async def _job_run_file(
         res["has_original_pdf"] = is_pdf
         res["source_filename"] = filename
         res["doc_title"] = title
+        if scanned:
+            res["ocr_used"] = True
         hist_id = None
         if user_id is not None:
             hist_id = await run_in_threadpool(
@@ -943,7 +999,10 @@ async def plagiarism_file_async_ep(  # noqa: B008
         text = extract_text(file.filename or "", data).strip()
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    if not text:
+    scanned = is_scanned_pdf(data, text)
+    if scanned and not ocr_available():
+        raise HTTPException(status_code=422, detail=_SCAN_NO_OCR_MSG)
+    if not text and not scanned:
         raise HTTPException(status_code=422, detail="Tidak ada teks yang dapat diekstrak.")
     _guard(text)
     user = optional_user_from_request(request)
@@ -955,7 +1014,7 @@ async def plagiarism_file_async_ep(  # noqa: B008
     _spawn(
         _job_run_file(
             job_id, uid, text, data, file.filename, is_pdf, min(max(top_k, 1), 60), ex,
-            title,
+            title, scanned,
         )
     )
     return {"job_id": job_id, "status": "processing"}
@@ -1251,7 +1310,14 @@ async def _read_pdf_upload(file: UploadFile) -> tuple[bytes, str]:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if not text:
-        raise HTTPException(status_code=422, detail="Tidak ada teks yang dapat diekstrak.")
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                _SCAN_OTHER_TOOLS_MSG
+                if is_scanned_pdf(data, text)
+                else "Tidak ada teks yang dapat diekstrak."
+            ),
+        )
     _guard(text)
     return data, text
 

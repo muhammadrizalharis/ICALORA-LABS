@@ -188,6 +188,14 @@ class Settings(BaseSettings):
     # Ambang: bila ekstraksi pypdf menghasilkan teks lebih pendek dari ini,
     # coba Tika (menangkap PDF 2-kolom/tabel lebih lengkap).
     tika_fallback_min_chars: int = Field(default=400)
+    # OCR PDF hasil pindaian (tanpa teks). Dijalankan di dalam job latar belakang
+    # Plagiarism Checker; membutuhkan data bahasa Tesseract di image backend.
+    ocr_enabled: bool = Field(default=True)
+    ocr_lang: str = Field(default="ind+eng")
+    ocr_max_pages: int = Field(default=40)
+    ocr_dpi: int = Field(default=200)
+    # PDF dianggap pindaian bila rata-rata karakter teks per halaman di bawah ini.
+    scanned_min_chars_per_page: int = Field(default=30)
 
     @property
     def database_url(self) -> str:
