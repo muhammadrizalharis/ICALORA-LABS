@@ -89,6 +89,8 @@ export interface Report {
   doc_title?: string;
   /** Teks diperoleh lewat OCR (PDF pindaian). */
   ocr_used?: boolean;
+  /** Jumlah HTTP 429 per penyedia saat pemeriksaan (bila signifikan). */
+  online_rate_limited?: Record<string, number>;
   online_merged?: boolean;
   online_providers?: { name: string; hits: number }[];
 }

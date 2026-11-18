@@ -168,6 +168,17 @@ export default function PlagiarismReport({ report, documentText, docTitle = "", 
         </div>
       )}
 
+      {report.online_rate_limited && (
+        <div className="rounded-lg border border-amber-400 bg-amber-50 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-500/60 dark:bg-amber-500/10 dark:text-amber-100">
+          Penyedia sumber daring membatasi permintaan saat pemeriksaan ini (
+          {Object.entries(report.online_rate_limited)
+            .map(([k, v]) => `${k} ×${v}`)
+            .join(", ")}
+          ); sebagian sumber mungkin tidak terjangkau sehingga skor bisa lebih rendah dari
+          seharusnya. Periksa ulang bila perlu.
+        </div>
+      )}
+
       {report.ocr_used && (
         <div className="rounded-lg border border-c bg-neutral-50 px-3 py-2 text-[11px] text-neutral-500 dark:bg-white/5 dark:text-neutral-400">
           Dokumen ini PDF hasil pindaian; teksnya diekstrak dengan OCR. Akurasi pencocokan

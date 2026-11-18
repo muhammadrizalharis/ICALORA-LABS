@@ -34,6 +34,16 @@ def health_infra() -> dict:
     return _infra()
 
 
+def _rate_limited_today() -> dict:
+    """Jumlah HTTP 429 dari penyedia sumber daring hari ini (OpenAlex/Crossref/dll)."""
+    try:
+        from app.services.plagiarism.online import rate_limit_usage
+
+        return rate_limit_usage()
+    except Exception as exc:  # noqa: BLE001
+        return {"error": str(exc)}
+
+
 def _websearch() -> dict:
     """Konfigurasi + pemakaian kuota layer web-search (verifikasi daring)."""
     s = get_settings()
@@ -66,6 +76,7 @@ def _websearch() -> dict:
         "cap": cap,
         "remaining": remaining,
         "ok": bool(s.online_websearch_enabled and provider and used != -1),
+        "rate_limited_today": _rate_limited_today(),
     }
 
 
