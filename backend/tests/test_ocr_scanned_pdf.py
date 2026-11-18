@@ -63,3 +63,10 @@ def test_ocr_recovers_text_and_makes_pdf_searchable():
     assert "scour" in text.lower() and "bridge piers" in text.lower()
     doc = pymupdf.open(stream=pdf, filetype="pdf")
     assert doc[0].search_for("foundation instability")
+
+
+def test_scanned_detection_ignores_extracted_text_from_tika():
+    # Tika bisa 'membaca' gambar sehingga teks ekstraksi tidak kosong; PDF tetap pindaian
+    # karena lapisan teks aslinya kosong.
+    assert is_scanned_pdf(_scanned_pdf(), "teks panjang hasil Tika " * 200)
+    assert not is_scanned_pdf(_text_pdf(), "")
