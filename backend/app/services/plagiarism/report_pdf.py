@@ -94,6 +94,40 @@ def _ring_tone(v: float) -> str:
     return "#16a34a"
 
 
+def _publication_block(pm: dict | None) -> str:
+    """Banner 'dokumen ini identik dengan paper terbit' (bila terdeteksi)."""
+    if not pm:
+        return ""
+    title = _esc(str(pm.get("title") or "Tanpa judul"))
+    doi = pm.get("doi")
+    ref = f" · DOI {_esc(str(doi))}" if doi else ""
+    if pm.get("by_doi"):
+        why = "Dokumen menyatakan DOI yang sama dengan publikasi ini."
+    elif pm.get("by_title"):
+        why = "Judul publikasi ini tercantum pada halaman depan dokumen."
+    elif pm.get("by_coverage"):
+        why = (
+            f"{float(pm.get('doc_coverage', 0) or 0):.0f}% isi dokumen cocok dengan "
+            "teks penuh publikasi ini."
+        )
+    else:
+        why = (
+            f"{float(pm.get('containment', 0) or 0):.0f}% teks publikasi ini termuat "
+            "di dokumen."
+        )
+    return (
+        '<div style="margin:6px 0 4px;padding:10px 12px;border:1px solid #f59e0b;'
+        'background:#fffbeb;border-radius:6px">'
+        '<div style="font-weight:800;font-size:12px;color:#92400e">'
+        "📌 Dokumen ini identik dengan paper yang sudah terbit</div>"
+        f'<div style="font-weight:700;margin-top:3px">{title}</div>'
+        f'<div class="note" style="margin-top:2px">{_esc(str(pm.get("source") or ""))}{ref}</div>'
+        f'<div class="note">{_esc(why)} Bila ini karya Anda sendiri, kecocokan tinggi '
+        "adalah wajar (publikasi Anda). Bila bukan, tinjau sebagai indikasi kuat "
+        "penjiplakan.</div></div>"
+    )
+
+
 def _cover_html(report: dict) -> str:
     """Halaman sampul 'Ringkasan Kemiripan' — tata letak & istilah orisinal."""
     idx = float(report.get("integrity_index", report.get("overall_similarity", 0)) or 0)
@@ -170,6 +204,21 @@ def _cover_html(report: dict) -> str:
             f"pemeriksaan): {_esc(', '.join(ex_labels))}.</div>"
         )
 
+    doc_title = str(
+        report.get("doc_title")
+        or str(report.get("source_filename") or "").rsplit(".", 1)[0]
+        or ""
+    ).strip()
+    title_block = (
+        '<div style="margin:0 0 14px"><div class="sub" style="text-transform:uppercase;'
+        'letter-spacing:.5px">Judul Dokumen</div>'
+        f'<div style="font-size:15px;font-weight:700;line-height:1.35">{_esc(doc_title)}</div>'
+        "</div>"
+        if doc_title
+        else ""
+    )
+    pub_block = _publication_block(report.get("publication_match"))
+
     src_rows = src_rows or (
         '<tr><td class="note">Tidak ada sumber dengan kemiripan berarti.</td></tr>'
     )
@@ -198,6 +247,7 @@ def _cover_html(report: dict) -> str:
       <div class="sub">ICALORA-LABS · MRH INNOVEX — pemeriksaan mandiri (self-hosted)</div></div>
       <div class="rid">ID: <b>{_esc(rid)}</b><br>Hash: {_esc(sha)}<br>Korpus akses-terbuka</div>
     </div>
+    {title_block}
     <div class="hero">
       <div class="ring"><div class="n">{idx_display}</div><div class="l">SIMILARITY</div></div>
       <div>
@@ -212,6 +262,7 @@ def _cover_html(report: dict) -> str:
         </div>
       </div>
     </div>
+    {pub_block}
     <h2>Kategori Temuan</h2>
     <table>{rows}</table>
     <h2>Sumber Teratas</h2>

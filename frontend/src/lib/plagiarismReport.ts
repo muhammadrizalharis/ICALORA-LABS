@@ -48,6 +48,8 @@ export interface PublicationMatch {
   online: boolean;
   by_doi?: boolean;
   by_title?: boolean;
+  by_coverage?: boolean;
+  doc_coverage?: number;
 }
 
 export interface ExcludeSettings {
@@ -84,6 +86,7 @@ export interface Report {
   generated_at?: string;
   has_original_pdf?: boolean;
   source_filename?: string;
+  doc_title?: string;
   online_merged?: boolean;
   online_providers?: { name: string; hits: number }[];
 }
@@ -278,6 +281,19 @@ export function toneForScore(v: number): string {
   return "border-emerald-400 text-emerald-600";
 }
 
+/** Alasan dokumen ditandai identik dengan paper terbit. */
+export function publicationReason(pm: PublicationMatch): string {
+  if (pm.by_doi) return "Dokumen menyatakan DOI yang sama dengan publikasi ini.";
+  if (pm.by_title) return "Judul publikasi ini tercantum pada halaman depan dokumen.";
+  if (pm.by_coverage)
+    return `${(pm.doc_coverage ?? 0).toFixed(0)}% isi dokumen cocok dengan teks penuh publikasi ini.`;
+  return `${pm.containment.toFixed(0)}% teks publikasi ini termuat di dokumen.`;
+}
+
+export const PUBLICATION_NOTE =
+  "Bila ini karya Anda sendiri, kecocokan tinggi adalah wajar (publikasi Anda). " +
+  "Bila bukan, tinjau sebagai indikasi kuat penjiplakan.";
+
 /** Susun HTML laporan lengkap (untuk unduh/lihat PDF). */
 export function buildReportHtml(args: {
   report: Report;
@@ -287,7 +303,22 @@ export function buildReportHtml(args: {
   hiOpts: { minWords: number; exclude: Set<string> };
 }): string {
   const { report, text, hiOpts } = args;
-  const docTitle = args.docTitle ?? "";
+  const docTitle = args.docTitle ?? report.doc_title ?? "";
+  const pm = report.publication_match;
+  const pubHtml = pm
+    ? `<div style="margin:10px 0;padding:10px 12px;border:1px solid #f59e0b;background:#fffbeb;border-radius:6px"><div style="font-weight:800;color:#92400e">📌 Dokumen ini identik dengan paper yang sudah terbit</div><div style="font-weight:700;margin-top:3px">${escHtml(
+        pm.title || "Tanpa judul",
+      )}</div><div class="legend" style="margin:2px 0">${escHtml(pm.source || "")}${
+        pm.doi ? ` · DOI ${escHtml(pm.doi)}` : ""
+      }</div><div class="legend" style="margin:0">${escHtml(publicationReason(pm))} ${escHtml(
+        PUBLICATION_NOTE,
+      )}</div></div>`
+    : "";
+  const titleHtml = docTitle.trim()
+    ? `<div style="margin:0 0 10px"><div class="legend" style="margin:0;text-transform:uppercase">Judul Dokumen</div><div style="font-size:16px;font-weight:700">${escHtml(
+        docTitle.trim(),
+      )}</div></div>`
+    : "";
   const now = new Date().toLocaleString("id-ID");
   const { html: hiText, sources: hiSources } = buildHighlight(
     text,
@@ -379,12 +410,14 @@ export function buildReportHtml(args: {
     report.generated_at ? new Date(report.generated_at).toLocaleString("id-ID") : now,
   )}<br>Korpus akses-terbuka (CC0/CC-BY)</div>
 </div>
+${titleHtml}
 <div class="hero">
   <div class="ring ${ringCls}"><span class="big">${
     idx > 0 && idx < 1 ? "&lt;1" : idx < 10 ? idx.toFixed(1) : idx.toFixed(0)
   }%</span><span class="cap">SIMILARITY</span></div>
   <div><div class="verdict">${v.label}</div><div class="vnote">${v.note}</div></div>
 </div>
+${pubHtml}
 <div class="metrics">
   <div><b>${report.word_count}</b> kata</div>
   <div><b>${report.char_count}</b> karakter</div>
