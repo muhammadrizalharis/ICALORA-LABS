@@ -9,10 +9,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # Dependensi sistem:
 # - WeasyPrint butuh pango/cairo/gdk-pixbuf/ffi + font untuk render PDF HTML
 # - ffmpeg untuk faster-whisper (ASR) via PyAV
+# - data bahasa Tesseract (ind+eng) untuk OCR PDF pindaian (PyMuPDF membawa mesin OCR)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpango-1.0-0 libpangocairo-1.0-0 libcairo2 libgdk-pixbuf-2.0-0 \
     libffi-dev shared-mime-info fonts-dejavu-core fonts-liberation \
-    ffmpeg curl \
+    ffmpeg curl tesseract-ocr tesseract-ocr-eng tesseract-ocr-ind \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

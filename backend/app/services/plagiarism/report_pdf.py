@@ -220,6 +220,11 @@ def _cover_html(report: dict) -> str:
         else ""
     )
     pub_block = _publication_block(report.get("publication_match"))
+    if report.get("ocr_used"):
+        pub_block += (
+            '<div class="note" style="margin:4px 0">Dokumen ini PDF hasil pindaian; teksnya '
+            "diekstrak dengan OCR. Akurasi pencocokan bergantung pada kualitas pindaian.</div>"
+        )
 
     src_rows = src_rows or (
         '<tr><td class="note">Tidak ada sumber dengan kemiripan berarti.</td></tr>'

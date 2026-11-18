@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import io
+import os
 import re
+import threading
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 
@@ -129,3 +131,90 @@ def extract_text(filename: str, data: bytes) -> str:
             raise ValueError(f"Gagal membaca DOCX: {exc}") from exc
 
     raise ValueError("Format tidak didukung. Gunakan .txt, .pdf, atau .docx.")
+
+
+# ── OCR untuk PDF hasil pindaian ─────────────────────────────────────────────
+# Satu OCR dalam satu waktu: Tesseract memakai banyak CPU di server bersama.
+_OCR_LOCK = threading.Semaphore(1)
+os.environ.setdefault("OMP_THREAD_LIMIT", "2")
+
+
+class OcrUnavailableError(RuntimeError):
+    """OCR tidak aktif atau data bahasa Tesseract tidak terpasang."""
+
+
+def ocr_available() -> bool:
+    """True bila OCR diaktifkan dan data bahasa Tesseract tersedia."""
+    from app.core.config import get_settings
+
+    if not get_settings().ocr_enabled:
+        return False
+    try:
+        import pymupdf
+
+        return bool(pymupdf.get_tessdata())
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def pdf_page_count(data: bytes) -> int:
+    try:
+        import pymupdf
+
+        with pymupdf.open(stream=data, filetype="pdf") as doc:
+            return doc.page_count
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+def is_scanned_pdf(data: bytes, text: str) -> bool:
+    """PDF yang hampir tanpa teks per halaman = hasil pindaian (gambar)."""
+    from app.core.config import get_settings
+
+    pages = pdf_page_count(data)
+    if pages <= 0:
+        return False
+    return len((text or "").strip()) / pages < get_settings().scanned_min_chars_per_page
+
+
+def ocr_pdf(data: bytes) -> tuple[bytes, str]:
+    """OCR PDF pindaian -> (PDF yang bisa dicari, teks).
+
+    PDF hasil memuat gambar halaman + lapisan teks tak kasat mata, sehingga
+    pencarian teks (dan sorotan laporan) bekerja di atasnya.
+    Melempar OcrUnavailableError / ValueError dengan pesan siap-tampil.
+    """
+    import pymupdf
+
+    from app.core.config import get_settings
+
+    st = get_settings()
+    if not ocr_available():
+        raise OcrUnavailableError(
+            "OCR belum tersedia di server. Unggah PDF yang memuat teks (bukan hasil pindaian)."
+        )
+    pages = pdf_page_count(data)
+    if pages <= 0:
+        raise ValueError("PDF tidak dapat dibaca.")
+    if pages > st.ocr_max_pages:
+        raise ValueError(
+            f"PDF pindaian berisi {pages} halaman; batas OCR {st.ocr_max_pages} halaman. "
+            "Pisahkan dokumen lalu unggah ulang."
+        )
+    with _OCR_LOCK:
+        src = pymupdf.open(stream=data, filetype="pdf")
+        out = pymupdf.open()
+        try:
+            for page in src:
+                pix = page.get_pixmap(dpi=st.ocr_dpi)
+                page_pdf = pymupdf.open(
+                    "pdf", pix.pdfocr_tobytes(compress=True, language=st.ocr_lang)
+                )
+                out.insert_pdf(page_pdf)
+                page_pdf.close()
+            text = "\n".join(p.get_text() for p in out)
+            pdf_bytes = out.tobytes(deflate=True, garbage=3)
+        finally:
+            src.close()
+            out.close()
+    return pdf_bytes, _dehyphenate(sanitize_text(text))

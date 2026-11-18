@@ -7,6 +7,9 @@ interface ExtractResult {
   filename: string;
   text: string;
   chars: number;
+  /** PDF hasil pindaian (tanpa teks); OCR dijalankan server saat pemeriksaan. */
+  scanned?: boolean;
+  pages?: number;
 }
 
 interface TextInputProps {
@@ -22,6 +25,8 @@ interface TextInputProps {
   acceptHint?: string;
   /** Bila true: sembunyikan tab & mode tempel teks — hanya unggah berkas. */
   uploadOnly?: boolean;
+  /** Terima PDF pindaian (tanpa teks) — hanya untuk fitur yang menjalankan OCR di server. */
+  allowScanned?: boolean;
 }
 
 const ACCEPT = ".txt,.md,.csv,.tex,.pdf,.docx";
@@ -35,6 +40,7 @@ export default function TextInput({
   accept = ACCEPT,
   acceptHint = "Mendukung .txt, .pdf, .docx (maks 10 MB)",
   uploadOnly = false,
+  allowScanned = false,
 }: TextInputProps) {
   const [mode, setMode] = useState<"paste" | "upload">(uploadOnly ? "upload" : "paste");
   const [dragOver, setDragOver] = useState(false);
@@ -62,9 +68,21 @@ export default function TextInput({
     setUploading(true);
     try {
       const res = await apiUpload<ExtractResult>("/tools/extract-text", file);
+      if (res.scanned && !allowScanned) {
+        setErr(
+          "PDF ini tampaknya hasil pindaian (tidak memuat teks). Fitur ini membutuhkan teks: " +
+            "gunakan Plagiarism Checker (mendukung OCR) atau unggah PDF yang memuat teks.",
+        );
+        return;
+      }
       onChange(res.text);
       onFile?.(file);
-      setFileInfo(`${res.filename} · ${res.chars.toLocaleString("id-ID")} karakter diekstrak`);
+      setFileInfo(
+        res.scanned
+          ? `${res.filename} · PDF hasil pindaian (${res.pages ?? "?"} halaman) — teks diekstrak ` +
+              "dengan OCR saat pemeriksaan (lebih lama)"
+          : `${res.filename} · ${res.chars.toLocaleString("id-ID")} karakter diekstrak`,
+      );
       if (!uploadOnly) setMode("paste");
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Gagal mengunggah berkas.");
