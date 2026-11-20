@@ -31,8 +31,10 @@ cari sinyal yang meloloskan, ketatkan (mis. wajib `fulltext_oa` atau containment
 Deteksi parafrase (PR #110) pada dokumen yang diparafrase agresif: uji langsung terhadap kandidat
 menghasilkan **97,2%** (35/36, 7,6 dtk), tetapi job produksi (`tool_history` id 184, sudah dihapus
 bila lewat 3 hari) menyimpan `semantic_match: None`, padahal sumber IJHT ada di hasil dengan teks
-penuh. Pengecualian di `_run_plagiarism_merged` ditelan diam-diam (`except Exception`). Reproduksi
-sedang berjalan di dalam container (skrip trace di sesi); langkah berikutnya: tambahkan
+penuh. Pengecualian di `_run_plagiarism_merged` ditelan diam-diam (`except Exception`). **Reproduksi di container produksi BERHASIL** (memanggil `_run_plagiarism_merged` langsung
+dengan teks dokumen: `semantic_match` terisi, 97,2%, 7,2 dtk). Jadi kode dan embedding sehat; yang
+berbeda adalah jalur job API (`_job_run_file`: teks hasil ekstraksi PDF, `exclude` bibliografi/kutipan
+aktif, berjalan bersamaan dengan uji lain pada saat itu). Langkah berikutnya: tambahkan
 `logger.warning(..., exc_info=True)` pada blok itu, jalankan ulang, temukan penyebab (timeout
 240 dtk? kandidat di `extra` beda dengan hasil `identity_candidates`? embedding di container?).
 
