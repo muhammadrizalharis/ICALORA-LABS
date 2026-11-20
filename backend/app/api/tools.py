@@ -61,6 +61,7 @@ from app.services.plagiarism.online import (
     online_check,
 )
 from app.services.plagiarism.report_pdf import build_report_pdf
+from app.services.plagiarism.semantic import find_semantic_source
 from app.services.publikasi import recommend_journals
 from app.services.report import MAX_HTML_BYTES, render_pdf
 from app.services.report.reports import (
@@ -799,6 +800,18 @@ async def _run_plagiarism_merged(
         extra = list(merged.values())
     res = await run_in_threadpool(check_plagiarism, text, top_k, extra, exclude)
     res["online_merged"] = bool(extra)
+    # Parafrase: bandingkan MAKNA dengan teks penuh paper kandidat (kata-demi-kata sudah dicek
+    # di atas). Gagal/lambat tidak boleh membatalkan laporan.
+    if extra and settings.online_semantic_enabled:
+        try:
+            sem = await asyncio.wait_for(
+                run_in_threadpool(find_semantic_source, text, extra, res),
+                timeout=max(30, settings.online_semantic_seconds),
+            )
+        except Exception:  # noqa: BLE001
+            sem = None
+        if sem:
+            res["semantic_match"] = sem
     res["online_openalex_calls"] = int(rate_limited.get("_oa_calls", 0))
     if rate_limited.get(BUDGET_FLAG):
         res["online_budget_exhausted"] = True

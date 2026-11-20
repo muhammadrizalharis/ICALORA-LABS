@@ -52,6 +52,19 @@ export interface PublicationMatch {
   doc_coverage?: number;
 }
 
+export interface SemanticMatch {
+  title: string | null;
+  doi: string | null;
+  url: string | null;
+  source: string | null;
+  /** % potongan dua-kalimat dokumen yang bermakna sama dengan teks penuh paper. */
+  coverage: number;
+  matched_windows: number;
+  total_windows: number;
+  threshold: number;
+  examples: { doc: string; source: string; cos: number }[];
+}
+
 export interface ExcludeSettings {
   bibliography: boolean;
   quotes: boolean;
@@ -65,6 +78,8 @@ export interface Report {
   paraphrase_component?: number;
   exclude_settings?: ExcludeSettings;
   publication_match?: PublicationMatch | null;
+  /** Indikasi parafrase (makna sama, kata berbeda) terhadap paper terbit. */
+  semantic_match?: SemanticMatch | null;
   document_lexical_similarity: number;
   paraphrase_similarity: number;
   similarity_index: number;
