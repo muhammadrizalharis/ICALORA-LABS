@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import auth, features, health, ingest, tools
-from app.core.config import get_settings
+from app.core.config import DEFAULT_SESSION_SECRET, get_settings
 from app.services.jobs import fail_orphaned_jobs
 
 settings = get_settings()
@@ -24,6 +24,11 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     berjalan tidak akan pernah selesai. Tandai sebagai gagal agar klien langsung
     tahu dan dapat menjalankan ulang, bukan menunggu hingga batas waktu.
     """
+    if get_settings().session_secret == DEFAULT_SESSION_SECRET:
+        logger.critical(
+            "SESSION_SECRET memakai nilai BAWAAN (publik): cookie sesi bisa dipalsukan "
+            "siapa pun. Set SESSION_SECRET acak di backend/.env lalu restart backend & bot."
+        )
     try:
         n = fail_orphaned_jobs()
         if n:

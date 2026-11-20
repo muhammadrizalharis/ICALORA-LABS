@@ -103,14 +103,21 @@ def _send(chat_id: int, text: str) -> None:
         print(f"[bot] gagal kirim: {exc}", flush=True)
 
 
+def _internal_headers() -> dict:
+    """Backend mewajibkan login; bot memakai token internal turunan session_secret."""
+    from app.services.auth import internal_service_token
+
+    return {"x-internal-token": internal_service_token()}
+
+
 def _post(path: str, body: dict) -> dict:
-    r = httpx.post(f"{API}{path}", json=body, timeout=180)
+    r = httpx.post(f"{API}{path}", json=body, headers=_internal_headers(), timeout=180)
     r.raise_for_status()
     return r.json()
 
 
 def _get(path: str) -> dict:
-    r = httpx.get(f"{API}{path}", timeout=60)
+    r = httpx.get(f"{API}{path}", headers=_internal_headers(), timeout=60)
     r.raise_for_status()
     return r.json()
 

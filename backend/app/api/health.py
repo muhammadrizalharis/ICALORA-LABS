@@ -3,7 +3,7 @@
 from fastapi import APIRouter
 
 from app.core.clients import check_llm, check_postgres, check_redis, check_s3
-from app.core.config import get_settings
+from app.core.config import DEFAULT_SESSION_SECRET, get_settings
 
 router = APIRouter(tags=["health"])
 
@@ -77,6 +77,7 @@ def _websearch() -> dict:
         "remaining": remaining,
         "ok": bool(s.online_websearch_enabled and provider and used != -1),
         "rate_limited_today": _rate_limited_today(),
+        "session_secret_default": s.session_secret == DEFAULT_SESSION_SECRET,
     }
 
 
