@@ -248,6 +248,22 @@ def get_user(user_id: int) -> dict | None:
     return _row_to_user(r) if r else None
 
 
+def internal_service_token() -> str:
+    """Token panggilan internal (bot Telegram -> backend), diturunkan dari session_secret.
+
+    Layanan sisi-server yang tak punya akun pengguna memakai ini sebagai pengganti
+    login. Tidak butuh variabel .env baru; berubah otomatis bila session_secret diganti.
+    """
+    return hmac.new(
+        settings.session_secret.encode(), b"icalora-internal-service:v1", hashlib.sha256
+    ).hexdigest()
+
+
+def is_internal_service_request(request) -> bool:
+    sent = request.headers.get("x-internal-token", "")
+    return bool(sent) and hmac.compare_digest(sent, internal_service_token())
+
+
 def optional_user_from_request(request) -> dict | None:
     """Ambil user dari cookie sesi jika ada (tanpa memaksa login)."""
     token = request.cookies.get(settings.session_cookie)

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { FEATURES, GROUP_COLOR, GROUP_LABEL, type FeatureGroup } from "@/lib/features";
+import CheckNowLink from "@/components/CheckNowLink";
 import StatsBar from "@/components/StatsBar";
 
 const GROUPS: FeatureGroup[] = ["berat", "ringan", "api"];
@@ -57,12 +58,9 @@ export default function Home() {
               </p>
 
               <div className="mt-8 flex flex-wrap items-center gap-3">
-                <Link
-                  href="/features/plagiarism-checker"
-                  className="inline-flex items-center gap-2 rounded-xl brand-grad px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-violet-500/25 transition hover:opacity-95"
-                >
+                <CheckNowLink className="inline-flex items-center gap-2 rounded-xl brand-grad px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-violet-500/25 transition hover:opacity-95">
                   🛡️ Periksa Sekarang
-                </Link>
+                </CheckNowLink>
                 <Link
                   href="/cara-pakai"
                   className="inline-flex items-center gap-2 rounded-xl border border-c px-6 py-3 text-sm font-semibold text-neutral-800 transition hover:bg-neutral-100 dark:border-white/15 dark:text-neutral-100 dark:hover:bg-white/5"

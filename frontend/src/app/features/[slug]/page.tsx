@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { getFeature, GROUP_LABEL, FEATURES } from "@/lib/features";
+import LoginGate from "@/components/LoginGate";
 import PlagiarismTool from "@/components/PlagiarismTool";
 import TextTool from "@/components/TextTool";
 import ChatTool from "@/components/tools/ChatTool";
@@ -95,22 +96,24 @@ export default async function FeaturePage({
       </p>
 
       <div className="mt-6">
-        {simple ? (
-          <TextTool
-            endpoint={simple.endpoint}
-            kind={simple.kind}
-            slug={feature.slug}
-            submitLabel={simple.submitLabel}
-            outputKey={simple.outputKey}
-            placeholder={simple.placeholder}
-          />
-        ) : Rich ? (
-          <Rich />
-        ) : (
-          <div className="rounded-xl border border-dashed border-c p-6 text-sm text-neutral-500 dark:text-neutral-400">
-            Placeholder antarmuka untuk <b>{feature.name}</b>.
-          </div>
-        )}
+        <LoginGate name={feature.name}>
+          {simple ? (
+            <TextTool
+              endpoint={simple.endpoint}
+              kind={simple.kind}
+              slug={feature.slug}
+              submitLabel={simple.submitLabel}
+              outputKey={simple.outputKey}
+              placeholder={simple.placeholder}
+            />
+          ) : Rich ? (
+            <Rich />
+          ) : (
+            <div className="rounded-xl border border-dashed border-c p-6 text-sm text-neutral-500 dark:text-neutral-400">
+              Placeholder antarmuka untuk <b>{feature.name}</b>.
+            </div>
+          )}
+        </LoginGate>
       </div>
     </div>
   );

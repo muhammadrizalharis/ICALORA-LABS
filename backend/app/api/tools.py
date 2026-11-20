@@ -19,6 +19,7 @@ from app.services.ai_detector.report_pdf import build_ai_report_pdf
 from app.services.auth import (
     get_history_item,
     get_tool_file_by_history,
+    is_internal_service_request,
     optional_user_from_request,
     record_history,
     save_tool_file,
@@ -151,6 +152,12 @@ def _access_guard(request: Request) -> None:
     is_admin = bool(user and user.get("is_admin"))
     if is_admin:
         return
+    # Semua layanan wajib login (Google/email). Pengecualian: panggilan internal bot.
+    if not user and not is_internal_service_request(request):
+        raise HTTPException(
+            status_code=401,
+            detail="Silakan masuk dulu (Google atau email) untuk memakai layanan ini.",
+        )
     if admin_svc.is_maintenance():
         raise HTTPException(
             status_code=503,

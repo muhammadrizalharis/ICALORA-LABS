@@ -6,7 +6,8 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { FEATURES, GROUP_LABEL, GROUP_COLOR, type FeatureGroup } from "@/lib/features";
 import ThemeToggle from "@/components/ThemeToggle";
-import { useAuth } from "@/lib/auth";
+import AccountButton from "@/components/AccountButton";
+import CheckNowLink from "@/components/CheckNowLink";
 
 const GROUPS: FeatureGroup[] = ["berat", "ringan", "api"];
 
@@ -18,7 +19,6 @@ const NAV = [
 
 export default function TopNav() {
   const pathname = usePathname();
-  const { user } = useAuth();
   const [megaOpen, setMegaOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -131,18 +131,10 @@ export default function TopNav() {
           <div className="hidden sm:block">
             <ThemeToggle />
           </div>
-          <Link
-            href="/features/plagiarism-checker"
-            className="hidden rounded-xl brand-grad px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-violet-500/20 transition hover:opacity-95 sm:inline-flex"
-          >
+          <CheckNowLink className="hidden rounded-xl brand-grad px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-violet-500/20 transition hover:opacity-95 sm:inline-flex">
             Periksa Sekarang
-          </Link>
-          <Link
-            href={user ? "/dashboard" : "/login"}
-            className="hidden rounded-xl border border-c px-4 py-2 text-sm font-semibold text-neutral-700 transition hover:bg-neutral-100 sm:inline-flex dark:text-neutral-200 dark:hover:bg-white/5"
-          >
-            {user ? "Dashboard" : "Masuk"}
-          </Link>
+          </CheckNowLink>
+          <AccountButton className="hidden sm:inline-flex" />
 
           {/* Mobile toggle */}
           <button
@@ -188,18 +180,10 @@ export default function TopNav() {
           <div className="mt-4 flex items-center justify-between gap-3">
             <ThemeToggle />
             <div className="flex items-center gap-2">
-              <Link
-                href={user ? "/dashboard" : "/login"}
-                className="rounded-xl border border-c px-4 py-2 text-sm font-semibold text-neutral-700 dark:text-neutral-200"
-              >
-                {user ? "Dashboard" : "Masuk"}
-              </Link>
-              <Link
-                href="/features/plagiarism-checker"
-                className="rounded-xl brand-grad px-4 py-2 text-sm font-semibold text-white"
-              >
+              <AccountButton />
+              <CheckNowLink className="rounded-xl brand-grad px-4 py-2 text-sm font-semibold text-white">
                 Periksa
-              </Link>
+              </CheckNowLink>
             </div>
           </div>
         </div>
