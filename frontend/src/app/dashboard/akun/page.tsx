@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Image from "next/image";
 import { useAuth } from "@/lib/auth";
+import { tokenView } from "@/lib/tokens";
 
 function UserPasswordCard() {
   const { resetPassword, emailEnabled } = useAuth();
@@ -176,7 +177,8 @@ function AdminPasswordCard() {
 }
 
 export default function AkunPage() {
-  const { user, logout } = useAuth();
+  const { user, logout, tokenEnforcement, defaultToolCost } = useAuth();
+  const tv = tokenView(user, tokenEnforcement, defaultToolCost);
 
   return (
     <div className="mx-auto max-w-2xl p-8">
@@ -206,11 +208,16 @@ export default function AkunPage() {
         <div className="mt-6 grid grid-cols-2 gap-4">
           <div className="rounded-xl border border-c surface p-4">
             <div className="text-xs text-neutral-400">Token / Saldo</div>
-            <div className="text-xl font-bold">∞</div>
+            <div className={`text-xl font-bold ${tv.low ? "text-red-500" : ""}`}>{tv.value}</div>
+            <div className={`mt-0.5 text-[11px] ${tv.low ? "text-red-400" : "text-neutral-400"}`}>
+              {tv.note}
+            </div>
           </div>
           <div className="rounded-xl border border-c surface p-4">
-            <div className="text-xs text-neutral-400">Paket</div>
-            <div className="text-xl font-bold">Gratis</div>
+            <div className="text-xs text-neutral-400">Peran</div>
+            <div className="text-xl font-bold">
+              {user?.is_admin ? "Super Admin" : user?.is_demo ? "Demo" : "Pengguna"}
+            </div>
           </div>
         </div>
 

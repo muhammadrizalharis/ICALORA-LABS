@@ -130,7 +130,7 @@ export default function LoginPage() {
         </p>
 
         <p className="mt-4 text-xs text-neutral-400">
-          Semua layanan gratis · token tak terbatas selama masa awal.
+          Akun baru memulai dengan 0 token; saldo ditambahkan oleh admin.
         </p>
       </div>
     </div>

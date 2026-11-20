@@ -110,6 +110,8 @@ def me(request: Request) -> dict:
         "history_retention_days": settings.history_retention_days,
         "maintenance_mode": admin_svc.is_maintenance(),
         "registration_open": admin_svc.is_registration_open(),
+        "token_enforcement": admin_svc.token_enforcement_enabled(),
+        "default_tool_cost": admin_svc.tool_cost(""),
     }
 
 

@@ -220,6 +220,8 @@ def _enforce_token_cost(request: Request, user: dict | None, slug: str) -> None:
     if not user or user.get("id") is None:
         # Tanpa akun tidak bisa dipotong token; rate-limit sudah menjaga.
         return
+    if user.get("is_demo"):
+        return  # akun demo: token tidak terbatas (Super Admin sudah dikecualikan di guard)
     cost = admin_svc.tool_cost(slug)
     if cost <= 0:
         return
