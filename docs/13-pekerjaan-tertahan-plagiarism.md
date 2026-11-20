@@ -3,20 +3,62 @@
 Dicatat 2026-11-19, diperbarui 2026-11-20. Semua perbaikan sebelumnya sudah ada di `main`
 (PR #94–#105) dan dideploy. Dokumen ini hanya memuat yang **belum selesai** dan alasannya.
 
-## Ringkasan prioritas
+## Ringkasan prioritas (diperbarui 2026-11-20 malam)
 
 | # | Item | Status | Pemilik |
 |---|---|---|---|
 | 1 | Ganti `SESSION_SECRET` produksi (**kritis**) | belum dilakukan | user |
-| 2 | Validasi mode hemat OpenAlex | menunggu reset kuota | AI |
-| 3 | Uji paper dari penerbit lain | menunggu reset kuota | AI |
-| 4 | Uji login Google asli end-to-end | belum diuji | user |
-| 5 | Saldo token akun yang sudah ada (id 18 = 1000) | menunggu keputusan | user |
-| 6 | Peran "admin biasa" (boleh beri token) | menunggu keputusan | user |
-| 7 | Teks "Gratis" di beranda/FAQ/Cara Pakai | menunggu keputusan | user |
-| 8 | Dokumen yang seluruhnya diparafrase | belum diputuskan | user |
-| 9 | Rapikan peringatan lint lama | opsional | AI |
-| 10 | Baris pengguna demo ganda di DB | diamati, belum diselidiki | AI |
+| 2 | **Banner "paper terbit" muncul padahal indeks 2-4%** (Springer, BMC) | **temuan baru, belum diselidiki** | AI |
+| 3 | **`semantic_match` kosong pada job produksi** (uji langsung 97,2%) | **sedang direproduksi** | AI |
+| 4 | Penerbit yang gagal: MDPI, Frontiers, Springer, BMC, T&F, Elsevier, Wiley | analisis di bawah | AI |
+| 5 | Peran admin biasa, Google login, token 0, teks "Gratis", lint, demo ganda | **selesai** (PR #104-#110) | - |
+| 6 | Saldo akun id 18 (1000) | dibiarkan (keputusan user) | - |
+| 7 | Mode hemat OpenAlex | **terbukti**: 9-21 pencarian/job (dulu ±110-140) | - |
+
+## Temuan 2026-11-20 malam (BELUM SELESAI — lanjutkan dari sini)
+
+### A. Banner "paper terbit" berisiko salah-tuduh
+
+Uji penerbit (naskah = paper OA terbaru dengan 10% awal dibuang): pada **Springer** dan **BMC**
+`publication_match` bernilai True padahal indeks hanya 2,0% dan 4,4% dan DOI paper aslinya tidak
+ketemu. Artinya sumber LAIN dianggap "identik" lewat heuristik `title_identity`/containment di
+`plagiarism/__init__.py` (`_title_in_front_matter` >= 0,70). Banner ini baru ditampilkan sejak
+PR #96, jadi bisa menuduh paper yang salah. Langkah: cetak `publication_match` untuk dua kasus itu,
+cari sinyal yang meloloskan, ketatkan (mis. wajib `fulltext_oa` atau containment tinggi), tambah tes.
+
+### B. `semantic_match` kosong di job produksi
+
+Deteksi parafrase (PR #110) pada dokumen yang diparafrase agresif: uji langsung terhadap kandidat
+menghasilkan **97,2%** (35/36, 7,6 dtk), tetapi job produksi (`tool_history` id 184, sudah dihapus
+bila lewat 3 hari) menyimpan `semantic_match: None`, padahal sumber IJHT ada di hasil dengan teks
+penuh. Pengecualian di `_run_plagiarism_merged` ditelan diam-diam (`except Exception`). Reproduksi
+sedang berjalan di dalam container (skrip trace di sesi); langkah berikutnya: tambahkan
+`logger.warning(..., exc_info=True)` pada blok itu, jalankan ulang, temukan penyebab (timeout
+240 dtk? kandidat di `extra` beda dengan hasil `identity_candidates`? embedding di container?).
+
+### C. Hasil uji penerbit lain (1 paper per penerbit, tanpa judul/abstrak)
+
+| Penerbit | Hasil | Catatan |
+|---|---|---|
+| PLOS | HIT 100% | 9 pencarian |
+| IEEE | HIT 100% | 8 pencarian |
+| MDPI | miss | paper ketemu tapi **teks penuh < 15.000 karakter** (gagal diunduh) |
+| BMC | miss | idem; banner salah (lihat A) |
+| Taylor & Francis | miss | idem |
+| Frontiers | miss | paper tidak ketemu |
+| Springer | miss | banner salah (lihat A) |
+| Elsevier, Wiley | tak teruji | teks penuh tak bisa diunduh untuk 4 paper pertama |
+
+Pola: deteksi berhasil bila teks penuh bisa diunduh (PLOS, IEEE). Kegagalan utama = **pengunduhan
+teks penuh** dari penerbit yang memblokir bot / hanya HTML. Belum ada perbaikan; perlu dikaji
+(Unpaywall / URL PDF alternatif / Crawl4AI milik server untuk halaman penerbit).
+Skrip uji (sementara) ada di `/tmp/v/pubs.py` dan akan hilang; tulis ulang bila perlu.
+
+### D. Kuota OpenAlex
+
+Pengukuran nyata lewat header `x-ratelimit-remaining`: job penuh mode hemat = 9-21 pencarian
+(90-210 kredit). Kuota harian $1 = 10.000 kredit. Uji malam ini menghabiskan sekitar 2.000 kredit
+(banyak uji paralel).
 
 ## Keamanan & auth (2026-11-20)
 
