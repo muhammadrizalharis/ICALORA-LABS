@@ -50,8 +50,14 @@ async function proxy(req: NextRequest, path: string[]): Promise<Response> {
     });
     const respHeaders = new Headers();
     upstream.headers.forEach((value, key) => {
-      if (!HOP_BY_HOP.has(key.toLowerCase())) respHeaders.set(key, value);
+      const k = key.toLowerCase();
+      // Set-Cookie bisa muncul lebih dari sekali (mis. callback Google mengirim cookie
+      // sesi + penghapusan oauth_state). `set` akan menimpa; salin terpisah dengan append.
+      if (!HOP_BY_HOP.has(k) && k !== "set-cookie") respHeaders.set(key, value);
     });
+    for (const cookie of upstream.headers.getSetCookie()) {
+      respHeaders.append("set-cookie", cookie);
+    }
     return new Response(upstream.body, {
       status: upstream.status,
       statusText: upstream.statusText,

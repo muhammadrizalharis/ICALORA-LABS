@@ -5,6 +5,9 @@ from functools import lru_cache
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Nilai bawaan kode (publik). WAJIB diganti di produksi lewat SESSION_SECRET.
+DEFAULT_SESSION_SECRET = "icalora-dev-secret-change-me"  # noqa: S105
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
@@ -70,7 +73,7 @@ class Settings(BaseSettings):
     backend_base_url: str = Field(default="http://127.0.0.1:58010")
 
     # Auth / sesi
-    session_secret: str = Field(default="icalora-dev-secret-change-me")
+    session_secret: str = Field(default=DEFAULT_SESSION_SECRET)
     session_cookie: str = Field(default="icalora_session")
     session_ttl_days: int = Field(default=30)
     history_retention_days: int = Field(default=3)

@@ -28,6 +28,8 @@ interface AuthState {
   emailEnabled: boolean;
   historyRetentionDays: number;
   maintenanceMode: boolean;
+  tokenEnforcement: boolean;
+  defaultToolCost: number;
   refresh: () => Promise<void>;
   adminLogin: (password: string) => Promise<boolean>;
   changeAdminPassword: (currentPassword: string, newPassword: string) => Promise<string | null>;
@@ -46,6 +48,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [emailEnabled, setEmailEnabled] = useState(false);
   const [historyRetentionDays, setHistoryRetentionDays] = useState(3);
   const [maintenanceMode, setMaintenanceMode] = useState(false);
+  const [tokenEnforcement, setTokenEnforcement] = useState(true);
+  const [defaultToolCost, setDefaultToolCost] = useState(1);
 
   const refresh = useCallback(async () => {
     try {
@@ -58,6 +62,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (typeof d.history_retention_days === "number")
         setHistoryRetentionDays(d.history_retention_days);
       setMaintenanceMode(Boolean(d.maintenance_mode));
+      setTokenEnforcement(d.token_enforcement !== false);
+      if (typeof d.default_tool_cost === "number") setDefaultToolCost(d.default_tool_cost);
     } catch {
       setUser(null);
     } finally {
@@ -147,7 +153,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthCtx.Provider
-      value={{ loading, user, googleEnabled, adminEnabled, emailEnabled, historyRetentionDays, maintenanceMode, refresh, adminLogin, changeAdminPassword, passwordLogin, resetPassword, logout }}
+      value={{ loading, user, googleEnabled, adminEnabled, emailEnabled, historyRetentionDays, maintenanceMode, tokenEnforcement, defaultToolCost, refresh, adminLogin, changeAdminPassword, passwordLogin, resetPassword, logout }}
     >
       {children}
     </AuthCtx.Provider>

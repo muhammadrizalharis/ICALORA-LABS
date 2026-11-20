@@ -19,6 +19,7 @@ from app.services.ai_detector.report_pdf import build_ai_report_pdf
 from app.services.auth import (
     get_history_item,
     get_tool_file_by_history,
+    is_internal_service_request,
     optional_user_from_request,
     record_history,
     save_tool_file,
@@ -151,6 +152,12 @@ def _access_guard(request: Request) -> None:
     is_admin = bool(user and user.get("is_admin"))
     if is_admin:
         return
+    # Semua layanan wajib login (Google/email). Pengecualian: panggilan internal bot.
+    if not user and not is_internal_service_request(request):
+        raise HTTPException(
+            status_code=401,
+            detail="Silakan masuk dulu (Google atau email) untuk memakai layanan ini.",
+        )
     if admin_svc.is_maintenance():
         raise HTTPException(
             status_code=503,
@@ -213,6 +220,8 @@ def _enforce_token_cost(request: Request, user: dict | None, slug: str) -> None:
     if not user or user.get("id") is None:
         # Tanpa akun tidak bisa dipotong token; rate-limit sudah menjaga.
         return
+    if user.get("is_demo"):
+        return  # akun demo: token tidak terbatas (Super Admin sudah dikecualikan di guard)
     cost = admin_svc.tool_cost(slug)
     if cost <= 0:
         return
