@@ -17,7 +17,7 @@ function fmt(n: number): string {
 const STATIC = [
   { label: "Fitur Terintegrasi", value: "13", live: false },
   { label: "Privasi", value: "100%", live: false },
-  { label: "Biaya", value: "Gratis", live: false },
+  { label: "Biaya langganan", value: "Rp0", live: false },
 ];
 
 export default function StatsBar() {

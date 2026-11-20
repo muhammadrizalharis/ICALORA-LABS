@@ -65,7 +65,7 @@ class LogisticModel:
         }
 
     @classmethod
-    def from_dict(cls, d: dict) -> "LogisticModel":
+    def from_dict(cls, d: dict) -> LogisticModel:
         return cls(
             d["weights"], d["bias"], d["mean"], d["std"],
             d.get("meta"), d.get("features"),

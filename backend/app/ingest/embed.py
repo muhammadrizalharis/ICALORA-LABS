@@ -88,7 +88,10 @@ def run(target: int, batch: int, pause: float) -> None:
     done = 0
     batches = 0
     if _EMBED_TARGET_TOTAL > 0:
-        print(f"[embed] batas coverage global: {_EMBED_TARGET_TOTAL:,} embedding total.", flush=True)
+        print(
+            f"[embed] batas coverage global: {_EMBED_TARGET_TOTAL:,} embedding total.",
+            flush=True,
+        )
         if _target_reached():
             print("[embed] target coverage global sudah tercapai — tidak ada yang dikerjakan.")
             return

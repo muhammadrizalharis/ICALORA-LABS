@@ -31,8 +31,7 @@ from app.core.config import get_settings
 from app.ingest.common import text_metrics
 from app.services.file_extract import extract_text
 
-from . import _WORD_RE, _chunk_match, _extract_own_dois, _report_id, _sentences, _shingles
-from . import online_cache
+from . import _chunk_match, _extract_own_dois, _report_id, _sentences, _shingles, online_cache
 
 settings = get_settings()
 
