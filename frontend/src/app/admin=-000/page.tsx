@@ -8,6 +8,7 @@ import {
   AdminUser,
   AnalyticsOverview,
   AppSettings,
+  AuditItem,
   FEATURE_LABELS,
   HistoryItem,
   UserStats,
@@ -15,6 +16,8 @@ import {
   getActivity,
   getAnalytics,
   getSettings,
+  giveTokens,
+  listAudit,
   listUsers,
   patchUser,
   putSettings,
@@ -24,7 +27,8 @@ import {
 
 export default function AdminPage() {
   const { user, loading, adminEnabled, adminLogin } = useAuth();
-  const isAdmin = Boolean(user?.is_admin);
+  // Super Admin (tunggal) atau admin biasa boleh membuka panel; isinya dibedakan per peran.
+  const canOpen = Boolean(user?.is_admin || user?.is_staff);
 
   if (loading) {
     return (
@@ -33,7 +37,7 @@ export default function AdminPage() {
       </div>
     );
   }
-  if (!isAdmin) {
+  if (!canOpen) {
     return <AdminLogin adminEnabled={adminEnabled} adminLogin={adminLogin} />;
   }
   return <AdminPanel />;
@@ -78,6 +82,13 @@ function AdminLogin({
         <p className="mt-2 text-center text-sm text-neutral-500 dark:text-neutral-400">
           Halaman privat. Masukkan kata sandi admin untuk melanjutkan.
         </p>
+        <p className="mt-1 text-center text-xs text-neutral-400">
+          Admin biasa: masuk dulu lewat halaman{" "}
+          <a href="/login" className="underline">
+            Masuk
+          </a>{" "}
+          (Google/email), lalu buka halaman ini lagi.
+        </p>
         {adminEnabled === false ? (
           <div className="mt-6 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
             Super admin belum dikonfigurasi di server (ADMIN_PASSWORD kosong).
@@ -113,17 +124,20 @@ function AdminLogin({
 function AdminPanel() {
   const { user, logout } = useAuth();
   const router = useRouter();
-  const [tab, setTab] = useState<"aktivitas" | "users" | "settings">("aktivitas");
+  const isSuper = Boolean(user?.is_admin);
+  type Tab = "aktivitas" | "users" | "audit" | "settings";
+  const tabs: Tab[] = isSuper ? ["aktivitas", "users", "audit", "settings"] : ["users"];
+  const [tab, setTab] = useState<Tab>(isSuper ? "aktivitas" : "users");
 
   return (
     <div className="mx-auto max-w-6xl p-4 sm:p-8">
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="text-[11px] uppercase tracking-widest text-neutral-400">
-            Super Admin
+            {isSuper ? "Super Admin" : "Admin"}
           </div>
           <h1 className="text-2xl font-bold text-neutral-900 dark:text-neutral-50">
-            Panel Pengelolaan
+            {isSuper ? "Panel Pengelolaan" : "Panel Admin"}
           </h1>
           <p className="text-sm text-neutral-500">Masuk sebagai {user?.email}</p>
         </div>
@@ -147,7 +161,7 @@ function AdminPanel() {
       </div>
 
       <div className="mb-5 flex gap-1 border-b border-c">
-        {(["aktivitas", "users", "settings"] as const).map((t) => (
+        {tabs.map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -161,15 +175,27 @@ function AdminPanel() {
               ? "Aktivitas"
               : t === "users"
                 ? "Pengguna"
-                : "Pengaturan Aplikasi"}
+                : t === "audit"
+                  ? "Log Tindakan"
+                  : "Pengaturan Aplikasi"}
           </button>
         ))}
       </div>
 
-      {tab === "aktivitas" ? (
+      {!isSuper && (
+        <div className="mb-4 rounded-lg border border-c surface-2 p-3 text-xs text-neutral-500">
+          Sebagai <b>Admin</b>, kamu dapat melihat pengguna dan <b>menambah token</b> untuk
+          pengguna biasa (ada batas per pemberian, dan setiap pemberian tercatat). Pengaturan,
+          peran, dan data dokumen pengguna hanya bisa diakses Super Admin.
+        </div>
+      )}
+
+      {tab === "aktivitas" && isSuper ? (
         <ActivityTab />
       ) : tab === "users" ? (
-        <UsersTab adminId={user?.id ?? -1} />
+        <UsersTab adminId={user?.id ?? -1} isSuper={isSuper} />
+      ) : tab === "audit" && isSuper ? (
+        <AuditTab />
       ) : (
         <SettingsTab />
       )}
@@ -479,7 +505,7 @@ function ActivityTab() {
 
 /* ------------------------------- USERS ------------------------------- */
 
-function UsersTab({ adminId }: { adminId: number }) {
+function UsersTab({ adminId, isSuper }: { adminId: number; isSuper: boolean }) {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [stats, setStats] = useState<UserStats | null>(null);
   const [q, setQ] = useState("");
@@ -511,6 +537,18 @@ function UsersTab({ adminId }: { adminId: number }) {
       setMsg(`✓ ${label}`);
     } catch (e) {
       setMsg(e instanceof Error ? e.message : "Gagal menyimpan.");
+    }
+  }
+
+  async function addTokens(u: AdminUser, amount: number) {
+    try {
+      const d = await giveTokens(u.id, { add: amount });
+      setUsers((prev) =>
+        prev.map((x) => (x.id === u.id ? { ...x, token_balance: d.token_balance } : x)),
+      );
+      setMsg(`✓ +${amount.toLocaleString("id-ID")} token untuk ${u.email}`);
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "Gagal memberi token.");
     }
   }
 
@@ -580,9 +618,9 @@ function UsersTab({ adminId }: { adminId: number }) {
               <tr className="border-b border-c text-left text-xs uppercase tracking-wide text-neutral-400">
                 <th className="px-3 py-3">Pengguna</th>
                 <th className="px-3 py-3">Token</th>
-                <th className="px-3 py-3">Admin</th>
+                <th className="px-3 py-3">Peran</th>
                 <th className="px-3 py-3">Status</th>
-                <th className="px-3 py-3">Aksi</th>
+                {isSuper && <th className="px-3 py-3">Aksi</th>}
               </tr>
             </thead>
             <tbody>
@@ -600,27 +638,56 @@ function UsersTab({ adminId }: { adminId: number }) {
                     <div className="text-xs text-neutral-500">{u.email}</div>
                   </td>
                   <td className="px-3 py-3">
-                    <TokenEditor
-                      value={u.token_balance}
-                      onSave={(v) => update(u.id, { token_balance: v }, "Token diperbarui")}
-                    />
+                    {u.is_demo ? (
+                      <span className="text-xs text-neutral-400">∞ (demo)</span>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {isSuper ? (
+                          <TokenEditor
+                            value={u.token_balance}
+                            onSave={(v) => update(u.id, { token_balance: v }, "Token diperbarui")}
+                          />
+                        ) : (
+                          <div className="font-medium">{u.token_balance.toLocaleString("id-ID")}</div>
+                        )}
+                        {/* Admin biasa hanya boleh menambah ke pengguna biasa. */}
+                        {(isSuper || (!u.is_admin && !u.is_staff && u.id !== adminId)) && (
+                          <TokenGiver onGive={(n) => addTokens(u, n)} />
+                        )}
+                      </div>
+                    )}
                   </td>
                   <td className="px-3 py-3">
-                    <button
-                      disabled={u.id === adminId}
-                      onClick={() =>
-                        update(u.id, { is_admin: !u.is_admin }, u.is_admin ? "Admin dicabut" : "Dijadikan admin")
-                      }
-                      className={`rounded-full px-3 py-1 text-xs font-medium disabled:opacity-40 ${
-                        u.is_admin
-                          ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
-                          : "bg-neutral-100 text-neutral-500 dark:bg-neutral-800"
-                      }`}
-                    >
-                      {u.is_admin ? "Admin" : "Bukan"}
-                    </button>
+                    {isSuper && !u.is_admin && !u.is_demo ? (
+                      <button
+                        onClick={() =>
+                          update(
+                            u.id,
+                            { is_staff: !u.is_staff },
+                            u.is_staff ? "Peran Admin dicabut" : "Dijadikan Admin",
+                          )
+                        }
+                        className={`rounded-full px-3 py-1 text-xs font-medium ${
+                          u.is_staff
+                            ? "bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-300"
+                            : "bg-neutral-100 text-neutral-500 dark:bg-neutral-800"
+                        }`}
+                        title="Klik untuk mengubah peran"
+                      >
+                        {u.is_staff ? "Admin" : "Pengguna"}
+                      </button>
+                    ) : (
+                      <span className="text-xs text-neutral-500">
+                        {u.is_admin ? "Super Admin" : u.is_staff ? "Admin" : u.is_demo ? "Demo" : "Pengguna"}
+                      </span>
+                    )}
                   </td>
                   <td className="px-3 py-3">
+                    {!isSuper ? (
+                      <span className={`text-xs ${u.is_active ? "text-emerald-600" : "text-red-500"}`}>
+                        {u.is_active ? "Aktif" : "Nonaktif"}
+                      </span>
+                    ) : (
                     <button
                       disabled={u.id === adminId}
                       onClick={() =>
@@ -634,7 +701,9 @@ function UsersTab({ adminId }: { adminId: number }) {
                     >
                       {u.is_active ? "Aktif" : "Nonaktif"}
                     </button>
+                    )}
                   </td>
+                  {isSuper && (
                   <td className="px-3 py-3">
                     <div className="flex gap-2">
                       <button
@@ -658,11 +727,12 @@ function UsersTab({ adminId }: { adminId: number }) {
                       </button>
                     </div>
                   </td>
+                  )}
                 </tr>
               ))}
               {users.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-3 py-8 text-center text-neutral-500">
+                  <td colSpan={isSuper ? 5 : 4} className="px-3 py-8 text-center text-neutral-500">
                     Tidak ada pengguna.
                   </td>
                 </tr>
@@ -748,6 +818,112 @@ function HistoryModal({ user, onClose }: { user: AdminUser; onClose: () => void 
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function TokenGiver({ onGive }: { onGive: (n: number) => Promise<void> | void }) {
+  const [v, setV] = useState("100");
+  const [busy, setBusy] = useState(false);
+  const n = parseInt(v || "0", 10);
+  return (
+    <div className="flex items-center gap-1">
+      <input
+        type="number"
+        value={v}
+        min={1}
+        onChange={(e) => setV(e.target.value)}
+        className="w-20 rounded-lg border border-c surface-2 px-2 py-1 text-xs outline-none focus:border-[color:var(--brand)]"
+        aria-label="Jumlah token yang ditambahkan"
+      />
+      <button
+        disabled={busy || !(n >= 1)}
+        onClick={async () => {
+          setBusy(true);
+          try {
+            await onGive(n);
+          } finally {
+            setBusy(false);
+          }
+        }}
+        className="rounded-lg border border-c surface-2 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40 dark:hover:bg-neutral-900"
+      >
+        + Tambah
+      </button>
+    </div>
+  );
+}
+
+const AUDIT_LABELS: Record<string, string> = {
+  "tokens.add": "Menambah token",
+  "tokens.set": "Menetapkan saldo",
+  "user.tokens_set": "Menetapkan saldo",
+  "user.role": "Mengubah peran Admin",
+  "user.active": "Mengubah status aktif",
+  "user.rename": "Mengubah nama",
+  "user.reset_password": "Reset kata sandi",
+  "user.delete": "Menghapus pengguna",
+};
+
+function auditDetail(a: AuditItem): string {
+  const d = a.detail ?? {};
+  if (a.action === "tokens.add")
+    return `+${d.add} (saldo ${d.balance_before} → ${d.balance_after})`;
+  if (a.action === "tokens.set") return `saldo ${d.balance_before} → ${d.balance_after}`;
+  if ("from" in d || "to" in d) return `${String(d.from)} → ${String(d.to)}`;
+  return "";
+}
+
+function AuditTab() {
+  const [items, setItems] = useState<AuditItem[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    listAudit(200)
+      .then((d) => setItems(d.items))
+      .catch((e) => setErr(e instanceof Error ? e.message : "Gagal memuat."));
+  }, []);
+
+  if (err) return <div className="p-6 text-sm text-red-500">{err}</div>;
+  if (!items) return <div className="p-8 text-center text-sm text-neutral-500">Memuat…</div>;
+  return (
+    <div className="overflow-x-auto rounded-xl border border-c surface">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-c text-left text-xs uppercase tracking-wide text-neutral-400">
+            <th className="px-3 py-3">Waktu</th>
+            <th className="px-3 py-3">Oleh</th>
+            <th className="px-3 py-3">Tindakan</th>
+            <th className="px-3 py-3">Pengguna</th>
+            <th className="px-3 py-3">Rincian</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((a) => (
+            <tr key={a.id} className="border-b border-c last:border-0">
+              <td className="whitespace-nowrap px-3 py-2 text-xs text-neutral-500">
+                {timeAgo(a.created_at)}
+              </td>
+              <td className="px-3 py-2 text-xs">
+                {a.actor_email}
+                <span className="ml-1 rounded bg-neutral-100 px-1 text-[10px] text-neutral-500 dark:bg-neutral-800">
+                  {a.actor_role === "super" ? "Super" : "Admin"}
+                </span>
+              </td>
+              <td className="px-3 py-2">{AUDIT_LABELS[a.action] ?? a.action}</td>
+              <td className="px-3 py-2 text-xs">{a.target_email ?? "—"}</td>
+              <td className="px-3 py-2 text-xs text-neutral-500">{auditDetail(a)}</td>
+            </tr>
+          ))}
+          {items.length === 0 && (
+            <tr>
+              <td colSpan={5} className="px-3 py-8 text-center text-neutral-500">
+                Belum ada tindakan tercatat.
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
     </div>
   );
 }

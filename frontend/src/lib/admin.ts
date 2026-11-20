@@ -10,6 +10,8 @@ export interface AdminUser {
   token_balance: number;
   is_demo: boolean;
   is_admin: boolean;
+  is_staff: boolean;
+  role: "super" | "admin" | "demo" | "user";
   is_active: boolean;
   created_at: string | null;
   last_login_at: string | null;
@@ -61,9 +63,32 @@ export function listUsers(q = ""): Promise<{ users: AdminUser[]; stats: UserStat
 
 export function patchUser(
   id: number,
-  fields: Partial<Pick<AdminUser, "token_balance" | "is_admin" | "is_active" | "name">>,
+  fields: Partial<Pick<AdminUser, "token_balance" | "is_staff" | "is_active" | "name">>,
 ): Promise<{ ok: boolean; user: AdminUser }> {
   return req(`/auth/admin/users/${id}`, { method: "PATCH", body: JSON.stringify(fields) });
+}
+
+/** Beri token. Admin biasa: hanya `add` (ada batas per pemberian). Super Admin: add/set. */
+export function giveTokens(
+  id: number,
+  body: { add: number } | { set: number },
+): Promise<{ ok: boolean; user_id: number; token_balance: number }> {
+  return req(`/auth/admin/users/${id}/tokens`, { method: "POST", body: JSON.stringify(body) });
+}
+
+export interface AuditItem {
+  id: number;
+  created_at: string | null;
+  actor_email: string | null;
+  actor_role: string | null;
+  action: string;
+  target_id: number | null;
+  target_email: string | null;
+  detail: Record<string, unknown>;
+}
+
+export function listAudit(limit = 100): Promise<{ items: AuditItem[] }> {
+  return req(`/auth/admin/audit?limit=${limit}`);
 }
 
 export function deleteUser(id: number): Promise<{ ok: boolean }> {
