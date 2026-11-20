@@ -1630,10 +1630,13 @@ def _flatten(results: list) -> list[dict]:
 
 
 def _has_identity_hit(cands: list[dict], doc: str, title_hint: str = "") -> bool:
-    """Ada kandidat yang meyakinkan sebagai paper terbit dokumen ini?
+    """Ada kandidat yang MEYAKINKAN sebagai paper terbit dokumen ini?
 
-    Sinyal kuat: DOI sendiri, muncul untuk >= 2 frasa isi, kemiripan judul tinggi,
-    atau semua kata judul kandidat (tanpa abstrak) termuat di dokumen.
+    Hanya sinyal kuat yang dihitung: DOI sendiri, muncul untuk >= 2 frasa isi berbeda
+    (pencarian teks penuh), atau kemiripan judul tinggi. Sinyal "kata judul termuat di
+    dokumen" SENGAJA tidak dipakai di sini: paper LAIN yang kata judulnya kebetulan ada
+    di naskah akan dianggap ketemu dan tahap 2 dilewati, padahal paper aslinya belum
+    ditemukan (regresi nyata pada uji validasi). Sinyal itu hanya untuk gerbang unduhan.
     """
     own = {d.lower() for d in _extract_own_dois(doc)}
     titles = [t for t in (_extract_title(doc), _clean(title_hint or "")) if t]
@@ -1644,8 +1647,6 @@ def _has_identity_hit(cands: list[dict], doc: str, title_hint: str = "") -> bool
             return True
         ct = c.get("title") or ""
         if any(_title_jaccard(ct, t) >= 0.6 for t in titles):
-            return True
-        if _title_in_doc_score(c, doc) >= 0.9:
             return True
     return False
 
