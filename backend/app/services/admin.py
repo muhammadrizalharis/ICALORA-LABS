@@ -84,6 +84,23 @@ def ensure_settings_schema() -> None:
                 "is_active boolean NOT NULL DEFAULT TRUE"
             )
         )
+        c.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS admin_audit ("
+                "id bigserial PRIMARY KEY, "
+                "created_at timestamptz NOT NULL DEFAULT now(), "
+                "actor_id bigint, actor_email text, actor_role text, "
+                "action text NOT NULL, "
+                "target_id bigint, target_email text, "
+                "detail jsonb NOT NULL DEFAULT '{}'::jsonb)"
+            )
+        )
+        c.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_admin_audit_created "
+                "ON admin_audit(created_at DESC)"
+            )
+        )
     _schema_ready = True
 
 
@@ -249,7 +266,7 @@ def charge_tokens(user_id: int, amount: int) -> bool:
 # ---- manajemen pengguna ----
 
 _USER_COLS = (
-    "id, email, name, picture, token_balance, is_demo, is_admin, "
+    "id, email, name, picture, token_balance, is_demo, is_admin, is_staff, "
     "COALESCE(is_active, TRUE) AS is_active, created_at, last_login_at"
 )
 
@@ -263,6 +280,8 @@ def _row_to_admin_user(r) -> dict:
         "token_balance": r.token_balance,
         "is_demo": bool(r.is_demo),
         "is_admin": bool(r.is_admin),
+        "is_staff": bool(r.is_staff),
+        "role": auth_svc.user_role(r),
         "is_active": bool(getattr(r, "is_active", True)),
         "created_at": r.created_at.isoformat() if r.created_at else None,
         "last_login_at": r.last_login_at.isoformat() if r.last_login_at else None,
@@ -292,16 +311,20 @@ def get_admin_user(user_id: int) -> dict | None:
 
 
 def update_user(user_id: int, fields: dict[str, Any]) -> dict | None:
-    """Perbarui token_balance / is_admin / is_active / name untuk satu user."""
+    """Perbarui token_balance / is_staff / is_active / name untuk satu user.
+
+    `is_admin` (Super Admin) sengaja TIDAK bisa diubah lewat sini: Super Admin hanya satu
+    akun (ADMIN_EMAIL) yang dibuat lewat login admin.
+    """
     ensure_settings_schema()
     sets: list[str] = []
     params: dict[str, Any] = {"id": user_id}
     if "token_balance" in fields and fields["token_balance"] is not None:
         sets.append("token_balance = :tb")
         params["tb"] = max(0, int(fields["token_balance"]))
-    if "is_admin" in fields and fields["is_admin"] is not None:
-        sets.append("is_admin = :ia")
-        params["ia"] = bool(fields["is_admin"])
+    if "is_staff" in fields and fields["is_staff"] is not None:
+        sets.append("is_staff = :st")
+        params["st"] = bool(fields["is_staff"])
     if "is_active" in fields and fields["is_active"] is not None:
         sets.append("is_active = :ac")
         params["ac"] = bool(fields["is_active"])
@@ -315,6 +338,83 @@ def update_user(user_id: int, fields: dict[str, Any]) -> dict | None:
             text(f"UPDATE users SET {', '.join(sets)} WHERE id = :id"), params
         )
     return get_admin_user(user_id)
+
+
+MAX_TOKEN_BALANCE = 1_000_000_000
+
+
+def add_tokens(user_id: int, amount: int) -> int | None:
+    """Tambah `amount` token secara atomik; kembalikan saldo baru (None bila user tak ada)."""
+    ensure_settings_schema()
+    with engine.begin() as c:
+        row = c.execute(
+            text(
+                "UPDATE users SET token_balance = LEAST(token_balance + :n, :mx) "
+                "WHERE id = :id RETURNING token_balance"
+            ),
+            {"n": int(amount), "id": user_id, "mx": MAX_TOKEN_BALANCE},
+        ).first()
+    return int(row[0]) if row else None
+
+
+def record_audit(
+    actor: dict, action: str, target: dict | None = None, detail: dict | None = None
+) -> None:
+    """Catat tindakan admin (siapa, apa, pada siapa). Gagal-aman: tak memblokir aksi."""
+    try:
+        ensure_settings_schema()
+        with engine.begin() as c:
+            c.execute(
+                text(
+                    "INSERT INTO admin_audit (actor_id, actor_email, actor_role, action, "
+                    "target_id, target_email, detail) "
+                    "VALUES (:aid, :ae, :ar, :act, :tid, :te, CAST(:d AS jsonb))"
+                ),
+                {
+                    "aid": actor.get("id"),
+                    "ae": actor.get("email"),
+                    "ar": actor.get("role") or ("super" if actor.get("is_admin") else "admin"),
+                    "act": action,
+                    "tid": (target or {}).get("id"),
+                    "te": (target or {}).get("email"),
+                    "d": json.dumps(detail or {}, ensure_ascii=False),
+                },
+            )
+    except Exception:  # noqa: BLE001, S110
+        pass
+
+
+def list_audit(limit: int = 100) -> list[dict]:
+    ensure_settings_schema()
+    with engine.connect() as c:
+        rows = c.execute(
+            text(
+                "SELECT id, created_at, actor_email, actor_role, action, target_id, "
+                "target_email, detail FROM admin_audit ORDER BY id DESC LIMIT :lim"
+            ),
+            {"lim": min(max(limit, 1), 500)},
+        ).fetchall()
+    out = []
+    for r in rows:
+        detail = r.detail
+        if isinstance(detail, str):
+            try:
+                detail = json.loads(detail)
+            except Exception:  # noqa: BLE001
+                detail = {}
+        out.append(
+            {
+                "id": r.id,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "actor_email": r.actor_email,
+                "actor_role": r.actor_role,
+                "action": r.action,
+                "target_id": r.target_id,
+                "target_email": r.target_email,
+                "detail": detail or {},
+            }
+        )
+    return out
 
 
 def delete_user(user_id: int) -> bool:
@@ -332,7 +432,7 @@ def count_users() -> dict[str, int]:
     with engine.connect() as c:
         total = c.execute(text("SELECT count(*) FROM users")).scalar() or 0
         admins = c.execute(
-            text("SELECT count(*) FROM users WHERE is_admin")
+            text("SELECT count(*) FROM users WHERE is_admin OR is_staff")
         ).scalar() or 0
         inactive = c.execute(
             text("SELECT count(*) FROM users WHERE NOT COALESCE(is_active, TRUE)")

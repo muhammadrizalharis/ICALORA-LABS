@@ -197,9 +197,9 @@ export default function AkunPage() {
           <div>
             <div className="font-semibold">{user?.name ?? "Pengguna"}</div>
             <div className="text-sm text-neutral-400">{user?.email}</div>
-            {user?.is_admin && (
+            {(user?.is_admin || user?.is_staff) && (
               <span className="mt-1 inline-block rounded-full border border-c px-2 py-0.5 text-[10px] text-neutral-400">
-                Super Admin
+                {user?.is_admin ? "Super Admin" : "Admin"}
               </span>
             )}
           </div>
@@ -216,7 +216,13 @@ export default function AkunPage() {
           <div className="rounded-xl border border-c surface p-4">
             <div className="text-xs text-neutral-400">Peran</div>
             <div className="text-xl font-bold">
-              {user?.is_admin ? "Super Admin" : user?.is_demo ? "Demo" : "Pengguna"}
+              {user?.is_admin
+                ? "Super Admin"
+                : user?.is_staff
+                  ? "Admin"
+                  : user?.is_demo
+                    ? "Demo"
+                    : "Pengguna"}
             </div>
           </div>
         </div>

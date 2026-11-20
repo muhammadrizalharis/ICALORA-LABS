@@ -32,7 +32,7 @@ export default function DashboardHome() {
         <div className="rounded-2xl border border-c surface-2 p-5">
           <div className="text-xs text-neutral-500 dark:text-neutral-400">Status Akun</div>
           <div className="mt-1 text-2xl font-bold text-[color:var(--brand)]">
-            {user?.is_admin ? "Super Admin" : "Aktif"}
+            {user?.is_admin ? "Super Admin" : user?.is_staff ? "Admin" : "Aktif"}
           </div>
           <div className="text-xs text-neutral-400">{user?.email}</div>
         </div>

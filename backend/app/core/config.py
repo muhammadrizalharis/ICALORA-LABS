@@ -82,6 +82,10 @@ class Settings(BaseSettings):
     admin_password: str = Field(default="")
     admin_email: str = Field(default="admin@icalora-labs.local")
     admin_name: str = Field(default="Super Admin")
+    # Batas token yang boleh diberikan admin BIASA dalam satu kali pemberian
+    # (Super Admin tanpa batas). Pagar agar akun admin biasa yang bocor tak bisa
+    # membagikan saldo tak terbatas.
+    staff_max_token_grant: int = Field(default=10_000)
     google_client_id: str = Field(default="")
     google_client_secret: str = Field(default="")
 
