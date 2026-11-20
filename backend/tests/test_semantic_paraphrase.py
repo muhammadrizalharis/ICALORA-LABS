@@ -140,3 +140,28 @@ def test_pdf_cover_shows_semantic_banner_escaped():
     assert "tidak memasukkan temuan ini" in html
     assert _semantic_block(None) == ""
     assert "Indikasi parafrase" not in _cover_html({"sources": [], "match_groups": []})
+
+
+def _wrap(text: str, width: int = 60) -> str:
+    import textwrap
+
+    return "\n".join(textwrap.fill(p, width) for p in text.split("\n\n"))
+
+
+def test_unwrap_joins_pdf_line_breaks_but_keeps_paragraphs():
+    assert sem._unwrap("a b\nc d\n\ne f") == "a b c d\n\ne f"
+    assert sem._unwrap("x  \t y") == "x y"
+    assert sem._unwrap("") == ""
+
+
+def test_pdf_wrapped_document_gives_same_windows_as_unwrapped():
+    # Regresi nyata: teks PDF terbungkus baris menghasilkan >2x jendela serpihan dan
+    # deteksi parafrase gagal (0% vs 97%).
+    raw = _text(["vortex", "sediment", "porous"], 30)
+    assert sem._windows(_wrap(raw), 300) == sem._windows(raw, 300)
+
+
+def test_paraphrase_detected_even_when_document_is_pdf_wrapped():
+    doc = _wrap(_text(["vortex", "sediment", "porous"], 30).replace("membahas", "menguraikan"))
+    out = sem.find_semantic_source(doc, [SRC], RESULT, llm=FakeLLM())
+    assert out and out["coverage"] >= 90

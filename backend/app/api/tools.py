@@ -1,6 +1,7 @@
 """Endpoint fitur ringan Fase 1."""
 
 import asyncio
+import logging
 import os
 import re
 import threading
@@ -78,6 +79,7 @@ from app.services.transkrip import (
 )
 
 router = APIRouter(prefix="/tools", tags=["tools"])
+logger = logging.getLogger(__name__)
 
 # Tidak ada batas fungsional untuk panjang teks. Angka ini hanya pagar
 # keamanan agar server (dibagi 24/7) tidak kehabisan memori pada input
@@ -809,6 +811,9 @@ async def _run_plagiarism_merged(
                 timeout=max(30, settings.online_semantic_seconds),
             )
         except Exception:  # noqa: BLE001
+            # Jangan batalkan laporan, tetapi JANGAN ditelan diam-diam: kegagalan harus
+            # terlihat di log agar bug seperti ini tak butuh reproduksi manual lagi.
+            logger.warning("Deteksi parafrase semantik gagal", exc_info=True)
             sem = None
         if sem:
             res["semantic_match"] = sem

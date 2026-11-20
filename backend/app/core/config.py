@@ -151,6 +151,8 @@ class Settings(BaseSettings):
     # mencakup seluruh isi sumber, bukan hanya abstrak. Tetap ephemeral
     # (di memori, tak disimpan) → nol tambahan disk.
     online_fulltext_similar_docs: int = Field(default=32)
+    # Kandidat SEPOKOK (kata abstrak) yang ikut diunduh teks penuhnya saat naskah tanpa abstrak.
+    online_fulltext_topical_docs: int = Field(default=8)
     # Cache teks-penuh OA yang BERHASIL diunduh (disimpan sebagai TEKS di DB,
     # bukan berkas PDF → tetap hemat disk). Tujuannya determinisme: sekali teks
     # penuh sebuah sumber terunduh, pemeriksaan berikutnya MEMAKAI ULANG teks
