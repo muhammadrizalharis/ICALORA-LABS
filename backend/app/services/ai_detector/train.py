@@ -41,7 +41,6 @@ from app.services.ai_detector.embed import EMB_DIM, EMB_ENDPOINT, embed_text
 from app.services.ai_detector.model import (
     EMB_MODEL_PATH,
     FEATURES,
-    LogisticModel,
     feature_vector,
     save,
     train,
@@ -454,7 +453,7 @@ def _generate_ai(lanes: list[tuple[str, str]], target_ai: int, titles: list[str]
 
 def _evaluate(model, X: list[list[float]], y: list[int]) -> dict:
     tp = tn = fp = fn = 0
-    for xi, yi in zip(X, y):
+    for xi, yi in zip(X, y, strict=False):
         pred = 1 if model.predict_proba(xi) >= 0.5 else 0
         if yi == 1 and pred == 1:
             tp += 1

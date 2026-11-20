@@ -31,7 +31,8 @@ def ensure_schema(skip_emb_index: bool | None = None) -> None:
     ICALORA_SKIP_EMB_INDEX (1/true untuk lewati).
     """
     if skip_emb_index is None:
-        skip_emb_index = os.environ.get("ICALORA_SKIP_EMB_INDEX", "").lower() in ("1", "true", "yes")
+        flag = os.environ.get("ICALORA_SKIP_EMB_INDEX", "").lower()
+        skip_emb_index = flag in ("1", "true", "yes")
     sql = (Path(__file__).parent / "schema.sql").read_text(encoding="utf-8")
     with engine.begin() as conn:
         for stmt in [s.strip() for s in sql.split(";") if s.strip()]:

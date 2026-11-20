@@ -82,6 +82,10 @@ class Settings(BaseSettings):
     admin_password: str = Field(default="")
     admin_email: str = Field(default="admin@icalora-labs.local")
     admin_name: str = Field(default="Super Admin")
+    # Batas token yang boleh diberikan admin BIASA dalam satu kali pemberian
+    # (Super Admin tanpa batas). Pagar agar akun admin biasa yang bocor tak bisa
+    # membagikan saldo tak terbatas.
+    staff_max_token_grant: int = Field(default=10_000)
     google_client_id: str = Field(default="")
     google_client_secret: str = Field(default="")
 
@@ -128,6 +132,11 @@ class Settings(BaseSettings):
     # sebagai publikasi dokumen (DOI/judul sendiri). Diproses ephemeral di
     # memori saat pengecekan — TIDAK disimpan ke disk/DB, jadi tak menambah
     # penyimpanan. Ini membuat % plagiarisme akurat untuk karya terbit/duplikat.
+    # Deteksi parafrase semantik terhadap teks penuh paper kandidat (lihat plagiarism/semantic.py).
+    online_semantic_enabled: bool = Field(default=True)
+    online_semantic_seconds: int = Field(default=240)
+    semantic_match_cos: float = Field(default=0.80)  # jendela cocok bila cosine >= ini
+    semantic_min_coverage: float = Field(default=35.0)  # % jendela dokumen agar ditandai
     online_fulltext_enabled: bool = Field(default=True)
     online_fulltext_max_bytes: int = Field(default=20 * 1024 * 1024)
     online_fulltext_max_docs: int = Field(default=10)

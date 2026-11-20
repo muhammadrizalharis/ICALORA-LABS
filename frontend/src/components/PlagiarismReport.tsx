@@ -194,6 +194,52 @@ export default function PlagiarismReport({ report, documentText, docTitle = "", 
         </div>
       )}
 
+      {report.semantic_match && (
+        <div className="rounded-xl border border-violet-400 bg-violet-50 px-4 py-3 text-xs text-violet-900 dark:border-violet-500/60 dark:bg-violet-500/10 dark:text-violet-100">
+          <div className="text-sm font-extrabold">🔁 Indikasi parafrase dari paper terbit</div>
+          <div className="mt-1 text-sm font-semibold">
+            {report.semantic_match.url ? (
+              <a
+                href={report.semantic_match.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline"
+              >
+                {report.semantic_match.title || "Tanpa judul"}
+              </a>
+            ) : (
+              report.semantic_match.title || "Tanpa judul"
+            )}
+          </div>
+          <div className="mt-0.5 opacity-80">
+            {report.semantic_match.source}
+            {report.semantic_match.doi ? ` · DOI ${report.semantic_match.doi}` : ""}
+          </div>
+          <div className="mt-1 opacity-90">
+            <b>{report.semantic_match.coverage.toFixed(0)}%</b> bagian dokumen (
+            {report.semantic_match.matched_windows} dari {report.semantic_match.total_windows}{" "}
+            potongan dua-kalimat) bermakna sama dengan teks penuh paper ini walau kata-katanya
+            berbeda. Ini <b>indikasi, bukan bukti</b>. Angka Similarity Index tidak memasukkan
+            temuan ini.
+          </div>
+          {report.semantic_match.examples.length > 0 && (
+            <details className="mt-2">
+              <summary className="cursor-pointer font-semibold">Lihat contoh pasangan kalimat</summary>
+              <div className="mt-2 space-y-2">
+                {report.semantic_match.examples.map((ex, i) => (
+                  <div key={i} className="rounded-lg bg-white/60 p-2 dark:bg-black/20">
+                    <div className="opacity-70">Dokumen Anda · kemiripan makna {ex.cos.toFixed(2)}</div>
+                    <div>{ex.doc}</div>
+                    <div className="mt-1 opacity-70">Paper terbit</div>
+                    <div>{ex.source}</div>
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
+        </div>
+      )}
+
       {report.publication_match && (
         <div className="rounded-xl border border-amber-400 bg-amber-50 px-4 py-3 text-xs text-amber-900 dark:border-amber-500/60 dark:bg-amber-500/10 dark:text-amber-100">
           <div className="text-sm font-extrabold">

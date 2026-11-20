@@ -9,7 +9,7 @@ import httpx
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.core.config import get_settings
 from app.services import admin as admin_svc
@@ -36,9 +36,14 @@ class PasswordLoginIn(BaseModel):
 
 class AdminUserPatchIn(BaseModel):
     token_balance: int | None = None
-    is_admin: bool | None = None
+    is_staff: bool | None = None  # peran "Admin" (admin biasa); hanya Super Admin yang bisa
     is_active: bool | None = None
     name: str | None = None
+
+
+class AdminTokenIn(BaseModel):
+    add: int | None = Field(default=None, ge=1)  # tambah saldo (admin biasa & super)
+    set: int | None = Field(default=None, ge=0)  # tetapkan saldo (hanya super)
 
 
 class AdminSettingsIn(BaseModel):
@@ -95,6 +100,16 @@ def require_admin(request: Request) -> dict:
     if not user.get("is_admin"):
         raise HTTPException(status_code=403, detail="Hanya Super Admin.")
     return user
+
+
+def require_staff(request: Request) -> dict:
+    """Super Admin ATAU admin biasa (is_staff, akun aktif)."""
+    user = current_user(request)
+    if user.get("is_admin"):
+        return user
+    if user.get("is_staff") and user.get("is_active", True):
+        return user
+    raise HTTPException(status_code=403, detail="Hanya admin.")
 
 
 @router.get("/me")
@@ -284,7 +299,7 @@ def history_delete(item_id: int, user: dict = Depends(current_user)) -> dict:  #
 def admin_list_users(
     request: Request, q: str | None = None, limit: int = 200
 ) -> dict:
-    require_admin(request)
+    require_staff(request)
     return {
         "users": admin_svc.list_users(q, limit),
         "stats": admin_svc.count_users(),
@@ -297,14 +312,67 @@ def admin_patch_user(user_id: int, body: AdminUserPatchIn, request: Request) -> 
     target = admin_svc.get_admin_user(user_id)
     if not target:
         raise HTTPException(status_code=404, detail="Pengguna tidak ditemukan.")
-    # Jangan biarkan admin mencabut hak admin / menonaktifkan dirinya sendiri.
-    if user_id == admin["id"]:
-        if body.is_admin is False:
-            raise HTTPException(status_code=400, detail="Tidak bisa mencabut admin diri sendiri.")
-        if body.is_active is False:
-            raise HTTPException(status_code=400, detail="Tidak bisa menonaktifkan diri sendiri.")
-    updated = admin_svc.update_user(user_id, body.model_dump(exclude_none=True))
+    # Jangan biarkan admin menonaktifkan dirinya sendiri.
+    if user_id == admin["id"] and body.is_active is False:
+        raise HTTPException(status_code=400, detail="Tidak bisa menonaktifkan diri sendiri.")
+    if body.is_staff is not None and (target["is_admin"] or target["is_demo"]):
+        raise HTTPException(
+            status_code=400, detail="Peran Admin tidak berlaku untuk Super Admin/akun demo."
+        )
+    fields = body.model_dump(exclude_none=True)
+    before = {k: target.get(k) for k in fields}  # ambil SEBELUM diubah (untuk audit)
+    updated = admin_svc.update_user(user_id, fields)
+    for key, label in (
+        ("is_staff", "role"), ("is_active", "active"), ("token_balance", "tokens_set"),
+        ("name", "rename"),
+    ):
+        if key in fields:
+            admin_svc.record_audit(
+                admin, f"user.{label}", target, {"from": before[key], "to": fields[key]}
+            )
     return {"ok": True, "user": updated}
+
+
+@router.post("/admin/users/{user_id}/tokens")
+def admin_give_tokens(user_id: int, body: AdminTokenIn, request: Request) -> dict:
+    """Beri token. Admin biasa: hanya `add` pada pengguna biasa, dibatasi per pemberian.
+
+    Super Admin: `add` tanpa batas atau `set` (tetapkan saldo).
+    """
+    actor = require_staff(request)
+    is_super = bool(actor.get("is_admin"))
+    if (body.add is None) == (body.set is None):
+        raise HTTPException(status_code=400, detail="Isi salah satu: add atau set.")
+    if body.set is not None and not is_super:
+        raise HTTPException(status_code=403, detail="Hanya Super Admin yang bisa menetapkan saldo.")
+    target = admin_svc.get_admin_user(user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Pengguna tidak ditemukan.")
+    if not is_super:
+        if user_id == actor["id"]:
+            raise HTTPException(status_code=403, detail="Tidak bisa memberi token ke diri sendiri.")
+        if target["is_admin"] or target["is_staff"]:
+            raise HTTPException(
+                status_code=403, detail="Admin biasa hanya bisa memberi token ke pengguna biasa."
+            )
+        if body.add and body.add > settings.staff_max_token_grant:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Maksimal {settings.staff_max_token_grant:,} token per pemberian.",
+            )
+    if target["is_demo"]:
+        raise HTTPException(status_code=400, detail="Akun demo sudah tak terbatas.")
+    if body.add is not None:
+        new_balance = admin_svc.add_tokens(user_id, body.add)
+        detail = {"add": body.add, "balance_before": target["token_balance"]}
+        action = "tokens.add"
+    else:
+        updated = admin_svc.update_user(user_id, {"token_balance": body.set})
+        new_balance = updated["token_balance"] if updated else None
+        detail = {"set": body.set, "balance_before": target["token_balance"]}
+        action = "tokens.set"
+    admin_svc.record_audit(actor, action, target, {**detail, "balance_after": new_balance})
+    return {"ok": True, "user_id": user_id, "token_balance": new_balance}
 
 
 @router.delete("/admin/users/{user_id}")
@@ -312,8 +380,10 @@ def admin_delete_user(user_id: int, request: Request) -> dict:
     admin = require_admin(request)
     if user_id == admin["id"]:
         raise HTTPException(status_code=400, detail="Tidak bisa menghapus diri sendiri.")
+    target = admin_svc.get_admin_user(user_id)
     if not admin_svc.delete_user(user_id):
         raise HTTPException(status_code=404, detail="Pengguna tidak ditemukan.")
+    admin_svc.record_audit(admin, "user.delete", target)
     return {"ok": True}
 
 
@@ -329,13 +399,21 @@ def admin_user_history(
 
 @router.post("/admin/users/{user_id}/reset-password")
 def admin_reset_user_password(user_id: int, request: Request) -> dict:
-    require_admin(request)
+    admin = require_admin(request)
     target = admin_svc.get_admin_user(user_id)
     if not target:
         raise HTTPException(status_code=404, detail="Pengguna tidak ditemukan.")
     new_pw = svc.generate_password(12)
     svc.set_user_password(user_id, new_pw)
+    admin_svc.record_audit(admin, "user.reset_password", target)
     return {"ok": True, "password": new_pw, "email": target.get("email")}
+
+
+@router.get("/admin/audit")
+def admin_audit(request: Request, limit: int = 100) -> dict:
+    """Log tindakan admin (pemberian token, perubahan peran, dll). Hanya Super Admin."""
+    require_admin(request)
+    return {"items": admin_svc.list_audit(limit)}
 
 
 @router.get("/admin/analytics")

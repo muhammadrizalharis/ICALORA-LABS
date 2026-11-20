@@ -11,6 +11,9 @@ export interface User {
   token_balance: number;
   is_demo: boolean;
   is_admin: boolean;
+  is_staff: boolean;
+  /** super = Super Admin (tunggal) · admin = admin biasa · demo · user */
+  role: "super" | "admin" | "demo" | "user";
 }
 
 interface ResetPasswordResult {

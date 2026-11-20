@@ -95,8 +95,21 @@ def _row_to_user(r) -> dict:
         "token_balance": r.token_balance,
         "is_demo": r.is_demo,
         "is_admin": bool(getattr(r, "is_admin", False)),
+        "is_staff": bool(getattr(r, "is_staff", False)),
+        "role": user_role(r),
         "is_active": bool(getattr(r, "is_active", True)),
     }
+
+
+def user_role(r) -> str:
+    """super = Super Admin (satu-satunya); admin = admin biasa; demo; user."""
+    if getattr(r, "is_admin", False):
+        return "super"
+    if getattr(r, "is_staff", False):
+        return "admin"
+    if getattr(r, "is_demo", False):
+        return "demo"
+    return "user"
 
 
 _user_schema_ready = False
@@ -124,6 +137,12 @@ def ensure_user_schema() -> None:
             text(
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS "
                 "is_active BOOLEAN NOT NULL DEFAULT TRUE"
+            )
+        )
+        c.execute(
+            text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS "
+                "is_staff BOOLEAN NOT NULL DEFAULT FALSE"
             )
         )
     _user_schema_ready = True
@@ -156,7 +175,7 @@ def verify_user_login(email: str, password: str) -> dict | None:
     with engine.connect() as c:
         r = c.execute(
             text(
-                "SELECT id, email, name, picture, token_balance, is_demo, is_admin, "
+                "SELECT id, email, name, picture, token_balance, is_demo, is_admin, is_staff, "
                 "COALESCE(is_active, TRUE) AS is_active, "
                 "password_hash FROM users WHERE lower(email) = lower(:email) "
                 "ORDER BY id LIMIT 1"
@@ -239,7 +258,7 @@ def get_user(user_id: int) -> dict | None:
     with engine.connect() as c:
         r = c.execute(
             text(
-                "SELECT id, email, name, picture, token_balance, is_demo, is_admin, "
+                "SELECT id, email, name, picture, token_balance, is_demo, is_admin, is_staff, "
                 "COALESCE(is_active, TRUE) AS is_active "
                 "FROM users WHERE id = :id"
             ),
@@ -300,7 +319,7 @@ def upsert_google_user(sub: str, email: str, name: str, picture: str) -> dict:
                 ON CONFLICT (google_sub) DO UPDATE
                    SET email = EXCLUDED.email, name = EXCLUDED.name,
                        picture = EXCLUDED.picture, last_login_at = now()
-                RETURNING id, email, name, picture, token_balance, is_demo, is_admin
+                RETURNING id, email, name, picture, token_balance, is_demo, is_admin, is_staff
                 """
             ),
             {"sub": sub, "email": email, "name": name, "picture": picture, "grant": grant},
@@ -316,7 +335,7 @@ def upsert_admin_user() -> dict:
             text(
                 "UPDATE users SET is_admin = TRUE, name = :name, last_login_at = now() "
                 "WHERE email = :email "
-                "RETURNING id, email, name, picture, token_balance, is_demo, is_admin"
+                "RETURNING id, email, name, picture, token_balance, is_demo, is_admin, is_staff"
             ),
             {"email": settings.admin_email, "name": settings.admin_name},
         ).first()
@@ -325,7 +344,7 @@ def upsert_admin_user() -> dict:
                 text(
                     "INSERT INTO users (email, name, is_admin, last_login_at) "
                     "VALUES (:email, :name, TRUE, now()) "
-                    "RETURNING id, email, name, picture, token_balance, is_demo, is_admin"
+                    "RETURNING id, email, name, picture, token_balance, is_demo, is_admin, is_staff"
                 ),
                 {"email": settings.admin_email, "name": settings.admin_name},
             ).first()

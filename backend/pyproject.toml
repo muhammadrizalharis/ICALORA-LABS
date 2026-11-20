@@ -36,6 +36,12 @@ target-version = "py310"
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "UP", "B"]
 
+[tool.ruff.lint.per-file-ignores]
+# Template HTML/CSS inline (f-string) dan baris log/JSON skrip training: membungkus baris
+# panjang di sini tidak menambah keterbacaan dan berisiko mengubah keluaran.
+"app/services/report/reports.py" = ["E501"]
+"app/services/ai_detector/train.py" = ["E501"]
+
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]

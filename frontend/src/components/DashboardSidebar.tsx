@@ -143,12 +143,14 @@ export default function DashboardSidebar() {
           collapsed={collapsed}
         />
 
-        {user?.is_admin && (
+        {(user?.is_admin || user?.is_staff) && (
           <>
-            <SectionLabel collapsed={collapsed}>Super Admin</SectionLabel>
+            <SectionLabel collapsed={collapsed}>
+              {user?.is_admin ? "Super Admin" : "Admin"}
+            </SectionLabel>
             <NavLink
               href="/admin=-000"
-              label="Panel Pengelolaan"
+              label={user?.is_admin ? "Panel Pengelolaan" : "Panel Admin"}
               icon="🛠️"
               active={pathname.startsWith("/admin=-000")}
               collapsed={collapsed}

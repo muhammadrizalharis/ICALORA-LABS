@@ -130,6 +130,30 @@ def _publication_block(pm: dict | None) -> str:
     )
 
 
+def _semantic_block(sm: dict | None) -> str:
+    """Banner 'indikasi parafrase': kemiripan MAKNA (bukan kata) dengan paper terbit."""
+    if not sm:
+        return ""
+    title = _esc(str(sm.get("title") or "Tanpa judul"))
+    doi = sm.get("doi")
+    ref = f" · DOI {_esc(str(doi))}" if doi else ""
+    return (
+        '<div style="margin:6px 0 4px;padding:10px 12px;border:1px solid #8b5cf6;'
+        'background:#f5f3ff;border-radius:6px">'
+        '<div style="font-weight:800;font-size:12px;color:#5b21b6">'
+        '<span style="background:#8b5cf6;color:#fff;border-radius:3px;padding:0 5px;'
+        'font-size:9px;font-weight:700;margin-right:6px">PARAFRASE</span>'
+        "Indikasi parafrase dari paper terbit</div>"
+        f'<div style="font-weight:700;margin-top:3px">{title}</div>'
+        f'<div class="note" style="margin-top:2px">{_esc(str(sm.get("source") or ""))}{ref}</div>'
+        f'<div class="note">{float(sm.get("coverage", 0) or 0):.0f}% bagian dokumen '
+        f'({int(sm.get("matched_windows", 0) or 0)} dari {int(sm.get("total_windows", 0) or 0)} '
+        "potongan dua-kalimat) memiliki MAKNA yang sama dengan teks penuh paper ini walau "
+        "kata-katanya berbeda. Ini indikasi, bukan bukti: periksa pasangan kalimat contoh di "
+        "aplikasi. Angka Similarity Index tidak memasukkan temuan ini.</div></div>"
+    )
+
+
 def _cover_html(report: dict) -> str:
     """Halaman sampul 'Ringkasan Kemiripan' — tata letak & istilah orisinal."""
     idx = float(report.get("integrity_index", report.get("overall_similarity", 0)) or 0)
@@ -220,6 +244,7 @@ def _cover_html(report: dict) -> str:
         else ""
     )
     pub_block = _publication_block(report.get("publication_match"))
+    pub_block += _semantic_block(report.get("semantic_match"))
     if report.get("online_budget_exhausted"):
         pub_block += (
             '<div class="note" style="margin:4px 0">Kuota harian OpenAlex habis saat '
