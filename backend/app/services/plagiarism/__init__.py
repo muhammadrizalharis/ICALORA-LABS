@@ -549,6 +549,13 @@ _REF_HEADING_RE = re.compile(
 # Perkiraan panjang "halaman depan" (judul+penulis+abstrak). DOI milik makalah
 # sendiri hampir selalu tercetak di sini.
 _FRONT_MATTER_CHARS = 5000
+# Zona JUDUL: judul dokumen sendiri tercetak di awal halaman pertama. Zona front-matter yang
+# lebih lebar (5000) bisa memuat entri DAFTAR PUSTAKA bila potongan naskah tak menyertakan
+# judul bab "References", sehingga paper yang hanya DIKUTIP dikira judul dokumen (regresi nyata).
+_TITLE_ZONE_CHARS = 2500
+# Banner berdasar JUDUL butuh bukti pendukung bahwa isi dokumen memang cocok dengan sumber.
+_TITLE_PUB_MIN_COVERAGE = 5.0  # % isi dokumen yang dijelaskan sumber itu
+_TITLE_PUB_MIN_CONTAINMENT = 20.0  # % teks sumber yang termuat di dokumen
 
 
 def _extract_own_dois(doc: str) -> list[str]:
@@ -591,6 +598,34 @@ def _title_in_front_matter(source_title: str, front_shingles: set[str]) -> float
 
 # Ambang kecocokan judul di front-matter untuk menyatakan identitas publikasi.
 _TITLE_IDENTITY_MIN = 0.70
+
+
+def _pick_publication(
+    doi_pub: dict | None,
+    title_pub: dict | None,
+    contain_pub: dict | None,
+    contrib: dict,
+) -> dict | None:
+    """Pilih bukti identitas paper terbit (prioritas: DOI sendiri > judul > containment).
+
+    Judul saja TIDAK cukup: sumber harus juga menjelaskan sebagian isi dokumen, termuat
+    cukup banyak teksnya, atau berupa teks penuh OA. Kalau tidak, paper yang sekadar
+    disebut di awal teks (mis. entri daftar pustaka pada naskah tanpa judul bab
+    "References") ikut dituduh sebagai dokumen itu sendiri.
+    """
+    if title_pub is not None:
+        tkey = (title_pub.get("doi") or title_pub.get("title") or "").lower().strip()
+        corroborated = (
+            contrib.get(tkey, 0.0) >= _TITLE_PUB_MIN_COVERAGE
+            or float(title_pub.get("containment", 0.0)) >= _TITLE_PUB_MIN_CONTAINMENT
+            or bool(title_pub.get("_fulltext_oa"))
+        )
+        if corroborated:
+            private = ("_overlap", "_fulltext_oa")
+            title_pub = {k: v for k, v in title_pub.items() if k not in private}
+        else:
+            title_pub = None
+    return doi_pub or title_pub or contain_pub
 
 
 def _vec_literal(vec: list[float]) -> str:
@@ -806,7 +841,7 @@ def check_plagiarism(
     doc_words = [w.lower() for w in _WORD_RE.findall(doc)]
     doc_sh = _shingles(doc_words)
     doc_dois = set(_extract_own_dois(doc))
-    front_words = [w.lower() for w in _WORD_RE.findall(_front_matter(doc))]
+    front_words = [w.lower() for w in _WORD_RE.findall(_front_matter(doc)[:_TITLE_ZONE_CHARS])]
     front_sh = _shingles(front_words, 3)
     doi_pub: dict | None = None
     title_pub: dict | None = None
@@ -848,6 +883,7 @@ def check_plagiarism(
                 "by_doi": False,
                 "by_title": True,
                 "_overlap": title_overlap,
+                "_fulltext_oa": bool(s.get("fulltext_oa")),
             }
         # Reverse-containment tinggi HANYA dihitung sebagai identitas bila judul
         # sumber juga ada di front-matter — mencegah paper yang sekadar dirujuk
@@ -872,11 +908,6 @@ def check_plagiarism(
                 "by_doi": False,
                 "by_title": bool(s["title_identity"]),
             }
-    if title_pub is not None:
-        title_pub.pop("_overlap", None)
-    # Prioritas bukti identitas: DOI sendiri > judul di front-matter > containment.
-    publication_match = doi_pub or title_pub or contain_pub
-
     # Skor tampilan tiap sumber = KONTRIBUSI NYATA ke dokumen (porsi tersorot),
     # BUKAN kemiripan topik (cosine). Ini membuat "Sumber Teratas" selaras
     # dengan "Ringkasan Kecocokan" dan menghapus angka 76% yang menyesatkan.
@@ -888,6 +919,8 @@ def check_plagiarism(
     for s in sources + online_sources:
         s["match_percent"] = contrib.get(_skey(s), 0.0)
         s["similarity"] = s["match_percent"]
+
+    publication_match = _pick_publication(doi_pub, title_pub, contain_pub, contrib)
 
     # Sinyal CAKUPAN: satu sumber teks-PENUH open-access yang menjelaskan sebagian
     # besar isi DOKUMEN berarti dokumen itu adalah paper tersebut (atau bagiannya,
