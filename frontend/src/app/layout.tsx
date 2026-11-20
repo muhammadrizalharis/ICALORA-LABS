@@ -18,7 +18,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "ICALORA-LABS — Deteksi Plagiarisme & AI | by MRH INNOVEX",
   description:
-    "Platform deteksi plagiarisme & AI yang sah, transparan & terpercaya. Self-hosted. Cek plagiarisme dan deteksi AI terhadap korpus akses-terbuka. Cepat dengan GPU, aman, gratis.",
+    "Platform deteksi plagiarisme & AI yang sah, transparan & terpercaya. Self-hosted. Cek plagiarisme dan deteksi AI terhadap korpus akses-terbuka. Cepat dengan GPU, aman, tanpa langganan.",
 };
 
 const themeInitScript = `

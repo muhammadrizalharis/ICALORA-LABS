@@ -3,24 +3,30 @@ import Link from "next/link";
 const STEPS = [
   {
     n: 1,
+    icon: "🔑",
+    title: "Masuk",
+    desc: "Masuk dengan akun Google atau email. Akun baru mulai dari 0 token; saldo token ditambahkan oleh admin, lalu dipakai tiap analisis.",
+  },
+  {
+    n: 2,
     icon: "🧭",
     title: "Pilih fitur",
     desc: "Buka menu Fitur di atas lalu pilih alat yang Anda butuhkan — Plagiarism Checker, Grammar Checker, Paraphraser, Humanizer, atau lainnya.",
   },
   {
-    n: 2,
+    n: 3,
     icon: "📋",
     title: "Masukkan teks",
     desc: "Tempel teks langsung ke kotak input, atau ketik manual. Untuk pemeriksaan plagiarisme Anda juga dapat mengunggah dokumen.",
   },
   {
-    n: 3,
+    n: 4,
     icon: "⚡",
     title: "Jalankan analisis",
     desc: "Klik tombol aksi. Mesin kami memproses dengan akselerasi GPU dan membandingkan ke korpus akses-terbuka.",
   },
   {
-    n: 4,
+    n: 5,
     icon: "📊",
     title: "Baca & ekspor laporan",
     desc: "Lihat skor kemiripan/AI, sumber yang cocok, dan sorotan per-kalimat. Salin atau ekspor hasilnya sesuai kebutuhan.",
@@ -45,7 +51,11 @@ const FAQ = [
   },
   {
     q: "Berapa biayanya?",
-    a: "Gratis. Tujuan kami menyediakan deteksi plagiarisme yang sah dan terpercaya tanpa langganan mahal.",
+    a: "Tanpa biaya langganan: tidak ada paket berbayar. Pemakaian dibatasi dengan token yang diberikan admin (akun baru mulai dari 0 token), agar layanan tetap adil dan terjaga. Tujuan kami menyediakan deteksi plagiarisme yang sah dan terpercaya tanpa langganan mahal.",
+  },
+  {
+    q: "Bagaimana cara mendapat token?",
+    a: "Hubungi admin ICALORA-LABS untuk menambah saldo akun Anda. Setiap analisis memakai token sesuai biaya fitur yang ditetapkan admin (umumnya 1 token per analisis). Saldo Anda tampil di Beranda dan halaman Profil & Saldo.",
   },
   {
     q: "Dari mana sumber datanya?",
@@ -64,7 +74,7 @@ export default function CaraPakaiPage() {
           Cara <span className="text-gradient">Pakai</span>
         </h1>
         <p className="mx-auto mt-3 max-w-xl text-neutral-600 dark:text-neutral-400">
-          Empat langkah sederhana untuk memeriksa integritas tulisan Anda bersama ICALORA-LABS.
+          Lima langkah sederhana untuk memeriksa integritas tulisan Anda bersama ICALORA-LABS.
         </p>
       </div>
 

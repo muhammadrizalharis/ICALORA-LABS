@@ -184,13 +184,14 @@ export default function Home() {
               Siap memeriksa tulisan Anda?
             </h2>
             <p className="mx-auto mt-3 max-w-xl text-white/90">
-              Gratis, legal, dan tanpa batas tersembunyi. Dapatkan laporan plagiarisme & AI sekarang.
+              Tanpa langganan, legal, dan tanpa biaya tersembunyi. Masuk dengan Google atau email,
+              saldo token diberikan oleh admin.
             </p>
             <Link
               href="/features/plagiarism-checker"
               className="mt-8 inline-flex items-center gap-2 rounded-xl bg-white px-7 py-3 text-sm font-semibold text-neutral-900 shadow-lg transition hover:bg-neutral-100"
             >
-              🛡️ Mulai Periksa Gratis
+              🛡️ Mulai Periksa
             </Link>
           </div>
         </div>
