@@ -553,6 +553,27 @@ async def _unpaywall_oa_pdf(client: httpx.AsyncClient, doi: str | None) -> str |
     return loc.get("url_for_pdf") or None
 
 
+_TOPIC_MIN_SCORE = 0.35
+_TOPIC_MIN_ABSTRACT_WORDS = 15
+
+
+def _content_words(text: str) -> set[str]:
+    """Kata isi (>=5 huruf) tanpa kata umum; dasar ukuran kesepokokan abstrak vs naskah."""
+    found = re.findall(r"[A-Za-z\u00C0-\u024F]{5,}", text or "")
+    return {w.lower() for w in found} - _GENERIC_TERMS
+
+
+def _topic_score(c: dict, doc_words: set[str]) -> float:
+    """Porsi kata isi abstrak kandidat yang juga muncul di naskah (0..1).
+
+    Murah (tanpa embedding/jaringan) dan tak butuh abstrak termuat utuh di naskah.
+    """
+    aw = _content_words(c.get("_fulltext"))
+    if len(aw) < _TOPIC_MIN_ABSTRACT_WORDS:
+        return 0.0
+    return len(aw & doc_words) / len(aw)
+
+
 def _title_in_doc_score(c: dict, doc: str) -> float:
     """Kandidat TANPA abstrak (paper baru, abstrak belum terindeks) tak bisa dinilai
     lewat abstrak. Ukur seberapa banyak kata isi JUDUL kandidat termuat di dokumen:
@@ -636,8 +657,23 @@ async def _enrich_fulltext(
     similar.sort(key=_abs_containment, reverse=True)
     similar = similar[: max(0, settings.online_fulltext_similar_docs)]
 
-    # Gabungan kandidat yang akan diperkaya teks penuh (identitas + termirip).
-    promising = identity[: max(1, settings.online_fulltext_max_docs)] + similar
+    # Jalur cadangan TOPIKAL: naskah tanpa judul/abstrak tak pernah memuat abstrak kandidat,
+    # jadi `_abs_containment` selalu ~0 dan paper aslinya tak pernah diunduh teks penuhnya
+    # (uji MDPI: ada di antara 381 kandidat, peringkat 4 menurut kata abstrak, tetapi tak
+    # lolos gerbang). Ambil beberapa kandidat paling sepokok; unduhan tak memakai kuota
+    # OpenAlex, dan pencocokan baris-per-baris tetap menentukan skor akhir.
+    doc_cw = _content_words(doc)
+    chosen = id_keys | {id(c) for c in similar}
+    topical = [
+        c
+        for c in cands
+        if id(c) not in chosen and _topic_score(c, doc_cw) >= _TOPIC_MIN_SCORE
+    ]
+    topical.sort(key=lambda c: _topic_score(c, doc_cw), reverse=True)
+    topical = topical[: max(0, settings.online_fulltext_topical_docs)]
+
+    # Gabungan kandidat yang akan diperkaya teks penuh (identitas + termirip + sepokok).
+    promising = identity[: max(1, settings.online_fulltext_max_docs)] + similar + topical
 
     # Perluas cakupan: untuk kandidat menjanjikan yang punya DOI tetapi belum
     # memiliki URL PDF OA, coba resolusi lewat Unpaywall (hanya salinan OA sah).
