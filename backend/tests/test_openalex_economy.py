@@ -89,6 +89,22 @@ def test_term_queries_run_only_when_identity_not_found(monkeypatch):
     assert {"istilah satu", "istilah dua", "abstrak satu"} <= set(queried)
 
 
+def test_unrelated_paper_with_title_words_in_doc_is_not_an_identity_hit():
+    # Regresi nyata: paper LAIN yang kata judulnya semua ada di naskah membuat tahap 2
+    # dilewati sehingga paper asli tak pernah ditemukan.
+    doc = (
+        "Experimental study of scour process and sediment transport around bridge pier "
+        "structures in laboratory flume conditions with different flow velocities. " * 3
+    )
+    other = {
+        "title": "An Experimental Study of Scour Process and Sediment Transport Bridge Pier",
+        "doi": "10.1061/other",
+        "_fulltext": "",
+    }
+    assert online._title_in_doc_score(other, doc) >= 0.9  # sinyal lemah itu memang tinggi
+    assert not online._has_identity_hit([other], doc)
+
+
 def test_has_identity_hit_signals():
     assert online._has_identity_hit([{"title": "x", "_ft_hits": 2}], _DOC)
     assert not online._has_identity_hit([{"title": "Lain sama sekali", "_ft_hits": 1}], _DOC)
