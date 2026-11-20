@@ -3,64 +3,46 @@
 Dicatat 2026-11-19, diperbarui 2026-11-20. Semua perbaikan sebelumnya sudah ada di `main`
 (PR #94–#105) dan dideploy. Dokumen ini hanya memuat yang **belum selesai** dan alasannya.
 
-## Ringkasan prioritas (diperbarui 2026-11-20 malam)
+## Ringkasan prioritas (diperbarui 2026-11-21)
 
 | # | Item | Status | Pemilik |
 |---|---|---|---|
 | 1 | Ganti `SESSION_SECRET` produksi (**kritis**) | belum dilakukan | user |
-| 2 | **Banner "paper terbit" muncul padahal indeks 2-4%** (Springer, BMC) | **temuan baru, belum diselidiki** | AI |
-| 3 | **`semantic_match` kosong pada job produksi** (uji langsung 97,2%) | **sedang direproduksi** | AI |
-| 4 | Penerbit yang gagal: MDPI, Frontiers, Springer, BMC, T&F, Elsevier, Wiley | analisis di bawah | AI |
-| 5 | Peran admin biasa, Google login, token 0, teks "Gratis", lint, demo ganda | **selesai** (PR #104-#110) | - |
-| 6 | Saldo akun id 18 (1000) | dibiarkan (keputusan user) | - |
-| 7 | Mode hemat OpenAlex | **terbukti**: 9-21 pencarian/job (dulu ±110-140) | - |
+| 2 | Banner "paper terbit" salah-tuduh (Springer) | **selesai** (PR #112) | - |
+| 3 | `semantic_match` kosong di job produksi | **selesai** (PR #111); terbukti job produksi 97,2% | - |
+| 4 | MDPI miss (teks pendek) | **selesai** (PR #113); 3,8% -> 100% | - |
+| 5 | Durasi job naik (363 -> 594 dtk pada satu uji) | **sedang diukur** (A/B fase luas) | AI |
+| 6 | Penerbit yang tetap gagal | batas diketahui (lihat tabel) | - |
+| 7 | Peran admin, Google login, token 0, teks "Gratis", lint, demo ganda, mode hemat | **selesai** (PR #104-#110) | - |
 
-## Temuan 2026-11-20 malam (BELUM SELESAI — lanjutkan dari sini)
+## Hasil 2026-11-21
 
-### A. Banner "paper terbit" berisiko salah-tuduh
+- **semantic_match kosong**: akarnya teks hasil ekstraksi PDF yang dibungkus per baris. Kalimat
+  terbelah, jendela "dua kalimat" menjadi serpihan (86, bukan 36), deteksi None. Perbaikan `_unwrap`
+  (sambung baris tunggal). Sebelum None, sesudah 97,2% pada PDF dan kandidat yang sama; kontrol
+  negatif (paper lain, topik sama, terbungkus PDF) tetap tidak ditandai.
+- **Banner salah (Springer)**: entri daftar pustaka dianggap "halaman depan" karena potongan naskah
+  tak memuat judul bab References, sehingga paper yang hanya DIKUTIP dituduh (kecocokan teks 0,0%).
+  Zona judul 5000 -> 2500 karakter, dan banner berdasar judul wajib terbukti (>=5% isi dokumen
+  dijelaskan, ATAU >=20% teks sumber termuat, ATAU teks penuh OA). BMC (DOI sendiri) tetap berbanner.
+- **MDPI**: paper asli ada di antara 381 kandidat (peringkat 4 menurut kata abstrak) tetapi tak
+  lolos gerbang unduhan karena naskah tanpa abstrak. Jalur cadangan: <=8 kandidat sepokok diunduh
+  teks penuhnya. MDPI 3,8% -> 100%; PLOS/IEEE tetap 100%.
 
-Uji penerbit (naskah = paper OA terbaru dengan 10% awal dibuang): pada **Springer** dan **BMC**
-`publication_match` bernilai True padahal indeks hanya 2,0% dan 4,4% dan DOI paper aslinya tidak
-ketemu. Artinya sumber LAIN dianggap "identik" lewat heuristik `title_identity`/containment di
-`plagiarism/__init__.py` (`_title_in_front_matter` >= 0,70). Banner ini baru ditampilkan sejak
-PR #96, jadi bisa menuduh paper yang salah. Langkah: cetak `publication_match` untuk dua kasus itu,
-cari sinyal yang meloloskan, ketatkan (mis. wajib `fulltext_oa` atau containment tinggi), tambah tes.
+### Hasil uji penerbit (1 paper per penerbit, tanpa judul/abstrak)
 
-### B. `semantic_match` kosong di job produksi
+| Penerbit | Hasil |
+|---|---|
+| PLOS, IEEE, Copernicus, Nature | terdeteksi 100% |
+| BMC | 100% (DOI sendiri); hasil lama "miss" = unduhan teks penuh tak stabil |
+| MDPI | 100% setelah PR #113 (sebelumnya 3,8%) |
+| Springer | paper sendiri tak ketemu sebagai kandidat |
+| Frontiers | paper sendiri tak ada di kandidat (PDF-nya bisa diunduh) |
+| Taylor & Francis | **diblokir penerbit** (HTTP 403, hanya 122 karakter); tak bisa diatasi secara sah |
+| Elsevier, Wiley, SAGE | tak teruji: teks penuh tak bisa diunduh untuk 4 paper pertama |
 
-Deteksi parafrase (PR #110) pada dokumen yang diparafrase agresif: uji langsung terhadap kandidat
-menghasilkan **97,2%** (35/36, 7,6 dtk), tetapi job produksi (`tool_history` id 184, sudah dihapus
-bila lewat 3 hari) menyimpan `semantic_match: None`, padahal sumber IJHT ada di hasil dengan teks
-penuh. Pengecualian di `_run_plagiarism_merged` ditelan diam-diam (`except Exception`). **Reproduksi di container produksi BERHASIL** (memanggil `_run_plagiarism_merged` langsung
-dengan teks dokumen: `semantic_match` terisi, 97,2%, 7,2 dtk). Jadi kode dan embedding sehat; yang
-berbeda adalah jalur job API (`_job_run_file`: teks hasil ekstraksi PDF, `exclude` bibliografi/kutipan
-aktif, berjalan bersamaan dengan uji lain pada saat itu). Langkah berikutnya: tambahkan
-`logger.warning(..., exc_info=True)` pada blok itu, jalankan ulang, temukan penyebab (timeout
-240 dtk? kandidat di `extra` beda dengan hasil `identity_candidates`? embedding di container?).
-
-### C. Hasil uji penerbit lain (1 paper per penerbit, tanpa judul/abstrak)
-
-| Penerbit | Hasil | Catatan |
-|---|---|---|
-| PLOS | HIT 100% | 9 pencarian |
-| IEEE | HIT 100% | 8 pencarian |
-| MDPI | miss | paper ketemu tapi **teks penuh < 15.000 karakter** (gagal diunduh) |
-| BMC | miss | idem; banner salah (lihat A) |
-| Taylor & Francis | miss | idem |
-| Frontiers | miss | paper tidak ketemu |
-| Springer | miss | banner salah (lihat A) |
-| Elsevier, Wiley | tak teruji | teks penuh tak bisa diunduh untuk 4 paper pertama |
-
-Pola: deteksi berhasil bila teks penuh bisa diunduh (PLOS, IEEE). Kegagalan utama = **pengunduhan
-teks penuh** dari penerbit yang memblokir bot / hanya HTML. Belum ada perbaikan; perlu dikaji
-(Unpaywall / URL PDF alternatif / Crawl4AI milik server untuk halaman penerbit).
-Skrip uji (sementara) ada di `/tmp/v/pubs.py` dan akan hilang; tulis ulang bila perlu.
-
-### D. Kuota OpenAlex
-
-Pengukuran nyata lewat header `x-ratelimit-remaining`: job penuh mode hemat = 9-21 pencarian
-(90-210 kredit). Kuota harian $1 = 10.000 kredit. Uji malam ini menghabiskan sekitar 2.000 kredit
-(banyak uji paralel).
+Batas yang tersisa (bukan bug kode): penerbit yang memblokir bot, dan paper yang tak terjangkau
+pencarian kandidat (Frontiers, Springer).
 
 ## Keamanan & auth (2026-11-20)
 
