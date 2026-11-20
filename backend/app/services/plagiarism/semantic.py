@@ -41,8 +41,22 @@ VERBATIM_COS = 0.985  # pasangan nyaris identik bukan contoh parafrase
 EXAMPLE_MAX_WORD_OVERLAP = 0.6  # contoh harus benar-benar berbeda kata (bukan judul bab sama)
 
 
+_SOFT_BREAK_RE = re.compile(r"(?<!\n)\n(?!\n)")
+
+
+def _unwrap(text: str) -> str:
+    """Sambung baris PDF yang terpotong (pindah baris tunggal) menjadi satu kalimat utuh.
+
+    Teks hasil ekstraksi PDF dibungkus per baris. Tanpa ini kalimat terbelah dan jendela
+    "dua kalimat" hanya serpihan yang batasnya tak sejajar antara dokumen dan sumber, sehingga
+    kesamaan makna tak terdeteksi (uji: dokumen PDF diparafrase 0% vs 97% dari teks mentah).
+    Baris kosong (paragraf) dipertahankan sebagai pemisah.
+    """
+    return re.sub(r"[ \t]+", " ", _SOFT_BREAK_RE.sub(" ", text or ""))
+
+
 def _windows(text: str, cap: int) -> list[str]:
-    sents = [s.strip() for s in _sentences(text) if len(s.strip()) >= 25]
+    sents = [s.strip() for s in _sentences(_unwrap(text)) if len(s.strip()) >= 25]
     wins = [
         " ".join(sents[i : i + WINDOW_SENTENCES])
         for i in range(0, max(1, len(sents) - WINDOW_SENTENCES + 1))
