@@ -38,8 +38,21 @@ ditelan diam-diam kini tercatat WARNING.
   sempat selesai; (b) `online_total_budget_seconds=1140`: fase luas & semantik dipangkas dinamis
   sehingga total job selalu < 20 menit (batas polling frontend). Sebelumnya jumlah batas per-fase
   bisa 180+840+lokal+240 > 20 mnt.
-- Belum dilakukan (ide): lewati fase luas bila pass identitas sudah menjelaskan ~100% dokumen
-  (job "cek paper sendiri" bisa 10x lebih cepat) - ditunda karena mengubah cakupan sumber lain.
+- **Lewati fase luas** (PR #118): bila pass identitas menemukan SATU paper teks-penuh OA yang memuat
+  >= 90% isi dokumen (shingle 5 kata, `single_source_coverage`), pencarian luas dilewati. Diukur di
+  produksi pada paper PLOS utuh: 468 dtk -> 109 dtk, hasil identik (100%, terbit). Dokumen separuh
+  salinan (cakupan ~45%) TIDAK dilewati (luas 391 dtk, indeks 32,4%). Konsekuensi yang disengaja:
+  laporan salinan-utuh hanya menampilkan sumber itu (tanpa sumber sekunder). Matikan dengan
+  `ONLINE_SKIP_BROAD_COVERAGE=0`. Hasil memuat `online_broad_skipped`.
+- **Embedding gagal tak lagi menggagalkan job** (PR #119): saat server embedding bersama kewalahan
+  (load host sampai 93) satu timeout membuang job di langkah terakhir. Kini lanjut tanpa pencarian
+  semantik korpus lokal; hasil memuat `local_corpus_unavailable` dan UI/PDF menampilkan catatan.
+  Diuji dengan embedding dipaksa gagal terhadap DB nyata (bukan tes otomatis: butuh DB).
+- **Ligatur** (PR #117/#118): berkas dan teks tempelan menguraikan "ﬁ ﬂ ﬀ ﬃ ﬄ ﬅ ﬆ" (bukan NFKC
+  penuh, agar "m²" tak berubah); sorotan frontend disamakan (`expandLigatures`).
+- **Docling TIDAK dipasang**: benchmark 21 PDF (15 acak + 6 terpilih): identik di 11/15 acak, lebih
+  baik 2, lebih buruk 2; cold start 76 dtk; tak ada pemicu andal. Layak dipertimbangkan lagi hanya
+  bila ada PDF nyata pengguna yang hasil ekstraksinya buruk (mis. karakter rusak > 1 per 1.000).
 
 ### Validasi ambang semantik (`semantic_match_cos=0,80`, `semantic_min_coverage=35`)
 
@@ -250,4 +263,5 @@ diselidiki; login demo dimatikan di produksi.
   dan `openalex_budget_exhausted`.
 - Hasil tiap job memuat `online_openalex_calls`, `online_rate_limited`, `online_budget_exhausted`,
   dan `online_timings` (detik per fase).
-- Setelan baru: `ONLINE_TOTAL_BUDGET_SECONDS` (bawaan 1140) = anggaran total job.
+- Setelan baru: `ONLINE_TOTAL_BUDGET_SECONDS` (bawaan 1140) = anggaran total job;
+  `ONLINE_SKIP_BROAD_COVERAGE` (bawaan 90, 0 = nonaktif) = ambang melewati pencarian luas.
