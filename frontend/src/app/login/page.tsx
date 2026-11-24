@@ -62,7 +62,9 @@ export default function LoginPage() {
         )}
 
         <div className="mt-6 space-y-3">
-          {googleEnabled ? (
+          {loading ? (
+            <div className="h-12 animate-pulse rounded-lg border border-c surface-2" />
+          ) : googleEnabled ? (
             <a
               href={googleLoginUrl()}
               className="flex w-full items-center justify-center gap-3 rounded-lg border border-c surface-2 px-4 py-3 text-sm font-medium hover:bg-neutral-50 dark:hover:bg-neutral-900"
