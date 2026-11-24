@@ -21,6 +21,7 @@ export default function LoginPage() {
   useEffect(() => {
     const err = new URLSearchParams(window.location.search).get("error");
     if (err === "registration_closed")
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- query string hanya ada di klien (hindari mismatch hydration)
       setNotice("Pendaftaran akun baru sedang ditutup oleh admin. Hubungi admin untuk akses.");
   }, []);
 

@@ -759,6 +759,15 @@ async def _run_plagiarism_merged(
     extra: list[dict] = []
     providers: dict = {}
     rate_limited = begin_rate_limit_tracking()
+    timings: dict[str, float] = {}
+    t_phase = time.monotonic()
+
+    def _lap(name: str) -> None:
+        nonlocal t_phase
+        now = time.monotonic()
+        timings[name] = round(now - t_phase, 1)
+        t_phase = now
+
     if settings.online_check_enabled:
         # 1) PASS IDENTITAS DULU (cepat, ~9–60 dtk): resolusi judul/DOI + unduh
         #    teks-penuh paper dokumen itu sendiri. WAJIB dijalankan SEBELUM
@@ -775,7 +784,9 @@ async def _run_plagiarism_merged(
             )
             ident_ok = True
         except Exception:  # noqa: BLE001
+            logger.warning("Fase identitas gagal/timeout", exc_info=True)
             ident = []
+        _lap("identity")
         # 2) Pencarian luas per-kalimat dengan sisa anggaran. Bila timeout, hasil
         #    identitas di atas tetap dipakai (laporan tak pernah kehilangan paper
         #    terbit hanya karena fase luas lambat).
@@ -785,7 +796,9 @@ async def _run_plagiarism_merged(
                 timeout=max(30, settings.online_budget_seconds),
             )
         except Exception:  # noqa: BLE001
+            logger.warning("Fase pencarian luas gagal/timeout", exc_info=True)
             extra, providers = [], {}
+        _lap("broad")
         # Gabungkan: dedup per DOI/judul, pertahankan teks-penuh TERPANJANG agar
         # cakupan pencocokan maksimal (paper terbit sering hanya lengkap dari
         # pass identitas).
@@ -800,14 +813,19 @@ async def _run_plagiarism_merged(
                     cand["_oa_url"] = cur["_oa_url"]
                 merged[key] = cand
         extra = list(merged.values())
+    t_phase = time.monotonic()
     res = await run_in_threadpool(check_plagiarism, text, top_k, extra, exclude)
+    _lap("local_check")
     res["online_merged"] = bool(extra)
     # Parafrase: bandingkan MAKNA dengan teks penuh paper kandidat (kata-demi-kata sudah dicek
     # di atas). Gagal/lambat tidak boleh membatalkan laporan.
     if extra and settings.online_semantic_enabled:
+        sem_budget = max(20, settings.online_semantic_seconds - 25)
         try:
             sem = await asyncio.wait_for(
-                run_in_threadpool(find_semantic_source, text, extra, res),
+                run_in_threadpool(
+                    lambda: find_semantic_source(text, extra, res, budget_seconds=sem_budget)
+                ),
                 timeout=max(30, settings.online_semantic_seconds),
             )
         except Exception:  # noqa: BLE001
@@ -817,6 +835,14 @@ async def _run_plagiarism_merged(
             sem = None
         if sem:
             res["semantic_match"] = sem
+        _lap("semantic")
+    res["online_timings"] = timings
+    logger.info(
+        "Cek plagiarisme selesai: %s total=%.0fs openalex=%d",
+        timings,
+        sum(timings.values()),
+        int(rate_limited.get("_oa_calls", 0)),
+    )
     res["online_openalex_calls"] = int(rate_limited.get("_oa_calls", 0))
     if rate_limited.get(BUDGET_FLAG):
         res["online_budget_exhausted"] = True

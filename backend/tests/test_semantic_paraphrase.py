@@ -106,6 +106,53 @@ def test_picks_best_candidate_and_limits_candidates():
     assert out2 and out2["doi"] == "10.1/src"  # saringan topik mempertahankan kandidat relevan
 
 
+class ClockedLLM(FakeLLM):
+    """Tiap batch embedding 'memakan' 10 dtk pada jam palsu (server embedding lambat)."""
+
+    def __init__(self, clock):
+        self.clock = clock
+
+    def embed_batch(self, texts):
+        self.clock["t"] += 10
+        return super().embed_batch(texts)
+
+
+def _fake_clock(monkeypatch):
+    clock = {"t": 0.0}
+    monkeypatch.setattr(sem.time, "monotonic", lambda: clock["t"])
+    return clock
+
+
+def test_deadline_returns_best_finished_candidate(monkeypatch):
+    clock = _fake_clock(monkeypatch)
+    small = {**SRC, "_fulltext": _text(["vortex", "sediment", "porous"], 40)}  # 2 batch
+    big = {**SRC, "title": "Besar", "doi": "10.1/big", "_fulltext": SRC["_fulltext"]}  # 4 batch
+    doc = _text(["vortex", "sediment", "porous"], 30).replace("membahas", "menguraikan")
+    out = sem.find_semantic_source(
+        doc, [small, big], RESULT, llm=ClockedLLM(clock), budget_seconds=35
+    )
+    # kandidat kedua terpotong tenggat; yang pertama selamat
+    assert out and out["doi"] == "10.1/src"
+
+
+def test_deadline_before_any_candidate_gives_none_not_error(monkeypatch):
+    clock = _fake_clock(monkeypatch)
+    doc = _text(["vortex", "sediment", "porous"], 30).replace("membahas", "menguraikan")
+    assert sem.find_semantic_source(
+        doc, [SRC], RESULT, llm=ClockedLLM(clock), budget_seconds=15
+    ) is None
+    clock["t"] = 0.0
+    assert sem.find_semantic_source(
+        doc, [SRC], RESULT, llm=ClockedLLM(clock), budget_seconds=5
+    ) is None
+
+
+def test_no_budget_means_no_deadline():
+    doc = _text(["vortex", "sediment", "porous"], 30).replace("membahas", "menguraikan")
+    out = sem.find_semantic_source(doc, [SRC], RESULT, llm=FakeLLM())
+    assert out and out["coverage"] >= 90
+
+
 def test_examples_are_real_paraphrases_not_identical_or_same_words():
     doc = _text(["vortex", "sediment", "porous"], 30).replace("membahas", "menguraikan")
     out = sem.find_semantic_source(doc, [SRC], RESULT, llm=FakeLLM())

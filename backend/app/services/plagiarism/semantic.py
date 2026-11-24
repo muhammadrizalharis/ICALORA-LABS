@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 
 import numpy as np
 
@@ -68,9 +69,12 @@ def _windows(text: str, cap: int) -> list[str]:
     return wins
 
 
-def _embed(llm, texts: list[str]) -> np.ndarray:
+def _embed(llm, texts: list[str], deadline: float | None = None) -> np.ndarray | None:
+    """Embedding batch; None bila `deadline` (time.monotonic) terlewati di tengah jalan."""
     out: list[list[float]] = []
     for i in range(0, len(texts), 32):
+        if deadline is not None and time.monotonic() > deadline:
+            return None
         out.extend(llm.embed_batch([t[:1500] for t in texts[i : i + 32]]))
     mat = np.asarray(out, dtype=np.float32)
     if mat.size == 0:
@@ -104,12 +108,23 @@ def _lexical_percent(result: dict, cand: dict) -> float:
     return 0.0
 
 
-def find_semantic_source(doc: str, candidates: list[dict], result: dict, llm=None) -> dict | None:
+def find_semantic_source(
+    doc: str,
+    candidates: list[dict],
+    result: dict,
+    llm=None,
+    budget_seconds: float | None = None,
+) -> dict | None:
     """Kembalikan paper yang kemungkinan DIPARAFRASE oleh dokumen, atau None.
 
     `candidates`: kandidat daring (dengan `_fulltext` + `fulltext_oa`). `result`: keluaran
     `check_plagiarism` (dipakai untuk melewati dokumen yang sudah dijelaskan pencocokan kata).
+    `budget_seconds`: tenggat lunak. Embedding bisa sangat lambat saat server dipakai bersama
+    (uji: ~1 dtk/jendela); alih-alih dibunuh dari luar dan hasilnya hilang, pemindaian berhenti
+    rapi dan mengembalikan kandidat terbaik yang sempat selesai (hanya bisa menurunkan cakupan,
+    tak pernah menambah tuduhan).
     """
+    deadline = time.monotonic() + budget_seconds if budget_seconds else None
     if not settings.online_semantic_enabled:
         return None
     if result.get("publication_match"):
@@ -133,7 +148,10 @@ def find_semantic_source(doc: str, candidates: list[dict], result: dict, llm=Non
     doc_wins = _windows(doc, MAX_DOC_WINDOWS)
     if len(doc_wins) < 8:
         return None  # terlalu sedikit untuk persentase yang bermakna
-    doc_vecs = _embed(llm, doc_wins)
+    doc_vecs = _embed(llm, doc_wins, deadline)
+    if doc_vecs is None:
+        log.warning("Semantik: tenggat habis saat meng-embed dokumen")
+        return None
     tau = settings.semantic_match_cos
 
     if len(cands) > MAX_CANDIDATES:  # saring awal: kemiripan topik dokumen vs sumber
@@ -141,15 +159,18 @@ def find_semantic_source(doc: str, candidates: list[dict], result: dict, llm=Non
         doc_mean /= np.linalg.norm(doc_mean) + 1e-9
 
         def topical(c: dict) -> float:
-            vecs = _embed(llm, _windows(c["_fulltext"], 40))
-            return float((vecs @ doc_mean).max()) if vecs.size else 0.0
+            vecs = _embed(llm, _windows(c["_fulltext"], 40), deadline)
+            return float((vecs @ doc_mean).max()) if vecs is not None and vecs.size else 0.0
 
         cands = sorted(cands, key=topical, reverse=True)[:MAX_CANDIDATES]
 
     best: dict | None = None
-    for c in cands:
+    for n_done, c in enumerate(cands):
         src_wins = _windows(c["_fulltext"], MAX_SRC_WINDOWS)
-        src_vecs = _embed(llm, src_wins)
+        src_vecs = _embed(llm, src_wins, deadline)
+        if src_vecs is None:
+            log.warning("Semantik: tenggat habis; %d/%d kandidat selesai", n_done, len(cands))
+            break
         cov, mx, arg = _coverage(doc_vecs, src_vecs, tau)
         if best is None or cov > best["coverage"]:
             order = [
