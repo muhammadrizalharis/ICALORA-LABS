@@ -30,11 +30,22 @@ def _dehyphenate(text: str) -> str:
 # sehingga riwayat tool GAGAL disimpan. Buang semua agar teks aman diproses
 # maupun disimpan, tanpa mengubah konten yang bermakna.
 _CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+# Ligatur tipografi PDF ("ﬁ" dst.) tak cocok dengan teks sumber/kueri pencarian. Sengaja BUKAN NFKC
+# penuh: NFKC juga mengubah superskrip/satuan ("m²" -> "m2") yang merusak pencocokan rumus.
+_LIGATURES = {
+    0xFB00: "ff",
+    0xFB01: "fi",
+    0xFB02: "fl",
+    0xFB03: "ffi",
+    0xFB04: "ffl",
+    0xFB05: "st",
+    0xFB06: "st",
+}
 
 
 def sanitize_text(text: str) -> str:
-    """Buang NUL & karakter kontrol C0 non-cetak dari teks hasil ekstraksi."""
-    return _CONTROL_CHARS_RE.sub("", text or "")
+    """Buang NUL & karakter kontrol C0 non-cetak, dan urai ligatur tipografi."""
+    return _CONTROL_CHARS_RE.sub("", text or "").translate(_LIGATURES)
 
 
 def _tika_extract(data: bytes, content_type: str) -> str:
