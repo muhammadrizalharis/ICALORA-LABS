@@ -251,6 +251,12 @@ def _cover_html(report: dict) -> str:
             "pemeriksaan ini; sumber dari OpenAlex tidak dapat diperiksa sehingga skor bisa "
             "lebih rendah dari seharusnya. Periksa ulang setelah kuota di-reset.</div>"
         )
+    if report.get("local_corpus_unavailable"):
+        pub_block += (
+            '<div class="note" style="margin:4px 0">Server pencocokan makna sedang sibuk saat '
+            "pemeriksaan ini, sehingga korpus lokal tidak ikut diperiksa (sumber daring tetap "
+            "diperiksa). Skor bisa lebih rendah dari seharusnya; periksa ulang nanti.</div>"
+        )
     rl = report.get("online_rate_limited") or {}
     if rl:
         who = ", ".join(f"{_esc(str(k))} ×{int(v)}" for k, v in rl.items())

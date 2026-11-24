@@ -14,6 +14,7 @@ menyusul (chunk-level).
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 import unicodedata
 from datetime import datetime, timezone
@@ -29,6 +30,8 @@ from app.ingest.common import (
 )
 from app.services.embedding import embed_chunks
 from app.services.llm.provider import get_llm
+
+_log = logging.getLogger(__name__)
 
 _SHINGLE = 5
 _SENT_RE = re.compile(r"[^.!?\n]+[.!?]?", re.UNICODE)
@@ -742,7 +745,15 @@ def check_plagiarism(
     # Embed SELURUH dokumen per-jendela, lalu cari tetangga terdekat untuk tiap
     # jendela dan gabungkan — agar penyalinan di bagian mana pun (bukan hanya
     # pembuka) ikut tertangkap. Jumlah sumber akhir tetap `top_k` teratas.
-    qvecs = embed_chunks(llm, doc, max_chunks=_FULLTEXT_WINDOWS) or [llm.embed(doc[:2000])]
+    local_corpus_unavailable = False
+    try:
+        qvecs = embed_chunks(llm, doc, max_chunks=_FULLTEXT_WINDOWS) or [llm.embed(doc[:2000])]
+    except Exception:  # noqa: BLE001
+        # Server embedding bersama bisa kewalahan (timeout). Jangan gagalkan job yang sudah
+        # bekerja berpuluh menit: lanjut tanpa pencarian-semantik korpus lokal dan beri tahu.
+        _log.warning("Embedding dokumen gagal; lanjut tanpa korpus lokal", exc_info=True)
+        qvecs = []
+        local_corpus_unavailable = True
     # Satu jendela: pakai ef_search penuh. Banyak jendela: ef_search lebih kecil
     # per pencarian karena gabungan antar-jendela sudah memperluas recall.
     ef = _EF_SEARCH if len(qvecs) <= 1 else _EF_SEARCH_MULTI
@@ -993,6 +1004,7 @@ def check_plagiarism(
         "paraphrase_similarity": paraphrase,
         "paraphrase_component": paraphrase_component,
         "publication_match": publication_match,
+        "local_corpus_unavailable": local_corpus_unavailable,
         "similarity_index": chunk["similarity_index"],
         "matched_sentences": chunk["matched_sentences"],
         "total_sentences": chunk["total_sentences"],
