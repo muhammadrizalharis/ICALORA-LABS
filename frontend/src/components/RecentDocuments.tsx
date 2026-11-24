@@ -6,7 +6,7 @@ import { API_BASE } from "@/lib/api";
 import { getFeature } from "@/lib/features";
 import { useAuth } from "@/lib/auth";
 import { useJobs, useHistoryVersion } from "@/lib/useJobs";
-import { dismissJob, type Job } from "@/lib/jobs";
+import { dismissJob, resumeActiveJobs, type Job } from "@/lib/jobs";
 import NewDocumentMenu from "@/components/NewDocumentMenu";
 
 interface HistoryItem {
@@ -104,6 +104,10 @@ export default function RecentDocuments({ limit = 6 }: { limit?: number }) {
   const [items, setItems] = useState<HistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
+
+  useEffect(() => {
+    void resumeActiveJobs();
+  }, []);
 
   // Ambil lebih banyak dari yang ditampilkan agar pencarian mencakup riwayat
   // yang lebih luas, bukan hanya beberapa dokumen terakhir.

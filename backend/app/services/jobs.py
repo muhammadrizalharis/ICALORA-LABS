@@ -144,6 +144,35 @@ def get_job(job_id: str, user_id: int | None) -> dict | None:
     }
 
 
+def list_active_jobs(user_id: int) -> list[dict]:
+    """Job milik pengguna yang masih 'processing' (untuk memulihkan tampilan setelah refresh)."""
+    ensure_job_schema()
+    with engine.begin() as c:
+        c.execute(
+            text(
+                "UPDATE tool_job SET status='error', error=:err, updated_at=now() "
+                "WHERE user_id=:uid AND status='processing' "
+                "AND created_at < now() - make_interval(secs => :sec)"
+            ),
+            {
+                "uid": user_id,
+                "sec": _HARD_CEILING_SECONDS,
+                "err": "Pemeriksaan melebihi batas waktu wajar dan dihentikan. Silakan coba lagi.",
+            },
+        )
+        rows = c.execute(
+            text(
+                "SELECT id, tool, title, created_at FROM tool_job "
+                "WHERE user_id=:uid AND status='processing' ORDER BY created_at DESC LIMIT 20"
+            ),
+            {"uid": user_id},
+        ).all()
+    return [
+        {"id": r.id, "tool": r.tool, "title": r.title, "created_at": r.created_at.isoformat()}
+        for r in rows
+    ]
+
+
 def purge_expired_jobs(hours: int = 24) -> int:
     ensure_job_schema()
     with engine.begin() as c:
