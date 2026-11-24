@@ -43,9 +43,14 @@ _LIGATURES = {
 }
 
 
+def expand_ligatures(text: str) -> str:
+    """Urai ligatur tipografi ("ﬁ" -> "fi"); dipakai juga untuk teks yang ditempel."""
+    return (text or "").translate(_LIGATURES)
+
+
 def sanitize_text(text: str) -> str:
     """Buang NUL & karakter kontrol C0 non-cetak, dan urai ligatur tipografi."""
-    return _CONTROL_CHARS_RE.sub("", text or "").translate(_LIGATURES)
+    return expand_ligatures(_CONTROL_CHARS_RE.sub("", text or ""))
 
 
 def _tika_extract(data: bytes, content_type: str) -> str:

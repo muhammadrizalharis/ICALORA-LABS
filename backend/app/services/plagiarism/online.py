@@ -31,7 +31,10 @@ from app.core.config import get_settings
 from app.ingest.common import text_metrics
 from app.services.file_extract import extract_text
 
+from . import _WORD_RE as _PKG_WORD_RE
 from . import _chunk_match, _extract_own_dois, _report_id, _sentences, _shingles, online_cache
+
+_MIN_SHINGLES_FOR_SKIP = 300  # dokumen pendek: persentase terlalu goyah untuk melewati pencarian
 
 settings = get_settings()
 
@@ -1808,6 +1811,27 @@ def _merge_dup(seen: dict[str, dict], key: str, cand: dict) -> None:
         seen[key] = cur = cand
     if hits:
         cur["_ft_hits"] = hits
+
+
+def single_source_coverage(doc: str, cands: list[dict]) -> tuple[float, dict | None]:
+    """% shingle dokumen yang termuat dalam SATU kandidat teks-penuh OA (terbaik).
+
+    Murah (tanpa jaringan/LLM). Dipakai untuk memutuskan apakah pencarian luas masih perlu:
+    bila satu paper menjelaskan hampir seluruh dokumen, sumber lain tak mengubah kesimpulan.
+    """
+    doc_sh = _shingles([w.lower() for w in _PKG_WORD_RE.findall(doc)])
+    if len(doc_sh) < _MIN_SHINGLES_FOR_SKIP:
+        return 0.0, None
+    best, best_c = 0.0, None
+    for c in cands:
+        ft = c.get("_fulltext") or ""
+        if not c.get("fulltext_oa") or len(ft) < 4000:
+            continue
+        src_sh = _shingles([w.lower() for w in _PKG_WORD_RE.findall(ft)])
+        cov = 100.0 * len(doc_sh & src_sh) / len(doc_sh)
+        if cov > best:
+            best, best_c = cov, c
+    return best, best_c
 
 
 async def identity_candidates(doc: str, title_hint: str = "") -> list[dict]:
