@@ -435,6 +435,26 @@ def _check_secret(arg: str) -> tuple[bool, str]:
     return True, rest.strip()
 
 
+_TIMEOUT_MSG = (
+    "⏳ Pemrosesan melebihi batas waktu bot. Teks panjang sebaiknya diperiksa lewat situs "
+    "(Plagiarism Checker berjalan di latar belakang dan menerima dokumen PDF)."
+)
+
+
+def _http_error_msg(status: int) -> str:
+    if status == 402:
+        return "Saldo token tidak mencukupi. Hubungi admin."
+    if status in (401, 403):
+        return "Bot tidak diizinkan memakai layanan ini (periksa konfigurasi rahasia bot)."
+    if status == 413:
+        return "Teks terlalu panjang untuk bot. Gunakan situs."
+    if status == 429:
+        return "Terlalu banyak permintaan. Coba lagi sebentar."
+    if status == 503:
+        return "Layanan sedang dalam pemeliharaan atau dinonaktifkan."
+    return f"Layanan membalas galat {status}."
+
+
 def _handle(chat_id: int, text: str) -> None:
     text = text.strip()
     cmd, _, arg = text.partition(" ")
@@ -516,6 +536,10 @@ def _handle(chat_id: int, text: str) -> None:
             body = {"text": arg}
             d = _post(path, body)
             _send(chat_id, fmt(d) or "(kosong)")
+        except httpx.TimeoutException:
+            _send(chat_id, _TIMEOUT_MSG)
+        except httpx.HTTPStatusError as exc:
+            _send(chat_id, _http_error_msg(exc.response.status_code))
         except Exception as exc:  # noqa: BLE001
             _send(chat_id, f"Gagal memproses: {html.escape(str(exc))}")
         return
