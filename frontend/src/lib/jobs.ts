@@ -17,6 +17,8 @@ export interface Job {
   historyId?: number;
   error?: string;
   createdAt: number;
+  /** ID job di server; ada pada job yang dipulihkan setelah refresh. */
+  serverId?: string;
 }
 
 let jobs: Job[] = [];
@@ -99,6 +101,72 @@ export function startJob({ tool, title, run }: StartJobOptions): string {
   })();
 
   return tempId;
+}
+
+interface ServerJob {
+  status: JobStatus;
+  history_id?: number | null;
+  error?: string | null;
+}
+
+const POLL_MS = 3000;
+const RESUME_MAX_MS = 26 * 60 * 1000; // sedikit di atas batas keras server (25 mnt)
+
+/**
+ * Pulihkan proses yang masih berjalan di server (mis. setelah halaman di-refresh), supaya
+ * Beranda tetap menampilkan "sedang diproses" lalu hasilnya, bukan daftar kosong.
+ */
+export async function resumeActiveJobs(): Promise<void> {
+  let active: { id: string; tool: string; title: string | null; created_at: string }[] = [];
+  try {
+    const d = await apiGet<{ items: typeof active }>("/tools/jobs/active");
+    active = d.items ?? [];
+  } catch {
+    return;
+  }
+  for (const sj of active) {
+    if (jobs.some((j) => j.serverId === sj.id)) continue;
+    // Job yang baru dikirim dari halaman ini sudah punya kartu lokal untuk tool yang sama.
+    if (jobs.some((j) => j.status === "processing" && !j.serverId && j.tool === sj.tool)) continue;
+    const tempId = `srv-${sj.id}`;
+    jobs = [
+      {
+        tempId,
+        tool: sj.tool,
+        title: sj.title || "Dokumen tanpa judul",
+        status: "processing",
+        createdAt: Date.parse(sj.created_at) || Date.now(),
+        serverId: sj.id,
+      },
+      ...jobs,
+    ];
+    emit();
+    void followServerJob(tempId, sj.id);
+  }
+}
+
+async function followServerJob(tempId: string, serverId: string): Promise<void> {
+  const deadline = Date.now() + RESUME_MAX_MS;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, POLL_MS));
+    try {
+      const sj = await apiGet<ServerJob>(`/tools/job/${serverId}`);
+      if (sj.status === "done") {
+        patch(tempId, { status: "done", historyId: sj.history_id ?? undefined });
+        historyVersion += 1;
+        emit();
+        setTimeout(() => dismissJob(tempId), 5000);
+        return;
+      }
+      if (sj.status === "error") {
+        patch(tempId, { status: "error", error: sj.error || "Pemeriksaan gagal di server." });
+        return;
+      }
+    } catch {
+      // Gangguan jaringan sesaat: coba lagi pada putaran berikutnya.
+    }
+  }
+  patch(tempId, { status: "error", error: "Pemeriksaan melebihi batas waktu." });
 }
 
 export function jobTitle(source: string, fallback = "Dokumen tanpa judul"): string {

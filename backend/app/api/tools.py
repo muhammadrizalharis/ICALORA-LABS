@@ -39,7 +39,7 @@ from app.services.file_extract import (
 )
 from app.services.grammar.report_pdf import build_grammar_report_pdf
 from app.services.hidden_text import check_hidden_text
-from app.services.jobs import complete_job, create_job, fail_job, get_job
+from app.services.jobs import complete_job, create_job, fail_job, get_job, list_active_jobs
 from app.services.llm.tasks import (
     build_resume,
     chat,
@@ -1117,6 +1117,15 @@ async def plagiarism_file_async_ep(  # noqa: B008
         )
     )
     return {"job_id": job_id, "status": "processing"}
+
+
+@router.get("/jobs/active")
+def active_jobs_ep(request: Request) -> dict:
+    """Job latar-belakang milik pengguna yang masih berjalan (pemulihan setelah refresh)."""
+    user = optional_user_from_request(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Perlu login.")
+    return {"items": list_active_jobs(user["id"])}
 
 
 @router.get("/job/{job_id}")
