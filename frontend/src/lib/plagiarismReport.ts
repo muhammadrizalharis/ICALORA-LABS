@@ -108,6 +108,8 @@ export interface Report {
   online_rate_limited?: Record<string, number>;
   /** Kuota harian OpenAlex habis saat pemeriksaan. */
   online_budget_exhausted?: boolean;
+  /** Server embedding gagal: korpus lokal tidak diperiksa (sumber daring tetap). */
+  local_corpus_unavailable?: boolean;
   online_merged?: boolean;
   online_providers?: { name: string; hits: number }[];
 }

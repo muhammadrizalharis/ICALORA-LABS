@@ -176,6 +176,14 @@ export default function PlagiarismReport({ report, documentText, docTitle = "", 
         </div>
       )}
 
+      {report.local_corpus_unavailable && (
+        <div className="rounded-lg border border-amber-400 bg-amber-50 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-500/60 dark:bg-amber-500/10 dark:text-amber-100">
+          Server pencocokan makna sedang sibuk saat pemeriksaan ini, sehingga korpus lokal tidak
+          ikut diperiksa (sumber daring tetap diperiksa). Skor bisa lebih rendah dari seharusnya;
+          periksa ulang beberapa saat lagi.
+        </div>
+      )}
+
       {report.online_rate_limited && (
         <div className="rounded-lg border border-amber-400 bg-amber-50 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-500/60 dark:bg-amber-500/10 dark:text-amber-100">
           Penyedia sumber daring membatasi permintaan saat pemeriksaan ini (
