@@ -820,9 +820,12 @@ async def _run_plagiarism_merged(
     # Parafrase: bandingkan MAKNA dengan teks penuh paper kandidat (kata-demi-kata sudah dicek
     # di atas). Gagal/lambat tidak boleh membatalkan laporan.
     if extra and settings.online_semantic_enabled:
+        sem_budget = max(20, settings.online_semantic_seconds - 25)
         try:
             sem = await asyncio.wait_for(
-                run_in_threadpool(find_semantic_source, text, extra, res),
+                run_in_threadpool(
+                    lambda: find_semantic_source(text, extra, res, budget_seconds=sem_budget)
+                ),
                 timeout=max(30, settings.online_semantic_seconds),
             )
         except Exception:  # noqa: BLE001
