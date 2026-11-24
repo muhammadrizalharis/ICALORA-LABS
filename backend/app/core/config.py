@@ -121,6 +121,10 @@ class Settings(BaseSettings):
     # bisa berjumlah >20 mnt (180+840+lokal+240) dan melewati polling frontend; anggaran ini
     # memangkas fase luas/semantik secara dinamis sesuai waktu yang sudah terpakai.
     online_total_budget_seconds: int = Field(default=1140)
+    # Bila SATU paper teks-penuh OA (dari pass identitas) sudah memuat >= nilai ini % isi dokumen,
+    # pencarian luas (80-90% waktu job) dilewati: sumber lain tak mengubah kesimpulan "dokumen ini
+    # adalah/menyalin paper itu". 0 = selalu jalankan pencarian luas.
+    online_skip_broad_coverage: float = Field(default=90.0)
     core_api_key: str = Field(default="")
     # OpenAlex tanpa key memakai kuota harian gratis yang DIBAGI per-IP (bisa habis
     # → 429 untuk semua). Key gratis dari openalex.org memberi kuota sendiri.

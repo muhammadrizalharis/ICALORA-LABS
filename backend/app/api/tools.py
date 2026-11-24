@@ -11,7 +11,7 @@ from collections import defaultdict, deque
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.core.config import get_settings
 from app.services import admin as admin_svc
@@ -30,6 +30,7 @@ from app.services.citation import find_citations
 from app.services.file_extract import (
     MAX_UPLOAD_BYTES,
     OcrUnavailableError,
+    expand_ligatures,
     extract_text,
     is_scanned_pdf,
     ocr_available,
@@ -60,6 +61,7 @@ from app.services.plagiarism.online import (
     identity_candidates,
     online_candidates,
     online_check,
+    single_source_coverage,
 )
 from app.services.plagiarism.report_pdf import build_report_pdf
 from app.services.plagiarism.semantic import find_semantic_source
@@ -243,6 +245,12 @@ router.dependencies.append(Depends(_access_guard))
 
 class TextIn(BaseModel):
     text: str = Field(..., min_length=1)
+
+    @field_validator("text")
+    @classmethod
+    def _expand_ligatures(cls, v: str) -> str:
+        # Teks tempelan dari PDF sering memuat ligatur ("ﬁ"); samakan dengan jalur berkas.
+        return expand_ligatures(v)
 
 
 class ParaphraseIn(TextIn):
@@ -771,6 +779,7 @@ async def _run_plagiarism_merged(
     providers: dict = {}
     rate_limited = begin_rate_limit_tracking()
     timings: dict[str, float] = {}
+    skipped_broad: dict | None = None
     t_start = t_phase = time.monotonic()
 
     def _lap(name: str) -> None:
@@ -798,14 +807,22 @@ async def _run_plagiarism_merged(
             logger.warning("Fase identitas gagal/timeout", exc_info=True)
             ident = []
         _lap("identity")
+        # Satu paper OA sudah memuat hampir seluruh dokumen -> pencarian luas (80-90% waktu job)
+        # tak mengubah kesimpulan; lewati. Pencocokan korpus lokal & semantik tetap berjalan.
+        thr = settings.online_skip_broad_coverage
+        if ident_ok and ident and thr > 0:
+            cov, best = await run_in_threadpool(single_source_coverage, text, ident)
+            if cov >= thr and best is not None:
+                skipped_broad = {"coverage": round(cov, 1), "title": best.get("title")}
         # 2) Pencarian luas per-kalimat dengan sisa anggaran. Bila timeout, hasil
         #    identitas di atas tetap dipakai (laporan tak pernah kehilangan paper
         #    terbit hanya karena fase luas lambat).
         try:
-            extra, providers = await asyncio.wait_for(
-                online_candidates(text, title_hint, skip_identity=ident_ok),
-                timeout=_broad_timeout(time.monotonic() - t_start),
-            )
+            if skipped_broad is None:
+                extra, providers = await asyncio.wait_for(
+                    online_candidates(text, title_hint, skip_identity=ident_ok),
+                    timeout=_broad_timeout(time.monotonic() - t_start),
+                )
         except Exception:  # noqa: BLE001
             logger.warning("Fase pencarian luas gagal/timeout", exc_info=True)
             extra, providers = [], {}
@@ -848,6 +865,8 @@ async def _run_plagiarism_merged(
             res["semantic_match"] = sem
         _lap("semantic")
     res["online_timings"] = timings
+    if skipped_broad:
+        res["online_broad_skipped"] = skipped_broad
     logger.info(
         "Cek plagiarisme selesai: %s total=%.0fs openalex=%d",
         timings,

@@ -177,14 +177,30 @@ export function passageKey(p: MatchedPassage): string {
   return p.source_title || (p.doc_id != null ? `doc-${p.doc_id}` : "src");
 }
 
+const LIGATURES: Record<string, string> = {
+  "\uFB00": "ff",
+  "\uFB01": "fi",
+  "\uFB02": "fl",
+  "\uFB03": "ffi",
+  "\uFB04": "ffl",
+  "\uFB05": "st",
+  "\uFB06": "st",
+};
+
+/** Sama dengan backend (`expand_ligatures`): server menguraikan ligatur, sorotan harus ikut. */
+export function expandLigatures(s: string): string {
+  return s.replace(/[\uFB00-\uFB06]/g, (c) => LIGATURES[c]);
+}
+
 /** Bangun HTML dokumen dengan sorotan warna + badge nomor per sumber. */
 export function buildHighlight(
-  original: string,
+  originalRaw: string,
   passages: MatchedPassage[],
   charCount: number,
   linked = false,
   opts: { minWords?: number; exclude?: Set<string> } = {},
 ): { html: string; sources: SrcAgg[] } {
+  const original = expandLigatures(originalRaw);
   const minWords = opts.minWords ?? 0;
   const exclude = opts.exclude ?? new Set<string>();
   const map = new Map<string, SrcAgg>();

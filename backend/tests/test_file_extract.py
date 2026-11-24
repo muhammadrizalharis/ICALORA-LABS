@@ -40,3 +40,12 @@ def test_sanitize_text_leaves_scientific_and_indonesian_text_untouched():
     # Sengaja bukan NFKC: superskrip, satuan, pecahan, elipsis, dan diakritik harus tetap.
     s = "Luas 25 m² dan 10⁻³ mol, ½ bagian… α≥0,05 café Pengaruh model pembelajaran ™"
     assert sanitize_text(s) == s
+
+
+def test_pasted_text_models_expand_ligatures_but_keep_everything_else():
+    from app.api.tools import ParaphraseIn, PlagiarismIn, TextIn
+
+    for model in (TextIn, PlagiarismIn, ParaphraseIn):
+        assert model(text="classi\ufb01cation e\ufb03cient").text == "classification efficient"
+    plain = "Teks biasa dengan m² dan café.\nBaris kedua."
+    assert PlagiarismIn(text=plain).text == plain
