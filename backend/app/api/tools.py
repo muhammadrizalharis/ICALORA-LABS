@@ -748,6 +748,17 @@ def _title_hint_from_filename(filename: str | None) -> str:
     return stem
 
 
+def _broad_timeout(elapsed: float) -> float:
+    """Sisa anggaran fase luas: dipangkas agar total job tak melewati batas polling klien."""
+    total = settings.online_total_budget_seconds
+    return max(30.0, min(float(settings.online_budget_seconds), total - elapsed - 120))
+
+
+def _semantic_budget(elapsed: float) -> float:
+    total = settings.online_total_budget_seconds
+    return max(20.0, min(float(settings.online_semantic_seconds - 25), total - elapsed))
+
+
 async def _run_plagiarism_merged(
     text: str, top_k: int, title_hint: str = "", exclude: dict | None = None
 ) -> dict:
@@ -760,7 +771,7 @@ async def _run_plagiarism_merged(
     providers: dict = {}
     rate_limited = begin_rate_limit_tracking()
     timings: dict[str, float] = {}
-    t_phase = time.monotonic()
+    t_start = t_phase = time.monotonic()
 
     def _lap(name: str) -> None:
         nonlocal t_phase
@@ -793,7 +804,7 @@ async def _run_plagiarism_merged(
         try:
             extra, providers = await asyncio.wait_for(
                 online_candidates(text, title_hint, skip_identity=ident_ok),
-                timeout=max(30, settings.online_budget_seconds),
+                timeout=_broad_timeout(time.monotonic() - t_start),
             )
         except Exception:  # noqa: BLE001
             logger.warning("Fase pencarian luas gagal/timeout", exc_info=True)
@@ -820,13 +831,13 @@ async def _run_plagiarism_merged(
     # Parafrase: bandingkan MAKNA dengan teks penuh paper kandidat (kata-demi-kata sudah dicek
     # di atas). Gagal/lambat tidak boleh membatalkan laporan.
     if extra and settings.online_semantic_enabled:
-        sem_budget = max(20, settings.online_semantic_seconds - 25)
+        sem_budget = _semantic_budget(time.monotonic() - t_start)
         try:
             sem = await asyncio.wait_for(
                 run_in_threadpool(
                     lambda: find_semantic_source(text, extra, res, budget_seconds=sem_budget)
                 ),
-                timeout=max(30, settings.online_semantic_seconds),
+                timeout=sem_budget + 30,
             )
         except Exception:  # noqa: BLE001
             # Jangan batalkan laporan, tetapi JANGAN ditelan diam-diam: kegagalan harus

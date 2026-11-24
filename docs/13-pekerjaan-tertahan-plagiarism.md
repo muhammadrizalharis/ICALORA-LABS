@@ -3,7 +3,7 @@
 Dicatat 2026-11-19, diperbarui 2026-11-20. Semua perbaikan sebelumnya sudah ada di `main`
 (PR #94–#105) dan dideploy. Dokumen ini hanya memuat yang **belum selesai** dan alasannya.
 
-## Ringkasan prioritas (diperbarui 2026-11-21)
+## Ringkasan prioritas (diperbarui 2026-11-25)
 
 | # | Item | Status | Pemilik |
 |---|---|---|---|
@@ -11,9 +11,74 @@ Dicatat 2026-11-19, diperbarui 2026-11-20. Semua perbaikan sebelumnya sudah ada 
 | 2 | Banner "paper terbit" salah-tuduh (Springer) | **selesai** (PR #112) | - |
 | 3 | `semantic_match` kosong di job produksi | **selesai** (PR #111); terbukti job produksi 97,2% | - |
 | 4 | MDPI miss (teks pendek) | **selesai** (PR #113); 3,8% -> 100% | - |
-| 5 | Durasi job naik (363 -> 594 dtk pada satu uji) | **sedang diukur** (A/B fase luas) | AI |
+| 5 | Durasi job bervariasi (225 -> 976 dtk) | **dijelaskan & dibatasi** (PR #115 + anggaran total), lihat "Durasi job" | - |
 | 6 | Penerbit yang tetap gagal | batas diketahui (lihat tabel) | - |
 | 7 | Peran admin, Google login, token 0, teks "Gratis", lint, demo ganda, mode hemat | **selesai** (PR #104-#110) | - |
+| 8 | Bot Telegram: semua perintah diuji, galat jelas | **selesai** (PR #114) | - |
+| 9 | Panel admin biasa/super diuji di browser | **selesai** (2026-11-25) | - |
+| 10 | Ambang semantik divalidasi lintas bidang | **selesai** (6 paper, 3 bidang) | - |
+| 11 | 8 peringatan lint frontend | **selesai** (aturan kembali `error`) | - |
+
+## Hasil 2026-11-25
+
+### Durasi job (diukur, bukan ditebak)
+
+Hasil job kini memuat `online_timings` (detik per fase: `identity`, `broad`, `local_check`,
+`semantic`) dan log INFO `Cek plagiarisme selesai: ...`. Timeout fase identitas/luas yang dulu
+ditelan diam-diam kini tercatat WARNING.
+
+- Pengukuran bersih (tanpa beban lain), dokumen 9.000 karakter tanpa judul: 594 dtk
+  (identitas 19, **luas 534**, lokal 42) dan 468 dtk (identitas 63, **luas 383**, lokal 22).
+  Fase luas = 80-90% waktu dan memang dirancang 5-10 menit (kalimat kueri adaptif 60-220).
+  Outlier 594 dtk yang dulu tak bisa direproduksi = perilaku normal fase luas.
+- Pengukuran terkontaminasi (proses uji yatim masih memakai LLM): 976 dtk dengan `semantic` = 240,0
+  (kena batas, hasil dibuang). Penyebab sebenarnya: server embedding bge-m3 dipakai bersama,
+  hanya separuh di VRAM (GPU penuh pengguna lain), load host ~54 -> ~1 dtk/jendela.
+- Perbaikan: (a) `find_semantic_source` taat tenggat lunak dan mengembalikan kandidat terbaik yang
+  sempat selesai; (b) `online_total_budget_seconds=1140`: fase luas & semantik dipangkas dinamis
+  sehingga total job selalu < 20 menit (batas polling frontend). Sebelumnya jumlah batas per-fase
+  bisa 180+840+lokal+240 > 20 mnt.
+- Belum dilakukan (ide): lewati fase luas bila pass identitas sudah menjelaskan ~100% dokumen
+  (job "cek paper sendiri" bisa 10x lebih cepat) - ditunda karena mengubah cakupan sumber lain.
+
+### Validasi ambang semantik (`semantic_match_cos=0,80`, `semantic_min_coverage=35`)
+
+6 paper OA / 3 bidang (pendidikan ID, keuangan ID, medis EN); tiap paper diparafrase agresif oleh LLM
+(4 potongan ~800 karakter), dibandingkan ke teks penuh ke-6 paper (6 positif, 30 negatif):
+
+- Negatif (paper lain, termasuk satu bidang): **0% dari 30 pasangan** melewati 0,80;
+  cosine rata-rata 0,56-0,72.
+- Positif: 5 dari 5 potongan prosa terdeteksi (cakupan 57-75%; 4 paper di atas 57%). Satu "miss"
+  (12,5%) ternyata potongan DAFTAR PUSTAKA (nama/judul rujukan, bukan prosa) - artefak uji.
+- Ambang tidak diubah. Batas: hanya 6 paper, bahasa ID/EN; belum diuji bidang lain/bahasa lain.
+
+### Jangkauan identitas (Springer/Frontiers)
+
+Uji ulang dengan sampel acak paper berkutip rendah (bukan yang terkenal), fase identitas saja:
+
+| Skenario | Frontiers | Springer |
+|---|---|---|
+| Tanpa judul/abstrak (hanya isi) | 6/6 ketemu | 3/5 ketemu |
+| Dengan judul/abstrak (kondisi nyata) | - | 2/2 yang tadi meleset: ketemu (11 dtk, 50 dtk) |
+
+Dua paper Springer yang meleset (teks tanpa judul) tetap meleset di pipeline penuh (indeks 4,1% dan
+2,6%): keduanya preprint ResearchSquare. Jadi batas yang tersisa sempit: dokumen TANPA judul/abstrak
+dari paper berkutip rendah yang tak terindeks baik oleh OpenAlex. Dokumen normal (ada judul) aman.
+
+### Panel admin (browser, produksi)
+
+Admin biasa: hanya tab Pengguna, tombol "+ Tambah" hanya pada pengguna biasa (tidak pada diri
+sendiri/admin/demo), badge "Anda"; menambah token via UI berhasil dan tercatat di Log Tindakan.
+Super Admin: 4 tab (Aktivitas, Pengguna, Log Tindakan, Pengaturan). Akun uji sudah dihapus.
+Catatan: alat browser sulit mengeklik tombol karena animasi (perlu `force`), bukan bug aplikasi.
+
+### Bot Telegram
+
+Semua perintah diuji (help, whoami, ping, status, hitung, grammar, parafrase, humanize, cek,
+perintah tak dikenal, secret salah, services/logs). `/cek` memakan 83-106 dtk (batas bot 180 dtk);
+timeout & galat HTTP kini dijawab dengan pesan jelas (402/401/403/413/429/503). Teks panjang
+sebaiknya lewat situs.
+
 
 ## Hasil 2026-11-21
 
@@ -36,8 +101,8 @@ Dicatat 2026-11-19, diperbarui 2026-11-20. Semua perbaikan sebelumnya sudah ada 
 | PLOS, IEEE, Copernicus, Nature | terdeteksi 100% |
 | BMC | 100% (DOI sendiri); hasil lama "miss" = unduhan teks penuh tak stabil |
 | MDPI | 100% setelah PR #113 (sebelumnya 3,8%) |
-| Springer | paper sendiri tak ketemu sebagai kandidat |
-| Frontiers | paper sendiri tak ada di kandidat (PDF-nya bisa diunduh) |
+| Springer | dengan judul/abstrak: ketemu; tanpa judul: 3/5 (lihat "Jangkauan identitas") |
+| Frontiers | 6/6 ketemu pada uji ulang sampel acak (tanpa judul) |
 | Taylor & Francis | **diblokir penerbit** (HTTP 403, hanya 122 karakter); tak bisa diatasi secara sah |
 | Elsevier, Wiley, SAGE | tak teruji: teks penuh tak bisa diunduh untuk 4 paper pertama |
 
@@ -141,9 +206,9 @@ dihubungkan ke pass identitas. Bisa diuji ulang pada paper lama bila ada kebutuh
 
 (Item 8 pada ringkasan: dokumen yang seluruhnya diparafrase.)
 
-- **Dokumen yang seluruhnya diparafrase** tidak terdeteksi (uji: 0,1%). Pencarian mengandalkan
-  frasa persis. Solusinya pencocokan semantik terhadap teks penuh paper yang teridentifikasi —
-  pekerjaan baru yang cukup besar.
+- **Dokumen yang seluruhnya diparafrase**: kini ada deteksi semantik (embedding bge-m3 vs teks penuh
+  kandidat OA) sebagai INDIKASI, tidak masuk Similarity Index. Hanya bekerja bila paper sumber
+  ditemukan dan teks penuhnya terbuka; bergantung pada kecepatan server embedding bersama.
 - **Paper berbayar / diblokir penerbit**: teks penuh tak bisa diambil secara sah.
 - **Mesin web SearXNG** rapuh (Brave/DuckDuckGo/Startpage sering terblokir); layanan itu dipakai
   bersama, jangan diuji berat. Bukan pengganti OpenAlex.
@@ -153,17 +218,16 @@ dihubungkan ke pass identitas. Bisa diuji ulang pada paper lama bila ada kebutuh
 
 ## Opsional / diamati
 
-### 9. Peringatan lint lama (sudah ada sebelum pekerjaan ini)
+### 9. Peringatan lint lama — SELESAI (2026-11-25)
 
-- Backend: 2 di `online.py` (urutan impor, `_WORD_RE` didefinisikan dua kali), E501 di `reports.py`
-  dan beberapa file `ingest/` & `ai_detector/`.
-- Frontend: ESLint `react-hooks/set-state-in-effect` di `TopNav.tsx`, `lib/auth.tsx`, `login/page.tsx`.
+- Backend: ruff 0 error. Frontend: eslint 0 error / 0 warning; aturan `react-hooks/set-state-in-effect`
+  kembali ke `error` (TopNav & TokenEditor ditulis ulang; enam efek fetch/hidrasi-saat-mount diberi
+  pengecualian per-baris beralasan).
 
-### 10. Baris pengguna demo ganda
+### 10. Baris pengguna demo ganda — SELESAI
 
-Tabel `users` memuat 13 baris `demo@icalora.local` (id 1–13, semua `is_demo`). Diduga tiap login demo
-membuat baris baru; penyebab belum diselidiki. Tidak berdampak ke pengguna nyata (login demo
-dimatikan di produksi), tetapi perlu dirapikan bila login demo dipakai lagi.
+Tujuh baris demo tak terpakai dihapus (13 -> 6). Penyebab pembuatan baris baru tiap login demo belum
+diselidiki; login demo dimatikan di produksi.
 
 ### Catatan fitur yang sudah ada namun terbatas
 
@@ -184,4 +248,6 @@ dimatikan di produksi), tetapi perlu dirapikan bila login demo dipakai lagi.
 
 - `GET /health/providers` memuat `rate_limited_today` (jumlah HTTP 429 per penyedia hari ini)
   dan `openalex_budget_exhausted`.
-- Hasil tiap job memuat `online_openalex_calls`, `online_rate_limited`, `online_budget_exhausted`.
+- Hasil tiap job memuat `online_openalex_calls`, `online_rate_limited`, `online_budget_exhausted`,
+  dan `online_timings` (detik per fase).
+- Setelan baru: `ONLINE_TOTAL_BUDGET_SECONDS` (bawaan 1140) = anggaran total job.

@@ -117,6 +117,10 @@ class Settings(BaseSettings):
     # kena rate-limit oleh banjir permintaan fase luas. Dibuat kecil agar total
     # (identitas + luas + korpus lokal) tetap aman di bawah polling frontend.
     online_identity_budget_seconds: int = Field(default=180)
+    # Anggaran TOTAL satu job (identitas + luas + korpus lokal + semantik). Batas per-fase saja
+    # bisa berjumlah >20 mnt (180+840+lokal+240) dan melewati polling frontend; anggaran ini
+    # memangkas fase luas/semantik secara dinamis sesuai waktu yang sudah terpakai.
+    online_total_budget_seconds: int = Field(default=1140)
     core_api_key: str = Field(default="")
     # OpenAlex tanpa key memakai kuota harian gratis yang DIBAGI per-IP (bisa habis
     # → 429 untuk semua). Key gratis dari openalex.org memberi kuota sendiri.
