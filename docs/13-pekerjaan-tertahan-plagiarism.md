@@ -7,7 +7,7 @@ Dicatat 2026-11-19, diperbarui 2026-11-20. Semua perbaikan sebelumnya sudah ada 
 
 | # | Item | Status | Pemilik |
 |---|---|---|---|
-| 1 | Ganti `SESSION_SECRET` produksi (**kritis**) | belum dilakukan | user |
+| 1 | Ganti `SESSION_SECRET` produksi | **selesai 2026-11-24** (terverifikasi) | - |
 | 2 | Banner "paper terbit" salah-tuduh (Springer) | **selesai** (PR #112) | - |
 | 3 | `semantic_match` kosong di job produksi | **selesai** (PR #111); terbukti job produksi 97,2% | - |
 | 4 | MDPI miss (teks pendek) | **selesai** (PR #113); 3,8% -> 100% | - |
@@ -46,23 +46,15 @@ pencarian kandidat (Frontiers, Springer).
 
 ## Keamanan & auth (2026-11-20)
 
-### 1. `SESSION_SECRET` produksi masih nilai bawaan (publik) — KRITIS
+### 1. `SESSION_SECRET` produksi — SELESAI (2026-11-24)
 
-Produksi memakai `icalora-dev-secret-change-me` (tertulis di kode). Siapa pun yang tahu nilainya
-bisa memalsukan cookie sesi untuk akun mana pun, termasuk admin. Terbukti: token demo yang dibuat
-dari mesin dev diterima produksi. Kode sudah menambah log CRITICAL saat startup dan flag
-`session_secret_default` di `GET /health/providers`, tetapi **nilainya belum diganti**
-(sengaja tidak diubah oleh AI: rahasia tidak boleh lewat AI, dan semua pengguna akan keluar sekali).
-
-Langkah (dijalankan user di server):
-
-```
-echo "SESSION_SECRET=$(openssl rand -hex 32)" >> ~/ICALORA-LABS/backend/.env
-cd ~/ICALORA-LABS && docker compose -f deploy/docker/docker-compose.app.yml up -d --no-deps backend bot
-```
-
-Verifikasi: `/health/providers` → `session_secret_default: false`. Token internal bot diturunkan dari
-secret ini, jadi backend dan bot harus direstart bersamaan.
+Sebelumnya produksi memakai kunci bawaan yang tertulis di kode, sehingga cookie sesi (termasuk
+Super Admin) bisa dipalsukan. Kunci acak sudah diset di `backend/.env` dan backend + bot direstart.
+Terverifikasi: cookie yang dipalsukan dengan kunci bawaan ditolak (`authenticated: false`, layanan
+401), sesi sah Super Admin dan panel admin berfungsi, bot (token internal) 200 / tanpa token 401,
+`/health/providers` -> `session_secret_default: false`, peringatan CRITICAL tak muncul lagi.
+Catatan: percobaan pertama user gagal karena barisnya tidak tersimpan di `.env`; selalu verifikasi
+dengan `grep -c '^SESSION_SECRET=.' backend/.env` (tanpa menampilkan nilainya).
 
 ### 4. Login Google belum diuji end-to-end
 
@@ -186,7 +178,7 @@ dimatikan di produksi), tetapi perlu dirapikan bila login demo dipakai lagi.
 | `OPENALEX_ENABLED` | `true` | `false` = OpenAlex tidak dipanggil sama sekali |
 | `OPENALEX_SENTENCE_SEARCH` | `false` | Pencarian per-kalimat OpenAlex (boros kuota) |
 | `OLLAMA_KEEP_ALIVE` | `5m` | Model dilepas dari VRAM setelah idle |
-| `SESSION_SECRET` | **belum diset** | WAJIB acak di produksi (lihat item 1) |
+| `SESSION_SECRET` | acak 64 hex (sudah diset) | Jangan di-commit; mengganti = semua pengguna login ulang |
 
 ## Pemantauan
 
