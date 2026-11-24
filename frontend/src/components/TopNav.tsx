@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { FEATURES, GROUP_LABEL, GROUP_COLOR, type FeatureGroup } from "@/lib/features";
 import ThemeToggle from "@/components/ThemeToggle";
 import AccountButton from "@/components/AccountButton";
@@ -22,11 +22,13 @@ export default function TopNav() {
   const [megaOpen, setMegaOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  // Tutup menu saat pindah halaman.
-  useEffect(() => {
+  // Tutup menu saat pindah halaman (penyesuaian state saat render, bukan di effect).
+  const [lastPath, setLastPath] = useState(pathname);
+  if (lastPath !== pathname) {
+    setLastPath(pathname);
     setMegaOpen(false);
     setMobileOpen(false);
-  }, [pathname]);
+  }
 
   return (
     <header className="sticky top-0 z-50 border-b border-c glass">

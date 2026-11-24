@@ -51,6 +51,7 @@ export default function HistoryList({ tool }: { tool?: string }) {
   }, [tool]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- muat data saat mount (fetch)
     load();
   }, [load]);
 

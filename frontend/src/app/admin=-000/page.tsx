@@ -294,6 +294,7 @@ function ActivityTab() {
   }, [days, toolFilter]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- muat data saat mount (fetch)
     load();
   }, [load]);
 
@@ -527,6 +528,7 @@ function UsersTab({ adminId, isSuper }: { adminId: number; isSuper: boolean }) {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- muat data saat mount (fetch)
     load();
   }, [load]);
 
@@ -930,7 +932,11 @@ function AuditTab() {
 
 function TokenEditor({ value, onSave }: { value: number; onSave: (v: number) => void }) {
   const [v, setV] = useState(String(value));
-  useEffect(() => setV(String(value)), [value]);
+  const [lastValue, setLastValue] = useState(value);
+  if (lastValue !== value) {
+    setLastValue(value);
+    setV(String(value));
+  }
   const changed = v !== String(value);
   return (
     <div className="flex items-center gap-1">

@@ -27,6 +27,7 @@ export default function ThemeToggle() {
 
   useEffect(() => {
     const stored = (localStorage.getItem(STORAGE_KEY) as Theme | null) ?? "system";
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- localStorage hanya ada di klien (hindari mismatch hydration)
     setTheme(stored);
     setMounted(true);
   }, []);
