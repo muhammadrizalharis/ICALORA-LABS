@@ -26,6 +26,9 @@ _RETRY_BACKOFF = 1.5
 # serempak -> ReadTimeout 120 dtk x3). Semaphore membuat waktu tunggu antrean terjadi di sini,
 # sebelum jam timeout permintaan berjalan.
 _EMBED_SEM = threading.BoundedSemaphore(max(1, settings.embed_max_concurrency))
+# Jalur CEPAT (batch kecil, berbatas waktu: embedding dokumen & semantik) punya slot sendiri agar
+# tak kelaparan di belakang job massal (mis. AI detector) yang menguasai _EMBED_SEM berjam-jam.
+_FAST_SEM = threading.BoundedSemaphore(max(1, settings.embed_max_concurrency))
 
 
 def _post_with_retry(
@@ -156,7 +159,7 @@ class OllamaProvider:
         dan menunggu antrean maksimal `wait` detik (TimeoutError bila tak kebagian giliran)."""
         if not texts:
             return []
-        if not _EMBED_SEM.acquire(timeout=wait if wait is not None else -1):
+        if not _FAST_SEM.acquire(timeout=wait if wait is not None else -1):
             raise TimeoutError("Antrean embedding penuh.")
         try:
             payload = self._embed_payload(input=texts)
@@ -166,7 +169,7 @@ class OllamaProvider:
                 )
                 return resp.json()["embeddings"]
         finally:
-            _EMBED_SEM.release()
+            _FAST_SEM.release()
 
 
 def get_llm() -> LLMProvider:
