@@ -87,7 +87,7 @@ def test_empty_text_returns_nothing():
 
 def test_embed_semaphore_limits_concurrency_and_fast_path_times_out_in_queue(monkeypatch):
     sem = threading.BoundedSemaphore(1)
-    monkeypatch.setattr(prov, "_EMBED_SEM", sem)
+    monkeypatch.setattr(prov, "_FAST_SEM", sem)
     llm = prov.OllamaProvider("http://x", "m", "e", timeout=5, embed_base_url="http://x")
     assert sem.acquire(blocking=False)  # slot sedang dipakai job lain
     t0 = time.monotonic()
@@ -95,3 +95,15 @@ def test_embed_semaphore_limits_concurrency_and_fast_path_times_out_in_queue(mon
         llm.embed_batch_fast(["a"], timeout=5, attempts=1, wait=0.3)
     assert time.monotonic() - t0 < 2  # menyerah di antrean, bukan menunggu 120 dtk
     sem.release()
+
+
+def test_fast_lane_is_not_starved_by_bulk_embedding_jobs(monkeypatch):
+    bulk = threading.BoundedSemaphore(1)
+    monkeypatch.setattr(prov, "_EMBED_SEM", bulk)
+    monkeypatch.setattr(prov, "_FAST_SEM", threading.BoundedSemaphore(1))
+    assert bulk.acquire(blocking=False)  # job massal (mis. AI detector) menguasai jalur massal
+    llm = prov.OllamaProvider("http://127.0.0.1:1", "m", "e", timeout=2, embed_base_url="http://127.0.0.1:1")
+    with pytest.raises(Exception) as ei:  # sampai ke jaringan (ditolak), bukan macet di antrean
+        llm.embed_batch_fast(["a"], timeout=2, attempts=1, wait=0.3)
+    assert not isinstance(ei.value, TimeoutError)
+    bulk.release()
