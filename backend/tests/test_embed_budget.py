@@ -60,7 +60,21 @@ def test_server_failure_midway_keeps_what_finished(clock):
 def test_total_failure_gives_empty_list_quickly(clock):
     llm = FastLLM(clock, fail_after=0)
     vecs, total = _run(llm)
-    assert vecs == [] and total == 64 and llm.calls == 1  # berhenti di kegagalan pertama
+    assert vecs == [] and total == 64 and llm.calls == 2  # menyerah setelah 2 kegagalan beruntun
+
+
+def test_single_transient_failure_does_not_abort_the_rest(clock):
+    class Flaky(FastLLM):
+        def embed_batch_fast(self, texts, timeout, attempts=1, wait=None):
+            self.calls += 1
+            if self.calls == 2:
+                raise TimeoutError("antrean")
+            self.clock["t"] += 1
+            return [[1.0] for _ in texts]
+
+    llm = Flaky(clock)
+    vecs, total = _run(llm)
+    assert total == 64 and len(vecs) == 64 - 8  # hanya batch yang gagal hilang
 
 
 def test_partial_result_is_spread_across_the_whole_document():

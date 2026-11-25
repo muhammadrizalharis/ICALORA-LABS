@@ -87,6 +87,7 @@ def embed_chunks_budgeted(
     deadline = time.monotonic() + budget_seconds
     order = _spread_order(total)
     out: list[list[float]] = []
+    failures = 0
     for i in range(0, total, max(1, batch_size)):
         remaining = deadline - time.monotonic()
         if remaining <= 1:
@@ -98,7 +99,11 @@ def embed_chunks_budgeted(
             else:
                 vecs = llm.embed_batch(batch)
         except Exception:  # noqa: BLE001
-            break  # server kewalahan: berhenti, pakai yang sudah ada
+            failures += 1
+            if failures >= 2:
+                break  # server kewalahan: berhenti, pakai yang sudah ada
+            continue  # satu kegagalan bisa sesaat (antrean); coba batch berikutnya
+        failures = 0
         out.extend(vecs)
     return out, total
 
