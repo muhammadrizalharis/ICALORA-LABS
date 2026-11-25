@@ -18,6 +18,9 @@ Dicatat 2026-11-19, diperbarui 2026-11-20. Semua perbaikan sebelumnya sudah ada 
 | 9 | Panel admin biasa/super diuji di browser | **selesai** (2026-11-25) | - |
 | 10 | Ambang semantik divalidasi lintas bidang | **selesai** (6 paper, 3 bidang) | - |
 | 11 | 8 peringatan lint frontend | **selesai** (aturan kembali `error`) | - |
+| 12 | Kartu "sedang diproses" hilang saat refresh | **selesai** (PR #121) | - |
+| 13 | Embedding korpus lokal gagal/lambat saat berebut (data produksi nyata) | **selesai**: akar masalah = bge-m3 sebagian di CPU; dipindah ke GPU 1 (~100x lebih cepat) + turun-mutu (PR #123-#124) | - |
+| 14 | Bot: /cek memblokir bot & timeout 180 dtk | **selesai** (PR #123) | - |
 
 ## Hasil 2026-11-25
 
@@ -63,7 +66,13 @@ ditelan diam-diam kini tercatat WARNING.
   cosine rata-rata 0,56-0,72.
 - Positif: 5 dari 5 potongan prosa terdeteksi (cakupan 57-75%; 4 paper di atas 57%). Satu "miss"
   (12,5%) ternyata potongan DAFTAR PUSTAKA (nama/judul rujukan, bukan prosa) - artefak uji.
-- Ambang tidak diubah. Batas: hanya 6 paper, bahasa ID/EN; belum diuji bidang lain/bahasa lain.
+- Putaran kedua (2026-11-25), 4 paper bidang lain (CS/evolusi-NN IEEE, teknik sipil Elsevier, ilmu
+  sosial EN, ekonomi ID), parafrase agresif LLM 3 potongan/paper (potongan prosa, bukan daftar pustaka):
+  **4 dari 4 terdeteksi** (cakupan 45,5 / 46,7 / 54,5 / 66,7%, ambang 35%) dan **0% pada 12 pasangan
+  negatif**. Total kini 10 paper, 3+ bidang, ID & EN. Satu paper uji (hukum ID) gagal diunduh.
+  Catatan: sumber dibatasi 250 jendela per paper (server embedding lambat), jadi cakupan positif bisa
+  sedikit lebih rendah dari yang sebenarnya.
+- Ambang tidak diubah. Batas: bahasa selain ID/EN dan bidang yang sangat teknis/rumus belum diuji.
 
 ### Jangkauan identitas (Springer/Frontiers)
 
@@ -77,6 +86,59 @@ Uji ulang dengan sampel acak paper berkutip rendah (bukan yang terkenal), fase i
 Dua paper Springer yang meleset (teks tanpa judul) tetap meleset di pipeline penuh (indeks 4,1% dan
 2,6%): keduanya preprint ResearchSquare. Jadi batas yang tersisa sempit: dokumen TANPA judul/abstrak
 dari paper berkutip rendah yang tak terindeks baik oleh OpenAlex. Dokumen normal (ada judul) aman.
+
+### Embedding berbatas waktu (temuan dari pemakaian nyata)
+
+Dua pemeriksaan asli Super Admin (24 Nov malam) sama-sama kehilangan korpus lokal dan membuang
+374-389 dtk di `local_check` (timeout embedding 120 dtk x 3 percobaan); satu job memakan 1.171 dtk
+(batas polling frontend 1.200). Pemicu: pemeriksaan plagiarisme dan AI detector berjalan serempak
+dan berebut server embedding bersama (bge-m3, sebagian di CPU: ~1,5 dtk/jendela).
+
+Perbaikan (PR #123, #124):
+- `embed_chunks_budgeted`: batch 8, anggaran 150 dtk, timeout 60 dtk per batch, urutan menyebar
+  sehingga hasil PARSIAL tetap mewakili seluruh dokumen; tak pernah melempar; menyerah setelah 2
+  kegagalan beruntun. Hasil memuat `local_corpus_partial` / `local_corpus_unavailable` (catatan di
+  UI & PDF).
+- Embedding dokumen dijalankan PARALEL dengan fase identitas/luas (terikat-jaringan).
+- Semaphore konkurensi embedding (`EMBED_MAX_CONCURRENCY`=2) untuk jalur massal dan jalur cepat
+  TERPISAH (uji pertama menunjukkan jalur massal bisa membuat jalur cepat kelaparan).
+- Fase semantik memakai jalur cepat + tenggat sungguhan (sebelumnya satu batch bisa melewati tenggat).
+- Setelan: `LOCAL_EMBED_BUDGET_SECONDS`=150, `LOCAL_EMBED_CALL_TIMEOUT`=60, `LOCAL_EMBED_BATCH`=8.
+
+Diukur di produksi (paper PLOS utuh, lewati-pencarian-luas aktif):
+
+| Kondisi | Total | Korpus lokal |
+|---|---|---|
+| Sebelum (job nyata, berebut) | 452-1.171 dtk | hilang, 374-389 dtk terbuang |
+| Normal, tanpa beban lain | **45 dtk** (sebelumnya ~109) | terperiksa, `embed_wait` 0 dtk |
+| 1 job embedding pengganggu | 78 dtk | terperiksa |
+| 2 job pengganggu (server jenuh penuh) | 81 dtk | **tetap hilang**, tapi gagal cepat + catatan |
+
+**Akar masalah ditemukan dan diperbaiki (2026-11-25).** Layanan `ollama-embed` (:11437) memuat bge-m3
+hanya 0,6 dari 1,24 GB di VRAM (sisanya CPU), `NUM_PARALLEL=1`, dan berada di slice CPU berbatas 50%
+sementara host ber-load 50 dari 64 inti; GPU 0 penuh 92% oleh pengguna lain, padahal GPU 1 hampir
+kosong (7,8 dari 45 GB). Layanan `ollama-gpu1` (:11436, GPU 1 saja) memuat bge-m3 penuh di GPU.
+Diukur: 16 jendela x 2000 karakter **76 dtk (:11437) vs 0,9 dtk (:11436, setelah muat 24 dtk)**;
+`embed_chunks` 20 potongan 29,8 dtk -> 0,3 dtk. Vektor kedua server kompatibel (cosine 0,99999,
+dim 1024), jadi indeks korpus tetap valid (uji: 32 sumber korpus ditemukan).
+
+Perubahan (hanya `backend/.env`, tidak masuk git): `OLLAMA_EMBED_BASE_URL=http://127.0.0.1:11436`
+dan `OLLAMA_EMBED_KEEP_ALIVE=5m` (WAJIB: nilai lama `server` mengikuti `KEEP_ALIVE=0` milik :11436 dan
+membuat model dimuat ulang 24 dtk tiap panggilan). Model dimuat saat dipakai dan dilepas setelah 5
+menit idle (sesuai preferensi tanpa-pin). Rollback: kembalikan kedua nilai (`:11437`, `server`).
+Layanan `ollama-embed` milik pengguna lain TIDAK disentuh. Risiko: :11436 dipakai bersama
+(`MAX_LOADED_MODELS=2`); bila model pengguna lain mengusir bge-m3, panggilan pertama berikutnya
+lambat sekali lalu normal, dan turun-mutu yang ditambahkan PR #123/#124 tetap melindungi job.
+
+Batas jujur: bila server embedding jenuh penuh, korpus lokal tetap tak terjangkau; yang berubah
+hanya kerugiannya (81 dtk, bukan 6+ menit) dan pengguna diberi tahu. Setelah pindah ke GPU 1,
+kondisi jenuh jauh lebih jarang karena embedding ~100x lebih cepat.
+
+### Bot Telegram: /cek tidak lagi memblokir
+
+Perintah teks berat berjalan di thread (maks. 3 serempak), /cek langsung dibalas "Memeriksa..." dan
+memakai timeout 1.500 dtk; /ping dkk. tetap dijawab selama pemeriksaan. Sebelumnya loop bot
+sekuensial sehingga satu /cek menahan semua perintah ~2 menit.
 
 ### Panel admin (browser, produksi)
 
@@ -239,8 +301,11 @@ dihubungkan ke pass identitas. Bisa diuji ulang pada paper lama bila ada kebutuh
 
 ### 10. Baris pengguna demo ganda — SELESAI
 
-Tujuh baris demo tak terpakai dihapus (13 -> 6). Penyebab pembuatan baris baru tiap login demo belum
-diselidiki; login demo dimatikan di produksi.
+Tujuh baris demo tak terpakai dihapus (13 -> 6). Penyebab ditemukan (2026-11-25): `create_demo_user()`
+versi awal melakukan `INSERT` tanpa upsert, dan `google_sub` NULL tidak kena unique index (NULL tak
+dianggap sama di Postgres), sehingga tiap demo-login membuat baris baru. Endpoint `/auth/demo-login`
+sudah tidak ada di kode sekarang, jadi tidak bisa terulang. Enam baris tersisa (id 1,2,3,4,7,13)
+dibiarkan karena sebagian memuat riwayat lama; id 2 dipakai untuk uji.
 
 ### Catatan fitur yang sudah ada namun terbatas
 
