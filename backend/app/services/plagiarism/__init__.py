@@ -22,16 +22,18 @@ from datetime import datetime, timezone
 from sqlalchemy import text
 
 from app.core.clients import corpus_size, embedded_corpus_size, engine
+from app.core.config import get_settings
 from app.ingest.common import (
     decompress_text,
     make_minhash,
     minhash_from_bytes,
     text_metrics,
 )
-from app.services.embedding import embed_chunks
+from app.services.embedding import embed_chunks_budgeted
 from app.services.llm.provider import get_llm
 
 _log = logging.getLogger(__name__)
+_settings = get_settings()
 
 _SHINGLE = 5
 _SENT_RE = re.compile(r"[^.!?\n]+[.!?]?", re.UNICODE)
@@ -713,11 +715,38 @@ def _coverage_publication(online_sources: list[dict]) -> dict | None:
     return best
 
 
+def embed_query_vectors(doc: str, llm=None) -> tuple[list[list[float]], int]:
+    """Vektor jendela dokumen untuk pencarian korpus lokal: (vektor, total_jendela).
+
+    Aman dipanggil PARALEL dengan fase pencarian daring (jaringan) agar waktu embedding
+    tersembunyi. Tidak pernah melempar; gagal/lambat -> hasil parsial atau kosong.
+    """
+    doc = (doc or "").strip()
+    if not doc:
+        return [], 0
+    llm = llm or get_llm()
+    vecs, total = embed_chunks_budgeted(
+        llm,
+        doc,
+        max_chunks=_FULLTEXT_WINDOWS,
+        budget_seconds=_settings.local_embed_budget_seconds,
+        batch_size=_settings.local_embed_batch,
+        call_timeout=_settings.local_embed_call_timeout,
+    )
+    if not vecs and total == 1:  # dokumen sangat pendek: satu jendela, coba sekali lagi
+        try:
+            return [llm.embed(doc[:2000])], 1
+        except Exception:  # noqa: BLE001
+            _log.warning("Embedding dokumen pendek gagal", exc_info=True)
+    return vecs, total
+
+
 def check_plagiarism(
     doc: str,
     top_k: int = 30,
     extra_candidates: list[dict] | None = None,
     exclude: dict | None = None,
+    query_vectors: tuple[list[list[float]], int] | None = None,
 ) -> dict:
     """Bandingkan `doc` dengan korpus; kembalikan laporan kemiripan.
 
@@ -745,15 +774,18 @@ def check_plagiarism(
     # Embed SELURUH dokumen per-jendela, lalu cari tetangga terdekat untuk tiap
     # jendela dan gabungkan — agar penyalinan di bagian mana pun (bukan hanya
     # pembuka) ikut tertangkap. Jumlah sumber akhir tetap `top_k` teratas.
-    local_corpus_unavailable = False
-    try:
-        qvecs = embed_chunks(llm, doc, max_chunks=_FULLTEXT_WINDOWS) or [llm.embed(doc[:2000])]
-    except Exception:  # noqa: BLE001
-        # Server embedding bersama bisa kewalahan (timeout). Jangan gagalkan job yang sudah
-        # bekerja berpuluh menit: lanjut tanpa pencarian-semantik korpus lokal dan beri tahu.
-        _log.warning("Embedding dokumen gagal; lanjut tanpa korpus lokal", exc_info=True)
-        qvecs = []
-        local_corpus_unavailable = True
+    # Server embedding bersama bisa kewalahan. Jangan gagalkan job yang sudah bekerja berpuluh
+    # menit: pakai vektor yang sempat jadi (parsial) atau, bila kosong, lanjut tanpa korpus lokal
+    # dan beri tahu pengguna lewat laporan.
+    if query_vectors is None:
+        query_vectors = embed_query_vectors(doc, llm)
+    qvecs, embed_total = query_vectors
+    local_corpus_unavailable = not qvecs
+    local_corpus_partial = bool(qvecs) and len(qvecs) < embed_total
+    if local_corpus_unavailable:
+        _log.warning("Embedding dokumen gagal/habis anggaran; lanjut tanpa korpus lokal")
+    elif local_corpus_partial:
+        _log.warning("Embedding dokumen parsial: %d/%d jendela", len(qvecs), embed_total)
     # Satu jendela: pakai ef_search penuh. Banyak jendela: ef_search lebih kecil
     # per pencarian karena gabungan antar-jendela sudah memperluas recall.
     ef = _EF_SEARCH if len(qvecs) <= 1 else _EF_SEARCH_MULTI
@@ -1005,6 +1037,9 @@ def check_plagiarism(
         "paraphrase_component": paraphrase_component,
         "publication_match": publication_match,
         "local_corpus_unavailable": local_corpus_unavailable,
+        "local_corpus_partial": (
+            {"embedded": len(qvecs), "total": embed_total} if local_corpus_partial else None
+        ),
         "similarity_index": chunk["similarity_index"],
         "matched_sentences": chunk["matched_sentences"],
         "total_sentences": chunk["total_sentences"],

@@ -107,13 +107,13 @@ def test_picks_best_candidate_and_limits_candidates():
 
 
 class ClockedLLM(FakeLLM):
-    """Tiap batch embedding 'memakan' 10 dtk pada jam palsu (server embedding lambat)."""
+    """Tiap batch embedding 'memakan' 5 dtk pada jam palsu (server embedding lambat)."""
 
     def __init__(self, clock):
         self.clock = clock
 
     def embed_batch(self, texts):
-        self.clock["t"] += 10
+        self.clock["t"] += 5
         return super().embed_batch(texts)
 
 

@@ -50,6 +50,13 @@ class Settings(BaseSettings):
     # balasan `content` bisa kosong. None = tidak kirim parameter (model non-think).
     ollama_think: bool | None = Field(default=None)
     llm_timeout: int = Field(default=120)
+    # Maks. permintaan embedding serempak dari proses ini ke server embedding bersama.
+    embed_max_concurrency: int = Field(default=2)
+    # Embedding dokumen untuk pencarian korpus lokal: anggaran total (dtk), timeout per-batch,
+    # ukuran batch. Bila anggaran habis, vektor yang sudah jadi tetap dipakai (hasil parsial).
+    local_embed_budget_seconds: int = Field(default=150)
+    local_embed_call_timeout: int = Field(default=60)
+    local_embed_batch: int = Field(default=8)
     # Durasi model tetap dimuat di VRAM setelah panggilan terakhir. "5m" = 5 menit
     # (default Ollama), "0" = langsung dilepas setelah tiap panggilan (hemat VRAM
     # saat server dibagi 24/7), "-1" = selalu residen. Dapat diubah via .env.
