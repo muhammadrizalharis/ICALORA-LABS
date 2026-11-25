@@ -53,7 +53,7 @@ from app.services.llm.tasks import (
     reader_reactions,
     rewrite,
 )
-from app.services.plagiarism import check_plagiarism
+from app.services.plagiarism import check_plagiarism, embed_query_vectors
 from app.services.plagiarism.online import (
     BUDGET_FLAG,
     RATE_LIMIT_NOTE_MIN,
@@ -781,6 +781,9 @@ async def _run_plagiarism_merged(
     timings: dict[str, float] = {}
     skipped_broad: dict | None = None
     t_start = t_phase = time.monotonic()
+    # Embedding dokumen (untuk korpus lokal) berjalan PARALEL dengan fase pencarian daring yang
+    # terikat-jaringan, sehingga tak lagi menambah waktu di ujung job. Tak pernah melempar.
+    embed_task = asyncio.ensure_future(run_in_threadpool(embed_query_vectors, text))
 
     def _lap(name: str) -> None:
         nonlocal t_phase
@@ -842,7 +845,9 @@ async def _run_plagiarism_merged(
                 merged[key] = cand
         extra = list(merged.values())
     t_phase = time.monotonic()
-    res = await run_in_threadpool(check_plagiarism, text, top_k, extra, exclude)
+    query_vectors = await embed_task
+    _lap("embed_wait")
+    res = await run_in_threadpool(check_plagiarism, text, top_k, extra, exclude, query_vectors)
     _lap("local_check")
     res["online_merged"] = bool(extra)
     # Parafrase: bandingkan MAKNA dengan teks penuh paper kandidat (kata-demi-kata sudah dicek

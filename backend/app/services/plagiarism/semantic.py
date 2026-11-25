@@ -72,10 +72,22 @@ def _windows(text: str, cap: int) -> list[str]:
 def _embed(llm, texts: list[str], deadline: float | None = None) -> np.ndarray | None:
     """Embedding batch; None bila `deadline` (time.monotonic) terlewati di tengah jalan."""
     out: list[list[float]] = []
-    for i in range(0, len(texts), 32):
-        if deadline is not None and time.monotonic() > deadline:
+    fast = getattr(llm, "embed_batch_fast", None) if deadline is not None else None
+    for i in range(0, len(texts), 16):
+        batch = [t[:1500] for t in texts[i : i + 16]]
+        if deadline is None:
+            out.extend(llm.embed_batch(batch))
+            continue
+        remaining = deadline - time.monotonic()
+        if remaining <= 1:
             return None
-        out.extend(llm.embed_batch([t[:1500] for t in texts[i : i + 32]]))
+        try:
+            if fast is not None:
+                out.extend(fast(batch, timeout=min(60.0, remaining), attempts=1, wait=remaining))
+            else:
+                out.extend(llm.embed_batch(batch))
+        except Exception:  # noqa: BLE001
+            return None  # server lambat/sibuk: hormati tenggat, bukan timeout 120 dtk
     mat = np.asarray(out, dtype=np.float32)
     if mat.size == 0:
         return mat.reshape(0, 0)

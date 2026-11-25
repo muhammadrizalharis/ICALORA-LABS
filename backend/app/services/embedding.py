@@ -8,6 +8,8 @@ bukan hanya bagian pembuka — penting untuk dokumen panjang (skripsi/tesis).
 
 from __future__ import annotations
 
+import time
+
 from app.services.llm.provider import LLMProvider
 
 
@@ -52,6 +54,53 @@ def embed_chunks(
     if not chunks:
         return []
     return llm.embed_batch(chunks)
+
+
+def _spread_order(n: int, stride: int = 4) -> list[int]:
+    """Urutan indeks yang menyebar (0,4,8,... lalu 1,5,9,...) agar hasil PARSIAL tetap mewakili
+    seluruh dokumen, bukan hanya bagian pembukanya."""
+    return [i for r in range(min(stride, n)) for i in range(r, n, stride)]
+
+
+def embed_chunks_budgeted(
+    llm: LLMProvider,
+    text: str,
+    *,
+    max_chunks: int,
+    budget_seconds: float,
+    batch_size: int = 8,
+    call_timeout: float = 60.0,
+    size: int = 2000,
+    overlap: int = 200,
+) -> tuple[list[list[float]], int]:
+    """Embed jendela dokumen dalam batch kecil dengan anggaran waktu.
+
+    Mengembalikan (vektor_yang_berhasil, total_jendela). Tidak pernah melempar: batch yang
+    gagal/timeout/lewat anggaran dilewati, sehingga pemanggil mendapat hasil parsial (urut menyebar)
+    atau daftar kosong, dan memutuskan sendiri cara menurunkan mutu.
+    """
+    chunks = chunk_text(text, size=size, overlap=overlap, max_chunks=max_chunks)
+    total = len(chunks)
+    if not total:
+        return [], 0
+    fast = getattr(llm, "embed_batch_fast", None)
+    deadline = time.monotonic() + budget_seconds
+    order = _spread_order(total)
+    out: list[list[float]] = []
+    for i in range(0, total, max(1, batch_size)):
+        remaining = deadline - time.monotonic()
+        if remaining <= 1:
+            break
+        batch = [chunks[j] for j in order[i : i + batch_size]]
+        try:
+            if fast is not None:
+                vecs = fast(batch, timeout=min(call_timeout, remaining), attempts=1, wait=remaining)
+            else:
+                vecs = llm.embed_batch(batch)
+        except Exception:  # noqa: BLE001
+            break  # server kewalahan: berhenti, pakai yang sudah ada
+        out.extend(vecs)
+    return out, total
 
 
 def embed_document(

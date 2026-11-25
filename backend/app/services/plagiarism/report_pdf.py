@@ -257,6 +257,14 @@ def _cover_html(report: dict) -> str:
             "pemeriksaan ini, sehingga korpus lokal tidak ikut diperiksa (sumber daring tetap "
             "diperiksa). Skor bisa lebih rendah dari seharusnya; periksa ulang nanti.</div>"
         )
+    part = report.get("local_corpus_partial")
+    if part:
+        pub_block += (
+            '<div class="note" style="margin:4px 0">Server pencocokan makna sedang sibuk, sehingga '
+            f"korpus lokal hanya diperiksa dari {int(part.get('embedded', 0))} dari "
+            f"{int(part.get('total', 0))} bagian dokumen (tersebar merata). Skor bisa lebih rendah "
+            "dari seharusnya; periksa ulang nanti untuk cakupan penuh.</div>"
+        )
     rl = report.get("online_rate_limited") or {}
     if rl:
         who = ", ".join(f"{_esc(str(k))} ×{int(v)}" for k, v in rl.items())

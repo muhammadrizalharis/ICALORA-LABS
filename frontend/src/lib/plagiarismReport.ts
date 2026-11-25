@@ -110,6 +110,8 @@ export interface Report {
   online_budget_exhausted?: boolean;
   /** Server embedding gagal: korpus lokal tidak diperiksa (sumber daring tetap). */
   local_corpus_unavailable?: boolean;
+  /** Embedding sempat sebagian: korpus lokal diperiksa dari sebagian jendela dokumen. */
+  local_corpus_partial?: { embedded: number; total: number } | null;
   online_merged?: boolean;
   online_providers?: { name: string; hits: number }[];
 }

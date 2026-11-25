@@ -21,6 +21,7 @@ from __future__ import annotations
 import html
 import os
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -110,8 +111,18 @@ def _internal_headers() -> dict:
     return {"x-internal-token": internal_service_token()}
 
 
+# Cek plagiarisme menjalankan pipeline penuh (identitas + pencarian + korpus lokal): 2-19 menit.
+_LONG_TIMEOUTS = {"/tools/plagiarism": 1500}
+_BG_SLOTS = threading.BoundedSemaphore(3)  # maks. perintah teks berat serempak dari bot
+
+
 def _post(path: str, body: dict) -> dict:
-    r = httpx.post(f"{API}{path}", json=body, headers=_internal_headers(), timeout=180)
+    r = httpx.post(
+        f"{API}{path}",
+        json=body,
+        headers=_internal_headers(),
+        timeout=_LONG_TIMEOUTS.get(path, 180),
+    )
     r.raise_for_status()
     return r.json()
 
@@ -455,7 +466,9 @@ def _http_error_msg(status: int) -> str:
     return f"Layanan membalas galat {status}."
 
 
-def _handle(chat_id: int, text: str) -> None:
+def _handle(chat_id: int, text: str, background: bool = False) -> None:
+    """`background=True` (dipakai loop bot): perintah teks berat dijalankan di thread supaya bot
+    tetap menjawab /ping dkk. selama pemeriksaan panjang berjalan."""
     text = text.strip()
     cmd, _, arg = text.partition(" ")
     cmd = cmd.lower().lstrip("/").split("@")[0]
@@ -532,16 +545,29 @@ def _handle(chat_id: int, text: str) -> None:
             _send(chat_id, f"Format: /{cmd} &lt;teks&gt;")
             return
         path, fmt = text_cmds[cmd]
-        try:
-            body = {"text": arg}
-            d = _post(path, body)
-            _send(chat_id, fmt(d) or "(kosong)")
-        except httpx.TimeoutException:
-            _send(chat_id, _TIMEOUT_MSG)
-        except httpx.HTTPStatusError as exc:
-            _send(chat_id, _http_error_msg(exc.response.status_code))
-        except Exception as exc:  # noqa: BLE001
-            _send(chat_id, f"Gagal memproses: {html.escape(str(exc))}")
+
+        def run() -> None:
+            try:
+                d = _post(path, {"text": arg})
+                _send(chat_id, fmt(d) or "(kosong)")
+            except httpx.TimeoutException:
+                _send(chat_id, _TIMEOUT_MSG)
+            except httpx.HTTPStatusError as exc:
+                _send(chat_id, _http_error_msg(exc.response.status_code))
+            except Exception as exc:  # noqa: BLE001
+                _send(chat_id, f"Gagal memproses: {html.escape(str(exc))}")
+
+        if not background or cmd == "hitung":
+            run()
+            return
+        if cmd == "cek":
+            _send(chat_id, "⏳ Memeriksa… biasanya 2-10 menit. Hasilnya saya kirim di sini.")
+
+        def guarded() -> None:
+            with _BG_SLOTS:
+                run()
+
+        threading.Thread(target=guarded, daemon=True).start()
         return
 
     _send(chat_id, "Perintah tidak dikenal. Ketik /help.")
@@ -583,9 +609,9 @@ def main() -> None:
                     "Bot belum dikunci. chat_id Anda: "
                     f"<code>{chat_id}</code>\nTambahkan ke TELEGRAM_ALLOWED_CHAT_IDS.",
                 )
-                _handle(chat_id, text)
+                _handle(chat_id, text, background=True)
                 continue
-            _handle(chat_id, text)
+            _handle(chat_id, text, background=True)
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ dapat diganti tanpa mengubah kode fitur.
 
 from __future__ import annotations
 
+import threading
 import time
 from typing import Protocol
 
@@ -20,20 +21,30 @@ _MAX_RETRIES = 3
 _RETRY_BACKOFF = 1.5
 
 
-def _post_with_retry(client: httpx.Client, url: str, payload: dict) -> httpx.Response:
+# Server embedding dipakai bersama banyak job (plagiarisme, AI detector, semantik). Tanpa batas,
+# permintaan menumpuk di server dan waktu ANTRE ikut dihitung sebagai timeout (terukur: 2 job
+# serempak -> ReadTimeout 120 dtk x3). Semaphore membuat waktu tunggu antrean terjadi di sini,
+# sebelum jam timeout permintaan berjalan.
+_EMBED_SEM = threading.BoundedSemaphore(max(1, settings.embed_max_concurrency))
+
+
+def _post_with_retry(
+    client: httpx.Client, url: str, payload: dict, attempts: int | None = None
+) -> httpx.Response:
     """POST dengan retry eksponensial untuk galat transien (5xx / koneksi)."""
     last_exc: Exception | None = None
-    for attempt in range(_MAX_RETRIES):
+    tries = attempts or _MAX_RETRIES
+    for attempt in range(tries):
         try:
             resp = client.post(url, json=payload)
-            if resp.status_code >= 500 and attempt < _MAX_RETRIES - 1:
+            if resp.status_code >= 500 and attempt < tries - 1:
                 time.sleep(_RETRY_BACKOFF * (attempt + 1))
                 continue
             resp.raise_for_status()
             return resp
         except (httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError) as exc:
             last_exc = exc
-            if attempt < _MAX_RETRIES - 1:
+            if attempt < tries - 1:
                 time.sleep(_RETRY_BACKOFF * (attempt + 1))
                 continue
             raise
@@ -134,9 +145,28 @@ class OllamaProvider:
         if not texts:
             return []
         payload = self._embed_payload(input=texts)
-        with httpx.Client(timeout=self.timeout) as client:
+        with _EMBED_SEM, httpx.Client(timeout=self.timeout) as client:
             resp = _post_with_retry(client, f"{self.embed_base_url}/api/embed", payload)
             return resp.json()["embeddings"]
+
+    def embed_batch_fast(
+        self, texts: list[str], timeout: float, attempts: int = 1, wait: float | None = None
+    ) -> list[list[float]]:
+        """Seperti embed_batch tetapi GAGAL CEPAT: timeout & percobaan ulang ditentukan pemanggil,
+        dan menunggu antrean maksimal `wait` detik (TimeoutError bila tak kebagian giliran)."""
+        if not texts:
+            return []
+        if not _EMBED_SEM.acquire(timeout=wait if wait is not None else -1):
+            raise TimeoutError("Antrean embedding penuh.")
+        try:
+            payload = self._embed_payload(input=texts)
+            with httpx.Client(timeout=timeout) as client:
+                resp = _post_with_retry(
+                    client, f"{self.embed_base_url}/api/embed", payload, attempts=attempts
+                )
+                return resp.json()["embeddings"]
+        finally:
+            _EMBED_SEM.release()
 
 
 def get_llm() -> LLMProvider:
