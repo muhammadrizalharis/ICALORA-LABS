@@ -177,8 +177,8 @@ function AdminPasswordCard() {
 }
 
 export default function AkunPage() {
-  const { user, logout, tokenEnforcement, defaultToolCost } = useAuth();
-  const tv = tokenView(user, tokenEnforcement, defaultToolCost);
+  const { user, logout, tokenEnforcement, defaultToolCost, billing } = useAuth();
+  const tv = tokenView(user, tokenEnforcement, defaultToolCost, billing);
 
   return (
     <div className="mx-auto max-w-2xl p-8">
@@ -207,7 +207,7 @@ export default function AkunPage() {
 
         <div className="mt-6 grid grid-cols-2 gap-4">
           <div className="rounded-xl border border-c surface p-4">
-            <div className="text-xs text-neutral-400">Token / Saldo</div>
+            <div className="text-xs text-neutral-400">Saldo</div>
             <div className={`text-xl font-bold ${tv.low ? "text-red-500" : ""}`}>{tv.value}</div>
             <div className={`mt-0.5 text-[11px] ${tv.low ? "text-red-400" : "text-neutral-400"}`}>
               {tv.note}

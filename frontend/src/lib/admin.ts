@@ -1,6 +1,7 @@
 "use client";
 
 import { API_BASE } from "@/lib/api";
+import type { Packages, PaymentInfo } from "@/lib/auth";
 
 export interface AdminUser {
   id: number;
@@ -15,6 +16,7 @@ export interface AdminUser {
   is_active: boolean;
   created_at: string | null;
   last_login_at: string | null;
+  sub_until: string | null;
 }
 
 export interface UserStats {
@@ -34,6 +36,9 @@ export interface AppSettings {
   token_enforcement: boolean;
   default_tool_cost: number;
   tool_costs: Record<string, number>;
+  priced_slugs: string[];
+  payment_info: PaymentInfo;
+  packages: Packages;
 }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
@@ -157,6 +162,13 @@ export function putSettings(patch: Partial<AppSettings>): Promise<{ ok: boolean;
   return req(`/auth/admin/settings`, { method: "PUT", body: JSON.stringify(patch) });
 }
 
+export function setSubscription(
+  id: number,
+  body: { days?: number } | { cancel: true },
+): Promise<{ ok: boolean; sub_until: string | null }> {
+  return req(`/auth/admin/users/${id}/subscription`, { method: "POST", body: JSON.stringify(body) });
+}
+
 export const FEATURE_LABELS: Record<string, string> = {
   "word-count": "Word Count",
   "extract-text": "Ekstrak Teks",
@@ -172,8 +184,10 @@ export const FEATURE_LABELS: Record<string, string> = {
   "citation-finder": "Citation Finder",
   "ai-detector": "AI Detector",
   authorship: "Authorship",
-  "toc-generator": "Daftar Isi",
-  "document-improver": "Perbaikan Dokumen",
+  "toc-generator": "Daftar Isi (cepat)",
+  "daftar-isi": "Daftar Isi (dokumen)",
+  "document-improver": "Perbaikan Dokumen (cepat)",
+  "perbaikan-dokumen": "Perbaikan Dokumen (dokumen)",
   "hidden-text": "Hidden Text",
   "doc-chat": "Doc Chat",
   publikasi: "Rekomendasi Publikasi",

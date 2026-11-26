@@ -7,6 +7,7 @@ import re
 import threading
 import time
 from collections import defaultdict, deque
+from collections.abc import Iterator
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
@@ -15,6 +16,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.core.config import get_settings
 from app.services import admin as admin_svc
+from app.services import billing as billing_svc
 from app.services.ai_detector import detect_ai
 from app.services.ai_detector.report_pdf import build_ai_report_pdf
 from app.services.auth import (
@@ -148,14 +150,17 @@ _FEATURE_BY_PATH: dict[str, str] = {
 }
 
 
-def _access_guard(request: Request) -> None:
+def _access_guard(request: Request) -> Iterator[None]:
     """Dependency router: tegakkan maintenance, blokir akun, dan on/off fitur.
 
     Super Admin dikecualikan dari semua pembatasan agar tetap bisa menguji.
+    Saldo yang dipotong dikembalikan bila permintaan gagal (exception), kecuali
+    tanggung jawabnya sudah dipindah ke job latar belakang (lihat `_new_job`).
     """
     user = optional_user_from_request(request)
     is_admin = bool(user and user.get("is_admin"))
     if is_admin:
+        yield
         return
     # Semua layanan wajib login (Google/email). Pengecualian: panggilan internal bot.
     if not user and not is_internal_service_request(request):
@@ -180,6 +185,13 @@ def _access_guard(request: Request) -> None:
     if slug:
         _enforce_rate_limit(request, user)
         _enforce_token_cost(request, user, slug)
+    try:
+        yield
+    except Exception:
+        charged = int(getattr(request.state, "charged", 0) or 0)
+        if charged and not getattr(request.state, "charge_moved", False) and user:
+            admin_svc.refund_tokens(user.get("id"), charged)
+        raise
 
 
 # Rate limiter in-memory sederhana (sliding window per identitas).
@@ -230,14 +242,54 @@ def _enforce_token_cost(request: Request, user: dict | None, slug: str) -> None:
     cost = admin_svc.tool_cost(slug)
     if cost <= 0:
         return
+    if billing_svc.subscription_active(int(user["id"])):
+        return  # langganan aktif: bebas pakai tanpa memotong saldo
     if not admin_svc.charge_tokens(int(user["id"]), cost):
+        balance = int(user.get("token_balance") or 0)
         raise HTTPException(
             status_code=402,
             detail=(
-                "Saldo token Anda tidak mencukupi untuk menjalankan fitur ini. "
-                "Hubungi admin untuk menambah saldo."
+                f"Saldo Anda tidak cukup. Biaya fitur ini {_rp(cost)}, "
+                f"saldo Anda {_rp(balance)}. Silakan isi saldo lewat menu Isi Saldo."
             ),
         )
+    request.state.charged = cost
+
+
+def _rp(n: int) -> str:
+    return "Rp" + f"{int(n):,}".replace(",", ".")
+
+
+def _new_job(request: Request, uid: int | None, tool: str, title: str | None) -> str:
+    """Buat job dan pindahkan saldo terpotong ke job (dikembalikan bila job gagal)."""
+    charged = int(getattr(request.state, "charged", 0) or 0)
+    job_id = create_job(uid, tool, title, charged=charged)
+    request.state.charge_moved = True
+    return job_id
+
+
+def _new_billed_job(
+    request: Request, uid: int | None, tool: str, title: str | None, doc: str
+) -> str:
+    """Seperti `_new_job`, plus diskon cek ulang revisi untuk dokumen yang sama."""
+    charged = int(getattr(request.state, "charged", 0) or 0)
+    quote: dict | None = None
+    if uid and charged > 0:
+        try:
+            quote = billing_svc.revision_quote(int(uid), tool, doc, charged)
+        except Exception:  # noqa: BLE001 - diskon tak boleh menggagalkan pemeriksaan
+            logger.exception("revision_quote gagal")
+            quote = None
+        if quote and quote["discount"] > 0:
+            admin_svc.refund_tokens(uid, quote["discount"])
+            request.state.charged = charged - quote["discount"]
+    job_id = _new_job(request, uid, tool, title)
+    if quote is not None:
+        try:
+            billing_svc.log_charge(int(uid), tool, request.state.charged, quote, job_id)
+        except Exception:  # noqa: BLE001
+            logger.exception("log_charge gagal")
+    return job_id
 
 
 router.dependencies.append(Depends(_access_guard))
@@ -471,7 +523,7 @@ async def grammar_async_ep(body: TextIn, request: Request) -> dict:
     user = optional_user_from_request(request)
     uid = user["id"] if user else None
     title = body.text[:60].strip() or "Grammar Check"
-    job_id = create_job(uid, "grammar-checker", title)
+    job_id = _new_job(request, uid, "grammar-checker", title)
     _spawn(_job_run_grammar_text(job_id, uid, body.text, title))
     return {"job_id": job_id, "status": "processing"}
 
@@ -487,7 +539,7 @@ async def grammar_file_async_ep(  # noqa: B008
     is_pdf = (file.filename or "").lower().endswith(".pdf")
     user = optional_user_from_request(request)
     uid = user["id"] if user else None
-    job_id = create_job(uid, "grammar-checker", file.filename or "Grammar Check")
+    job_id = _new_job(request, uid, "grammar-checker", file.filename or "Grammar Check")
     _spawn(_job_run_grammar_file(job_id, uid, text, data, file.filename, is_pdf))
     return {"job_id": job_id, "status": "processing"}
 
@@ -601,7 +653,7 @@ def _launch_transform_text(
     user = optional_user_from_request(request)
     uid = user["id"] if user else None
     title = text[:60].strip() or label
-    job_id = create_job(uid, slug, title)
+    job_id = _new_job(request, uid, slug, title)
     _spawn(_job_run_transform(job_id, uid, tool, title, text, None, None, False, opts))
     return {"job_id": job_id, "status": "processing"}
 
@@ -615,7 +667,7 @@ async def _launch_transform_file(
     user = optional_user_from_request(request)
     uid = user["id"] if user else None
     title = file.filename or label
-    job_id = create_job(uid, slug, title)
+    job_id = _new_job(request, uid, slug, title)
     _spawn(
         _job_run_transform(job_id, uid, tool, title, text, data, file.filename, is_pdf, opts)
     )
@@ -1073,7 +1125,7 @@ async def plagiarism_async_ep(body: PlagiarismIn, request: Request) -> dict:
     uid = user["id"] if user else None
     title = _clean_doc_title(body.title, body.text[:60].strip() or "Cek Plagiarisme")
     ex = body.exclude.model_dump() if body.exclude else None
-    job_id = create_job(uid, "plagiarism-checker", title)
+    job_id = _new_billed_job(request, uid, "plagiarism-checker", title, body.text)
     _spawn(_job_run_text(job_id, uid, body.text, body.top_k, title, ex))
     return {"job_id": job_id, "status": "processing"}
 
@@ -1114,7 +1166,7 @@ async def plagiarism_file_async_ep(  # noqa: B008
     is_pdf = (file.filename or "").lower().endswith(".pdf")
     ex = _exclude_from_query(exclude_bibliography, exclude_quotes, exclude_min_percent)
     title = _clean_doc_title(doc_title, file.filename or "Cek Plagiarisme")
-    job_id = create_job(uid, "plagiarism-checker", title)
+    job_id = _new_billed_job(request, uid, "plagiarism-checker", title, text)
     _spawn(
         _job_run_file(
             job_id, uid, text, data, file.filename, is_pdf, min(max(top_k, 1), 60), ex,
@@ -1481,7 +1533,7 @@ async def ai_detect_file_async_ep(  # noqa: B008
     is_pdf = (file.filename or "").lower().endswith(".pdf")
     user = optional_user_from_request(request)
     uid = user["id"] if user else None
-    job_id = create_job(uid, "ai-detector", file.filename or "AI Detector")
+    job_id = _new_billed_job(request, uid, "ai-detector", file.filename or "AI Detector", text)
     _spawn(_job_run_ai_file(job_id, uid, text, data, file.filename, is_pdf))
     return {"job_id": job_id, "status": "processing"}
 
@@ -1551,7 +1603,7 @@ async def toc_async_ep(body: TextIn, request: Request) -> dict:
     _guard(body.text)
     user = optional_user_from_request(request)
     uid = user["id"] if user else None
-    job_id = create_job(uid, "daftar-isi", body.text[:60].strip() or "Daftar Isi Otomatis")
+    job_id = _new_job(request, uid, "daftar-isi", body.text[:60].strip() or "Daftar Isi Otomatis")
     _spawn(_job_run_toc(job_id, uid, body.text, None, None, False))
     return {"job_id": job_id, "status": "processing"}
 
@@ -1565,7 +1617,7 @@ async def toc_file_async_ep(  # noqa: B008
     is_pdf = (file.filename or "").lower().endswith(".pdf")
     user = optional_user_from_request(request)
     uid = user["id"] if user else None
-    job_id = create_job(uid, "daftar-isi", file.filename or "Daftar Isi Otomatis")
+    job_id = _new_job(request, uid, "daftar-isi", file.filename or "Daftar Isi Otomatis")
     _spawn(_job_run_toc(job_id, uid, text, data, file.filename, is_pdf))
     return {"job_id": job_id, "status": "processing"}
 

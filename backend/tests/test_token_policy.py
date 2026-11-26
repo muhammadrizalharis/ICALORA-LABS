@@ -26,7 +26,12 @@ def ledger(monkeypatch):
         balances[uid] -= amount
         return True
 
+    def refund(uid, amount):
+        balances[uid] += amount
+
     monkeypatch.setattr(admin_svc, "charge_tokens", charge)
+    monkeypatch.setattr(admin_svc, "refund_tokens", refund)
+    monkeypatch.setattr(tools.billing_svc, "subscription_active", lambda uid: False)
     return balances
 
 
@@ -43,7 +48,7 @@ def test_new_user_with_zero_tokens_is_rejected_with_402(monkeypatch, ledger):
     _as(monkeypatch, id=1)
     r = _call()
     assert r.status_code == 402
-    assert "admin" in r.json()["detail"].lower()
+    assert "isi saldo" in r.json()["detail"].lower()
     assert ledger[1] == 0
 
 
@@ -74,3 +79,38 @@ def test_admin_is_never_charged(monkeypatch, ledger):
 
 def test_default_grant_for_new_users_is_zero():
     assert admin_svc._DEFAULTS["default_token_grant"] == 0
+
+
+def test_failed_request_is_refunded(monkeypatch, ledger):
+    """Permintaan yang gagal (exception di endpoint) tidak boleh memakan saldo."""
+    _as(monkeypatch, id=2)
+
+    def boom(*_a, **_k):
+        raise RuntimeError("model mati")
+
+    monkeypatch.setattr(tools, "analyze_text", boom)
+    no_raise = TestClient(app, raise_server_exceptions=False)
+    r = no_raise.post("/tools/word-count", json={"text": "satu dua tiga"})
+    assert r.status_code == 500
+    assert ledger[2] == 5
+
+
+def test_invalid_body_is_refunded(monkeypatch, ledger):
+    _as(monkeypatch, id=2)
+    r = client.post("/tools/word-count", json={"salah": 1})
+    assert r.status_code == 422
+    assert ledger[2] == 5
+
+
+def test_http_error_from_endpoint_is_refunded(monkeypatch, ledger):
+    _as(monkeypatch, id=2)
+    r = client.post("/tools/grammar-check", json={"text": ""})
+    assert r.status_code in (400, 422)
+    assert ledger[2] == 5
+
+
+def test_active_subscription_is_not_charged(monkeypatch, ledger):
+    monkeypatch.setattr(tools.billing_svc, "subscription_active", lambda uid: True)
+    _as(monkeypatch, id=1)
+    assert _call().status_code == 200
+    assert ledger[1] == 0

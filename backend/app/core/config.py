@@ -92,7 +92,7 @@ class Settings(BaseSettings):
     # Batas token yang boleh diberikan admin BIASA dalam satu kali pemberian
     # (Super Admin tanpa batas). Pagar agar akun admin biasa yang bocor tak bisa
     # membagikan saldo tak terbatas.
-    staff_max_token_grant: int = Field(default=10_000)
+    staff_max_token_grant: int = Field(default=1_000_000)
     google_client_id: str = Field(default="")
     google_client_secret: str = Field(default="")
 

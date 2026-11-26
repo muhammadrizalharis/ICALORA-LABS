@@ -6,6 +6,7 @@ import { notFound } from "next/navigation";
 import { getFeature, GROUP_LABEL } from "@/lib/features";
 import ToolRenderer from "@/components/ToolRenderer";
 import ToolEngineBanner from "@/components/ToolEngineBanner";
+import ToolCostBar from "@/components/ToolCostBar";
 
 export default function DashboardToolPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = use(params);
@@ -25,6 +26,7 @@ export default function DashboardToolPage({ params }: { params: Promise<{ slug: 
       </h1>
       <p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{feature.desc}</p>
       <div className="mt-6">
+        <ToolCostBar slug={feature.slug} />
         {feature.slug !== "plagiarism-checker" && <ToolEngineBanner slug={feature.slug} />}
         <ToolRenderer slug={feature.slug} />
       </div>

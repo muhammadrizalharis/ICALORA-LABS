@@ -4,6 +4,8 @@ Semua default OFF; uji perilaku saat admin mengaktifkannya, dengan
 memonkeypatch helper admin_svc agar tidak menyentuh DB.
 """
 
+from types import SimpleNamespace
+
 import pytest
 from fastapi import HTTPException
 
@@ -18,6 +20,7 @@ class _FakeRequest:
     def __init__(self, headers=None):
         self.headers = headers or {}
         self.client = _FakeClient()
+        self.state = SimpleNamespace()
 
 
 def _reset_hits():
@@ -80,6 +83,7 @@ def test_token_cost_anonymous_skipped(monkeypatch):
 
 def test_token_cost_rejects_when_insufficient(monkeypatch):
     monkeypatch.setattr(tools.admin_svc, "token_enforcement_enabled", lambda: True)
+    monkeypatch.setattr(tools.billing_svc, "subscription_active", lambda uid: False)
     monkeypatch.setattr(tools.admin_svc, "tool_cost", lambda slug: 5)
     monkeypatch.setattr(tools.admin_svc, "charge_tokens", lambda uid, amt: False)
     with pytest.raises(HTTPException) as exc:
@@ -89,6 +93,7 @@ def test_token_cost_rejects_when_insufficient(monkeypatch):
 
 def test_token_cost_passes_when_charged(monkeypatch):
     monkeypatch.setattr(tools.admin_svc, "token_enforcement_enabled", lambda: True)
+    monkeypatch.setattr(tools.billing_svc, "subscription_active", lambda uid: False)
     monkeypatch.setattr(tools.admin_svc, "tool_cost", lambda slug: 2)
     charged = {}
     monkeypatch.setattr(

@@ -142,6 +142,13 @@ export default function DashboardSidebar() {
           active={pathname === "/dashboard/akun"}
           collapsed={collapsed}
         />
+        <NavLink
+          href="/dashboard/isi-saldo"
+          label="Isi Saldo & Harga"
+          icon="💳"
+          active={pathname === "/dashboard/isi-saldo"}
+          collapsed={collapsed}
+        />
 
         {(user?.is_admin || user?.is_staff) && (
           <>
