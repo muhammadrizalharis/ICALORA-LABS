@@ -278,6 +278,41 @@ def similarity(a: list[int], b: list[int]) -> float:
     return both / k if k else 0.0
 
 
+def revision_price(full: int) -> int:
+    """Harga cek ulang revisi untuk harga penuh `full`."""
+    return full - full * packages()["revision_discount_pct"] // 100
+
+
+def has_revision_candidate(user_id: int, tool: str) -> bool:
+    """Ada pemeriksaan sebelumnya yang masih berhak diskon revisi (tanpa cek dokumen)."""
+    cfg = packages()
+    if (
+        tool not in cfg["revision_tools"]
+        or cfg["revision_max"] <= 0
+        or cfg["revision_discount_pct"] <= 0
+    ):
+        return False
+    ensure_billing_schema()
+    with engine.connect() as c:
+        row = c.execute(
+            text(
+                "SELECT 1 FROM charge_log p "
+                "WHERE p.user_id = :uid AND p.tool = :tool AND p.parent_id IS NULL "
+                "AND NOT p.voided AND p.discount = 0 "
+                "AND p.created_at > now() - make_interval(hours => :h) "
+                "AND (SELECT count(*) FROM charge_log ch "
+                "     WHERE ch.parent_id = p.id AND NOT ch.voided) < :mx LIMIT 1"
+            ),
+            {
+                "uid": user_id,
+                "tool": tool,
+                "h": cfg["revision_window_hours"],
+                "mx": cfg["revision_max"],
+            },
+        ).first()
+    return row is not None
+
+
 def revision_quote(user_id: int, tool: str, doc: str, charged: int) -> dict[str, Any]:
     """Hitung diskon cek ulang. Kembalikan {discount, parent_id, fingerprint}."""
     fp = fingerprint(doc)

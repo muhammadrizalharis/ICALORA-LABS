@@ -114,3 +114,55 @@ def test_active_subscription_is_not_charged(monkeypatch, ledger):
     _as(monkeypatch, id=1)
     assert _call().status_code == 200
     assert ledger[1] == 0
+
+
+@pytest.fixture
+def revision(monkeypatch, ledger):
+    """Harga penuh 8000, revisi 5040; saldo user 2 = 6000 (cukup hanya untuk revisi)."""
+    ledger[2] = 6000
+    monkeypatch.setattr(admin_svc, "tool_cost", lambda slug: 8000)
+    monkeypatch.setattr(tools.billing_svc, "has_revision_candidate", lambda uid, tool: True)
+    monkeypatch.setattr(tools.billing_svc, "revision_price", lambda full: 5040)
+    logged: list = []
+    monkeypatch.setattr(
+        tools.billing_svc, "log_charge", lambda *a: logged.append(a)
+    )
+    monkeypatch.setattr(tools, "create_job", lambda *a, **k: "job-x")
+    monkeypatch.setattr(tools, "_spawn", lambda coro: coro.close())
+    _as(monkeypatch, id=2)
+    return logged
+
+
+def _plag():
+    return client.post("/tools/plagiarism-async", json={"text": "kalimat " * 50})
+
+
+def test_revision_affordable_with_discounted_balance(monkeypatch, ledger, revision):
+    monkeypatch.setattr(
+        tools.billing_svc,
+        "revision_quote",
+        lambda *a: {"discount": 2960, "parent_id": 7, "fingerprint": [1]},
+    )
+    r = _plag()
+    assert r.status_code == 200, r.text
+    assert ledger[2] == 6000 - 5040
+    assert revision[0][2] == 5040 and revision[0][3]["discount"] == 2960
+
+
+def test_non_revision_with_short_balance_is_refunded(monkeypatch, ledger, revision):
+    monkeypatch.setattr(
+        tools.billing_svc,
+        "revision_quote",
+        lambda *a: {"discount": 0, "parent_id": None, "fingerprint": [1]},
+    )
+    r = _plag()
+    assert r.status_code == 402
+    assert "tidak terdeteksi sebagai revisi" in r.json()["detail"]
+    assert ledger[2] == 6000
+    assert revision == []
+
+
+def test_provisional_revision_not_offered_on_sync_endpoint(monkeypatch, ledger, revision):
+    r = client.post("/tools/plagiarism", json={"text": "kalimat " * 50})
+    assert r.status_code == 402
+    assert ledger[2] == 6000
