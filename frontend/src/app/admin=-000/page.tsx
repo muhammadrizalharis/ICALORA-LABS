@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useAuth } from "@/lib/auth";
+import { useAuth, type Packages, type PaymentInfo } from "@/lib/auth";
 import {
   ActivityItem,
   AdminUser,
@@ -17,6 +17,7 @@ import {
   getAnalytics,
   getSettings,
   giveTokens,
+  setSubscription,
   listAudit,
   listUsers,
   patchUser,
@@ -184,8 +185,9 @@ function AdminPanel() {
 
       {!isSuper && (
         <div className="mb-4 rounded-lg border border-c surface-2 p-3 text-xs text-neutral-500">
-          Sebagai <b>Admin</b>, kamu dapat melihat pengguna dan <b>menambah token</b> untuk
-          pengguna biasa (ada batas per pemberian, dan setiap pemberian tercatat). Pengaturan,
+          Sebagai <b>Admin</b>, kamu dapat melihat pengguna dan <b>menambah saldo</b> (setelah
+          pembayaran DANA dikonfirmasi) serta <b>mengaktifkan langganan</b> untuk pengguna biasa
+          (ada batas per pemberian, dan setiap tindakan tercatat). Pengaturan,
           peran, dan data dokumen pengguna hanya bisa diakses Super Admin.
         </div>
       )}
@@ -352,7 +354,7 @@ function ActivityTab() {
         <StatCard idx={0} label="Analisis (window)" value={fmtNum(t.runs_window)} sub={`${fmtNum(t.runs)} total`} icon="⚡" />
         <StatCard idx={1} label="Pengguna aktif" value={fmtNum(t.active_users_window)} sub={`dari ${fmtNum(t.users)} total`} icon="👥" />
         <StatCard idx={2} label="Pengguna baru" value={fmtNum(t.new_users_window)} sub="pendaftaran baru" icon="✨" />
-        <StatCard idx={3} label="Token beredar" value={fmtNum(t.tokens_outstanding)} sub="saldo seluruh user" icon="🪙" />
+        <StatCard idx={3} label="Saldo beredar" value={"Rp" + fmtNum(t.tokens_outstanding)} sub="saldo seluruh user" icon="🪙" />
         <StatCard idx={4} label="Job async" value={fmtNum(data.jobs.total)} sub={`${Object.keys(data.jobs.by_status).length} status`} icon="⚙️" />
         <StatCard idx={5} label="Error rate" value={`${errPct}%`} sub={`${fmtNum(data.jobs.by_status.error ?? 0)} gagal`} icon="🩺" />
       </div>
@@ -548,9 +550,27 @@ function UsersTab({ adminId, isSuper }: { adminId: number; isSuper: boolean }) {
       setUsers((prev) =>
         prev.map((x) => (x.id === u.id ? { ...x, token_balance: d.token_balance } : x)),
       );
-      setMsg(`✓ +${amount.toLocaleString("id-ID")} token untuk ${u.email}`);
+      setMsg(`✓ +Rp${amount.toLocaleString("id-ID")} saldo untuk ${u.email}`);
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : "Gagal memberi token.");
+      setMsg(e instanceof Error ? e.message : "Gagal menambah saldo.");
+    }
+  }
+
+  async function subscribe(u: AdminUser, cancel: boolean) {
+    const ask = cancel
+      ? `Batalkan langganan ${u.email}?`
+      : `Aktifkan/perpanjang langganan ${u.email}? Pastikan pembayaran sudah diterima.`;
+    if (!confirm(ask)) return;
+    try {
+      const d = await setSubscription(u.id, cancel ? { cancel: true } : {});
+      setUsers((prev) => prev.map((x) => (x.id === u.id ? { ...x, sub_until: d.sub_until } : x)));
+      setMsg(
+        cancel
+          ? `✓ Langganan ${u.email} dibatalkan`
+          : `✓ Langganan ${u.email} aktif s.d. ${fmtDate(d.sub_until)}`,
+      );
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "Gagal mengubah langganan.");
     }
   }
 
@@ -619,7 +639,8 @@ function UsersTab({ adminId, isSuper }: { adminId: number; isSuper: boolean }) {
             <thead>
               <tr className="border-b border-c text-left text-xs uppercase tracking-wide text-neutral-400">
                 <th className="px-3 py-3">Pengguna</th>
-                <th className="px-3 py-3">Token</th>
+                <th className="px-3 py-3">Saldo (Rp)</th>
+                <th className="px-3 py-3">Langganan</th>
                 <th className="px-3 py-3">Peran</th>
                 <th className="px-3 py-3">Status</th>
                 {isSuper && <th className="px-3 py-3">Aksi</th>}
@@ -647,7 +668,7 @@ function UsersTab({ adminId, isSuper }: { adminId: number; isSuper: boolean }) {
                         {isSuper ? (
                           <TokenEditor
                             value={u.token_balance}
-                            onSave={(v) => update(u.id, { token_balance: v }, "Token diperbarui")}
+                            onSave={(v) => update(u.id, { token_balance: v }, "Saldo diperbarui")}
                           />
                         ) : (
                           <div className="font-medium">{u.token_balance.toLocaleString("id-ID")}</div>
@@ -656,6 +677,37 @@ function UsersTab({ adminId, isSuper }: { adminId: number; isSuper: boolean }) {
                         {(isSuper || (!u.is_admin && !u.is_staff && u.id !== adminId)) && (
                           <TokenGiver onGive={(n) => addTokens(u, n)} />
                         )}
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-3 py-3">
+                    {u.is_demo ? (
+                      <span className="text-xs text-neutral-400">—</span>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {subActive(u.sub_until) ? (
+                          <div className="text-xs font-medium text-emerald-600">
+                            Aktif s.d. {fmtDate(u.sub_until)}
+                          </div>
+                        ) : (
+                          <div className="text-xs text-neutral-400">Tidak aktif</div>
+                        )}
+                        <div className="flex flex-wrap gap-1">
+                          <button
+                            onClick={() => subscribe(u, false)}
+                            className="rounded-lg border border-c surface-2 px-2 py-1 text-xs hover:bg-neutral-50 dark:hover:bg-neutral-900"
+                          >
+                            {subActive(u.sub_until) ? "+ Perpanjang" : "Aktifkan"}
+                          </button>
+                          {isSuper && subActive(u.sub_until) && (
+                            <button
+                              onClick={() => subscribe(u, true)}
+                              className="rounded-lg px-2 py-1 text-xs text-red-500 hover:underline"
+                            >
+                              Batalkan
+                            </button>
+                          )}
+                        </div>
                       </div>
                     )}
                   </td>
@@ -734,7 +786,7 @@ function UsersTab({ adminId, isSuper }: { adminId: number; isSuper: boolean }) {
               ))}
               {users.length === 0 && (
                 <tr>
-                  <td colSpan={isSuper ? 5 : 4} className="px-3 py-8 text-center text-neutral-500">
+                  <td colSpan={isSuper ? 6 : 5} className="px-3 py-8 text-center text-neutral-500">
                     Tidak ada pengguna.
                   </td>
                 </tr>
@@ -825,7 +877,7 @@ function HistoryModal({ user, onClose }: { user: AdminUser; onClose: () => void 
 }
 
 function TokenGiver({ onGive }: { onGive: (n: number) => Promise<void> | void }) {
-  const [v, setV] = useState("100");
+  const [v, setV] = useState("8000");
   const [busy, setBusy] = useState(false);
   const n = parseInt(v || "0", 10);
   return (
@@ -835,8 +887,8 @@ function TokenGiver({ onGive }: { onGive: (n: number) => Promise<void> | void })
         value={v}
         min={1}
         onChange={(e) => setV(e.target.value)}
-        className="w-20 rounded-lg border border-c surface-2 px-2 py-1 text-xs outline-none focus:border-[color:var(--brand)]"
-        aria-label="Jumlah token yang ditambahkan"
+        className="w-24 rounded-lg border border-c surface-2 px-2 py-1 text-xs outline-none focus:border-[color:var(--brand)]"
+        aria-label="Jumlah saldo (Rp) yang ditambahkan"
       />
       <button
         disabled={busy || !(n >= 1)}
@@ -857,7 +909,9 @@ function TokenGiver({ onGive }: { onGive: (n: number) => Promise<void> | void })
 }
 
 const AUDIT_LABELS: Record<string, string> = {
-  "tokens.add": "Menambah token",
+  "tokens.add": "Menambah saldo",
+  "subscription.activate": "Mengaktifkan langganan",
+  "subscription.cancel": "Membatalkan langganan",
   "tokens.set": "Menetapkan saldo",
   "user.tokens_set": "Menetapkan saldo",
   "user.role": "Mengubah peran Admin",
@@ -872,6 +926,9 @@ function auditDetail(a: AuditItem): string {
   if (a.action === "tokens.add")
     return `+${d.add} (saldo ${d.balance_before} → ${d.balance_after})`;
   if (a.action === "tokens.set") return `saldo ${d.balance_before} → ${d.balance_after}`;
+  if (a.action === "subscription.activate")
+    return `+${d.days} hari, s.d. ${fmtDate(d.sub_until as string | null)}` +
+      (d.referral_bonus ? " · bonus referral diberikan" : "");
   if ("from" in d || "to" in d) return `${String(d.from)} → ${String(d.to)}`;
   return "";
 }
@@ -1034,10 +1091,10 @@ function SettingsTab() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <div className="font-medium text-neutral-900 dark:text-neutral-50">
-                Jatah Token Default
+                Saldo Awal Pengguna Baru (Rp)
               </div>
               <div className="text-xs text-neutral-500">
-                Saldo token awal untuk setiap pengguna baru.
+                Saldo gratis untuk setiap pengguna baru (0 = tanpa bonus).
               </div>
             </div>
             <TokenEditor
@@ -1079,8 +1136,8 @@ function SettingsTab() {
             />
           </div>
           <ToggleRow
-            label="Potong Token per Pemakaian"
-            desc="Jika aktif, setiap analisis memotong saldo token pengguna; saldo habis = ditolak."
+            label="Fitur Berbayar (Potong Saldo)"
+            desc="Jika aktif, setiap pemakaian memotong saldo Rupiah pengguna sesuai harga fitur; saldo kurang = ditolak. Gagal = otomatis dikembalikan."
             checked={s.token_enforcement}
             disabled={saving}
             onChange={(v) => save({ token_enforcement: v })}
@@ -1089,10 +1146,10 @@ function SettingsTab() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <div className="font-medium text-neutral-900 dark:text-neutral-50">
-                Biaya Token Default
+                Harga Default (Rp)
               </div>
               <div className="text-xs text-neutral-500">
-                Token yang dipotong tiap pemakaian fitur (bila pemotongan aktif).
+                Dipakai untuk fitur yang belum diberi harga khusus di bawah.
               </div>
             </div>
             <TokenEditor
@@ -1102,6 +1159,10 @@ function SettingsTab() {
           </div>
         </div>
       </section>
+
+      <PriceSection s={s} saving={saving} save={save} />
+      <PaymentSection s={s} saving={saving} save={save} />
+      <PackagesSection s={s} saving={saving} save={save} />
 
       <section className="rounded-xl border border-c surface p-5">
         <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-neutral-500">
@@ -1171,5 +1232,199 @@ function ToggleRow({
         />
       </button>
     </div>
+  );
+}
+
+function fmtDate(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" });
+}
+
+function subActive(iso: string | null | undefined): boolean {
+  return !!iso && new Date(iso).getTime() > Date.now();
+}
+
+type SectionProps = {
+  s: AppSettings;
+  saving: boolean;
+  save: (patch: Partial<AppSettings>) => Promise<void>;
+};
+
+const inputCls =
+  "rounded-lg border border-c surface-2 px-2 py-1 text-sm outline-none focus:border-[color:var(--brand)]";
+
+function PriceSection({ s, saving, save }: SectionProps) {
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const value = (slug: string) =>
+    draft[slug] ?? (slug in s.tool_costs ? String(s.tool_costs[slug]) : "");
+  const dirty = Object.keys(draft).length > 0;
+
+  function submit() {
+    const next: Record<string, number> = { ...s.tool_costs };
+    for (const [slug, raw] of Object.entries(draft)) {
+      if (raw.trim() === "") delete next[slug];
+      else next[slug] = Math.max(0, parseInt(raw, 10) || 0);
+    }
+    save({ tool_costs: next }).then(() => setDraft({}));
+  }
+
+  return (
+    <section className="rounded-xl border border-c surface p-5">
+      <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-neutral-500">
+        Harga per Fitur (Rp)
+      </h2>
+      <p className="mb-4 text-xs text-neutral-500">
+        Kosongkan = pakai harga default (Rp{s.default_tool_cost.toLocaleString("id-ID")}). Isi 0 =
+        gratis. AI Chat &amp; Doc Chat dihitung per pesan. &quot;Ekstrak Teks&quot; dan &quot;Laporan
+        PDF&quot; sebaiknya 0 agar pengguna tidak terpotong dua kali.
+      </p>
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        {s.priced_slugs.map((slug) => (
+          <label
+            key={slug}
+            className="flex items-center justify-between gap-2 rounded-lg border border-c surface-2 px-3 py-2 text-sm"
+          >
+            <span>{FEATURE_LABELS[slug] ?? slug}</span>
+            <input
+              type="number"
+              min={0}
+              value={value(slug)}
+              placeholder={String(s.default_tool_cost)}
+              onChange={(e) => setDraft((d) => ({ ...d, [slug]: e.target.value }))}
+              className={inputCls + " w-24 text-right"}
+            />
+          </label>
+        ))}
+      </div>
+      {dirty && (
+        <div className="mt-3 flex gap-2">
+          <button
+            disabled={saving}
+            onClick={submit}
+            className="rounded-lg bg-[color:var(--brand)] px-3 py-1.5 text-sm text-white disabled:opacity-50"
+          >
+            Simpan Harga
+          </button>
+          <button onClick={() => setDraft({})} className="rounded-lg px-3 py-1.5 text-sm text-neutral-500">
+            Batal
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+const PAYMENT_FIELDS: { key: keyof PaymentInfo; label: string; hint: string }[] = [
+  { key: "dana_number", label: "Nomor DANA", hint: "contoh 081234567890" },
+  { key: "dana_name", label: "Nama pemilik DANA", hint: "nama yang muncul saat transfer" },
+  { key: "wa_primary", label: "WhatsApp utama", hint: "nomor penerima bukti transfer" },
+  { key: "wa_backup", label: "WhatsApp cadangan", hint: "kosongkan bila belum ada" },
+  { key: "backup_delay_sec", label: "Tampilkan cadangan setelah (detik)", hint: "default 60" },
+  { key: "note", label: "Catatan untuk pengguna", hint: "mis. jam layanan" },
+];
+
+function PaymentSection({ s, saving, save }: SectionProps) {
+  const [form, setForm] = useState<PaymentInfo>(s.payment_info);
+  const [base, setBase] = useState(s.payment_info);
+  if (base !== s.payment_info) {
+    setBase(s.payment_info);
+    setForm(s.payment_info);
+  }
+  const dirty = JSON.stringify(form) !== JSON.stringify(s.payment_info);
+  return (
+    <section className="rounded-xl border border-c surface p-5">
+      <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-neutral-500">
+        Info Pembayaran (DANA &amp; WhatsApp)
+      </h2>
+      <p className="mb-4 text-xs text-neutral-500">
+        Ditampilkan di halaman Isi Saldo. Selama nomor DANA/WA kosong, pengguna melihat pesan
+        &quot;info pembayaran belum tersedia&quot;.
+      </p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {PAYMENT_FIELDS.map((f) => (
+          <label key={f.key} className="text-sm">
+            <div className="mb-1 font-medium">{f.label}</div>
+            <input
+              type={f.key === "backup_delay_sec" ? "number" : "text"}
+              value={String(form[f.key] ?? "")}
+              placeholder={f.hint}
+              onChange={(e) =>
+                setForm((p) => ({
+                  ...p,
+                  [f.key]:
+                    f.key === "backup_delay_sec" ? parseInt(e.target.value || "0", 10) : e.target.value,
+                }))
+              }
+              className={inputCls + " w-full"}
+            />
+          </label>
+        ))}
+      </div>
+      {dirty && (
+        <button
+          disabled={saving}
+          onClick={() => save({ payment_info: form })}
+          className="mt-3 rounded-lg bg-[color:var(--brand)] px-3 py-1.5 text-sm text-white disabled:opacity-50"
+        >
+          Simpan Info Pembayaran
+        </button>
+      )}
+    </section>
+  );
+}
+
+const PACKAGE_FIELDS: { key: Exclude<keyof Packages, "revision_tools">; label: string; step?: number }[] = [
+  { key: "subscription_price", label: "Harga langganan (Rp)" },
+  { key: "subscription_days", label: "Durasi langganan (hari)" },
+  { key: "revision_discount_pct", label: "Diskon cek ulang revisi (%)" },
+  { key: "revision_window_hours", label: "Batas waktu cek ulang (jam)" },
+  { key: "revision_max", label: "Maks. cek ulang berdiskon per dokumen" },
+  { key: "revision_min_similarity", label: "Kemiripan minimal dokumen revisi (0–1)", step: 0.05 },
+  { key: "referral_bonus", label: "Bonus referral tiap pihak (Rp)" },
+  { key: "referral_min_topup", label: "Min. isi saldo teman agar bonus cair (Rp)" },
+];
+
+function PackagesSection({ s, saving, save }: SectionProps) {
+  const [form, setForm] = useState<Packages>(s.packages);
+  const [base, setBase] = useState(s.packages);
+  if (base !== s.packages) {
+    setBase(s.packages);
+    setForm(s.packages);
+  }
+  const dirty = JSON.stringify(form) !== JSON.stringify(s.packages);
+  return (
+    <section className="rounded-xl border border-c surface p-5">
+      <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-neutral-500">
+        Paket: Langganan, Diskon Revisi, Referral
+      </h2>
+      <p className="mb-4 text-xs text-neutral-500">
+        Diskon revisi berlaku untuk: {s.packages.revision_tools.map((t) => FEATURE_LABELS[t] ?? t).join(", ")}.
+        Isi diskon 0 atau bonus 0 untuk mematikan paket terkait.
+      </p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {PACKAGE_FIELDS.map((f) => (
+          <label key={f.key} className="text-sm">
+            <div className="mb-1 font-medium">{f.label}</div>
+            <input
+              type="number"
+              min={0}
+              step={f.step ?? 1}
+              value={String(form[f.key])}
+              onChange={(e) => setForm((p) => ({ ...p, [f.key]: Number(e.target.value || 0) }))}
+              className={inputCls + " w-full"}
+            />
+          </label>
+        ))}
+      </div>
+      {dirty && (
+        <button
+          disabled={saving}
+          onClick={() => save({ packages: form })}
+          className="mt-3 rounded-lg bg-[color:var(--brand)] px-3 py-1.5 text-sm text-white disabled:opacity-50"
+        >
+          Simpan Paket
+        </button>
+      )}
+    </section>
   );
 }

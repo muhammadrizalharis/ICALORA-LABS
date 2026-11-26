@@ -32,6 +32,9 @@ def ensure_job_schema() -> None:
     global _JOB_SCHEMA_READY
     if _JOB_SCHEMA_READY:
         return
+    from app.services.billing import ensure_billing_schema
+
+    ensure_billing_schema()  # tabel charge_log dipakai saat job gagal
     with engine.begin() as c:
         c.execute(
             text(
@@ -51,21 +54,59 @@ def ensure_job_schema() -> None:
             )
         )
         c.execute(text("CREATE INDEX IF NOT EXISTS idx_tool_job_user ON tool_job(user_id)"))
+        # Saldo yang dipotong saat job dibuat; dikembalikan otomatis bila job gagal.
+        c.execute(
+            text("ALTER TABLE tool_job ADD COLUMN IF NOT EXISTS charged bigint NOT NULL DEFAULT 0")
+        )
     _JOB_SCHEMA_READY = True
 
 
-def create_job(user_id: int | None, tool: str, title: str | None) -> str:
+# Menutup job sebagai 'error' sekaligus mengembalikan saldonya, dalam satu
+# transaksi. Hanya job yang masih 'processing' yang tersentuh, dan `charged`
+# dinolkan, sehingga pengembalian tak pernah terjadi dua kali.
+_FAIL_AND_REFUND_SQL = """
+WITH failed AS (
+    UPDATE tool_job j
+    SET status='error', error=:err, updated_at=now(), charged=0
+    FROM (SELECT id, charged AS old_charged FROM tool_job
+          WHERE status='processing' AND {where} FOR UPDATE) p
+    WHERE j.id = p.id
+    RETURNING j.id, j.user_id, p.old_charged
+), refunded AS (
+    UPDATE users u SET token_balance = u.token_balance + r.total
+    FROM (SELECT user_id, SUM(old_charged) AS total FROM failed
+          WHERE user_id IS NOT NULL AND old_charged > 0 GROUP BY user_id) r
+    WHERE u.id = r.user_id
+    RETURNING u.id
+), voided AS (
+    UPDATE charge_log SET voided = TRUE
+    WHERE job_id IN (SELECT id FROM failed)
+    RETURNING id
+)
+SELECT (SELECT count(*) FROM failed) AS n_failed, (SELECT count(*) FROM refunded) AS n_refunded
+"""
+
+
+def create_job(
+    user_id: int | None, tool: str, title: str | None, charged: int = 0
+) -> str:
     ensure_job_schema()
     job_id = uuid.uuid4().hex
     with engine.begin() as c:
         c.execute(
             text(
                 """
-                INSERT INTO tool_job (id, user_id, tool, title, status)
-                VALUES (:id, :uid, :tool, :title, 'processing')
+                INSERT INTO tool_job (id, user_id, tool, title, status, charged)
+                VALUES (:id, :uid, :tool, :title, 'processing', :charged)
                 """
             ),
-            {"id": job_id, "uid": user_id, "tool": tool, "title": (title or "")[:200]},
+            {
+                "id": job_id,
+                "uid": user_id,
+                "tool": tool,
+                "title": (title or "")[:200],
+                "charged": max(0, int(charged or 0)),
+            },
         )
     return job_id
 
@@ -89,13 +130,7 @@ def fail_job(job_id: str, message: str) -> None:
     ensure_job_schema()
     with engine.begin() as c:
         c.execute(
-            text(
-                """
-                UPDATE tool_job
-                SET status='error', error=:err, updated_at=now()
-                WHERE id=:id
-                """
-            ),
+            text(_FAIL_AND_REFUND_SQL.format(where="id=:id")),
             {"id": job_id, "err": (message or "Terjadi kesalahan.")[:500]},
         )
 
@@ -107,9 +142,9 @@ def get_job(job_id: str, user_id: int | None) -> dict | None:
     with engine.begin() as c:
         c.execute(
             text(
-                "UPDATE tool_job SET status='error', error=:err, updated_at=now() "
-                "WHERE id=:id AND status='processing' "
-                "AND created_at < now() - make_interval(secs => :sec)"
+                _FAIL_AND_REFUND_SQL.format(
+                    where="id=:id AND created_at < now() - make_interval(secs => :sec)"
+                )
             ),
             {
                 "id": job_id,
@@ -150,9 +185,9 @@ def list_active_jobs(user_id: int) -> list[dict]:
     with engine.begin() as c:
         c.execute(
             text(
-                "UPDATE tool_job SET status='error', error=:err, updated_at=now() "
-                "WHERE user_id=:uid AND status='processing' "
-                "AND created_at < now() - make_interval(secs => :sec)"
+                _FAIL_AND_REFUND_SQL.format(
+                    where="user_id=:uid AND created_at < now() - make_interval(secs => :sec)"
+                )
             ),
             {
                 "uid": user_id,
@@ -202,10 +237,7 @@ def fail_orphaned_jobs(
     ensure_job_schema()
     with engine.begin() as c:
         res = c.execute(
-            text(
-                "UPDATE tool_job SET status='error', error=:err, updated_at=now() "
-                "WHERE status='processing'"
-            ),
+            text(_FAIL_AND_REFUND_SQL.format(where="TRUE")),
             {"err": message[:500]},
-        )
-    return res.rowcount or 0
+        ).first()
+    return int(res[0]) if res else 0

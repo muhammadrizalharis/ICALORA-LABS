@@ -56,9 +56,25 @@ _DEFAULTS: dict[str, Any] = {
     "rate_limit_enabled": False,
     "rate_limit_per_min": 20,  # maks permintaan tool / menit / identitas
     "token_enforcement": False,  # bila ON, saldo token dipotong tiap pemakaian
-    "default_tool_cost": 1,  # biaya token default per analisis
+    "default_tool_cost": 1,  # biaya default per analisis (satuan saldo = Rupiah)
     "tool_costs": {},  # slug -> int; absen = default_tool_cost
+    # Info pembayaran manual (transfer DANA + konfirmasi WhatsApp) yang tampil ke pengguna.
+    "packages": {},  # aturan paket (lihat billing.PACKAGE_DEFAULTS)
+    "payment_info": {
+        "dana_number": "",
+        "dana_name": "",
+        "wa_primary": "",
+        "wa_backup": "",
+        "backup_delay_sec": 60,
+        "note": "",
+    },
 }
+
+_PAYMENT_TEXT_KEYS = ("dana_number", "dana_name", "wa_primary", "wa_backup", "note")
+
+# Slug yang dikenai biaya. Beberapa endpoint memetakan ke slug di luar FEATURE_SLUGS
+# (mis. versi async Daftar Isi/Perbaikan Dokumen), jadi didaftarkan terpisah.
+PRICED_SLUGS: list[str] = [*FEATURE_SLUGS, "daftar-isi", "perbaikan-dokumen"]
 
 _schema_ready = False
 
@@ -101,6 +117,9 @@ def ensure_settings_schema() -> None:
                 "ON admin_audit(created_at DESC)"
             )
         )
+    from app.services.billing import ensure_billing_schema
+
+    ensure_billing_schema()  # kolom users.sub_until dipakai daftar pengguna admin
     _schema_ready = True
 
 
@@ -149,7 +168,12 @@ def get_all_settings() -> dict[str, Any]:
             except Exception:  # noqa: BLE001
                 pass
         out[key] = val
+    from app.services import billing as billing_svc
+
+    out["packages"] = billing_svc.packages()
+    out["payment_info"] = payment_info()
     out["feature_slugs"] = FEATURE_SLUGS
+    out["priced_slugs"] = PRICED_SLUGS
     return out
 
 
@@ -183,6 +207,16 @@ def update_settings(patch: dict[str, Any]) -> dict[str, Any]:
             if not isinstance(value, dict):
                 continue
             value = {str(k): bool(v) for k, v in value.items()}
+        elif key == "packages":
+            if not isinstance(value, dict):
+                continue
+            from app.services import billing as billing_svc
+
+            value = billing_svc.clean_packages({**billing_svc.packages(), **value})
+        elif key == "payment_info":
+            if not isinstance(value, dict):
+                continue
+            value = _clean_payment_info({**payment_info(), **value})
         set_setting(key, value)
     return get_all_settings()
 
@@ -241,6 +275,41 @@ def tool_cost(slug: str) -> int:
         return 1
 
 
+def public_tool_costs() -> dict[str, int]:
+    """Biaya efektif tiap fitur (untuk ditampilkan ke pengguna sebelum memakai)."""
+    return {slug: tool_cost(slug) for slug in PRICED_SLUGS}
+
+
+def _clean_payment_info(raw: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for k in _PAYMENT_TEXT_KEYS:
+        limit = 500 if k == "note" else 120
+        out[k] = str(raw.get(k) or "").strip()[:limit]
+    try:
+        delay = int(raw.get("backup_delay_sec", 60))
+    except (TypeError, ValueError):
+        delay = 60
+    out["backup_delay_sec"] = max(10, min(3600, delay))
+    return out
+
+
+def payment_info() -> dict[str, Any]:
+    raw = get_setting("payment_info", None)
+    if not isinstance(raw, dict):
+        raw = {}
+    return _clean_payment_info({**_DEFAULTS["payment_info"], **raw})
+
+
+def refund_tokens(user_id: int | None, amount: int) -> None:
+    """Kembalikan saldo yang sudah dipotong (mis. analisis gagal). Gagal-aman."""
+    if not user_id or amount <= 0:
+        return
+    try:
+        add_tokens(int(user_id), int(amount))
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def charge_tokens(user_id: int, amount: int) -> bool:
     """Potong `amount` token secara atomik. True bila berhasil.
 
@@ -267,7 +336,7 @@ def charge_tokens(user_id: int, amount: int) -> bool:
 
 _USER_COLS = (
     "id, email, name, picture, token_balance, is_demo, is_admin, is_staff, "
-    "COALESCE(is_active, TRUE) AS is_active, created_at, last_login_at"
+    "COALESCE(is_active, TRUE) AS is_active, created_at, last_login_at, sub_until"
 )
 
 
@@ -285,6 +354,7 @@ def _row_to_admin_user(r) -> dict:
         "is_active": bool(getattr(r, "is_active", True)),
         "created_at": r.created_at.isoformat() if r.created_at else None,
         "last_login_at": r.last_login_at.isoformat() if r.last_login_at else None,
+        "sub_until": r.sub_until.isoformat() if getattr(r, "sub_until", None) else None,
     }
 
 

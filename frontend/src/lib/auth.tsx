@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
-import { API_BASE } from "@/lib/api";
+import { API_BASE, BALANCE_EVENT } from "@/lib/api";
 
 export interface User {
   id: number;
@@ -14,6 +14,34 @@ export interface User {
   is_staff: boolean;
   /** super = Super Admin (tunggal) · admin = admin biasa · demo · user */
   role: "super" | "admin" | "demo" | "user";
+}
+
+export interface PaymentInfo {
+  dana_number: string;
+  dana_name: string;
+  wa_primary: string;
+  wa_backup: string;
+  backup_delay_sec: number;
+  note: string;
+}
+
+export interface Packages {
+  subscription_price: number;
+  subscription_days: number;
+  revision_discount_pct: number;
+  revision_window_hours: number;
+  revision_max: number;
+  revision_min_similarity: number;
+  revision_tools: string[];
+  referral_bonus: number;
+  referral_min_topup: number;
+}
+
+export interface Billing {
+  sub_until: string | null;
+  sub_active: boolean;
+  referral_code: string;
+  referral: { joined: number; rewarded: number };
 }
 
 interface ResetPasswordResult {
@@ -33,6 +61,11 @@ interface AuthState {
   maintenanceMode: boolean;
   tokenEnforcement: boolean;
   defaultToolCost: number;
+  /** Biaya per fitur (slug backend → Rupiah). */
+  toolCosts: Record<string, number>;
+  paymentInfo: PaymentInfo | null;
+  packages: Packages | null;
+  billing: Billing | null;
   refresh: () => Promise<void>;
   adminLogin: (password: string) => Promise<boolean>;
   changeAdminPassword: (currentPassword: string, newPassword: string) => Promise<string | null>;
@@ -53,6 +86,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [maintenanceMode, setMaintenanceMode] = useState(false);
   const [tokenEnforcement, setTokenEnforcement] = useState(true);
   const [defaultToolCost, setDefaultToolCost] = useState(1);
+  const [toolCosts, setToolCosts] = useState<Record<string, number>>({});
+  const [paymentInfo, setPaymentInfo] = useState<PaymentInfo | null>(null);
+  const [packages, setPackages] = useState<Packages | null>(null);
+  const [billing, setBilling] = useState<Billing | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -67,6 +104,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setMaintenanceMode(Boolean(d.maintenance_mode));
       setTokenEnforcement(d.token_enforcement !== false);
       if (typeof d.default_tool_cost === "number") setDefaultToolCost(d.default_tool_cost);
+      if (d.tool_costs && typeof d.tool_costs === "object") setToolCosts(d.tool_costs);
+      setPaymentInfo(d.payment_info ?? null);
+      setPackages(d.packages ?? null);
+      setBilling(d.billing ?? null);
     } catch {
       setUser(null);
     } finally {
@@ -155,9 +196,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     refresh();
   }, [refresh]);
 
+  useEffect(() => {
+    let t: ReturnType<typeof setTimeout> | undefined;
+    const onBalance = () => {
+      clearTimeout(t);
+      t = setTimeout(() => refresh(), 400);
+    };
+    window.addEventListener(BALANCE_EVENT, onBalance);
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener(BALANCE_EVENT, onBalance);
+    };
+  }, [refresh]);
+
   return (
     <AuthCtx.Provider
-      value={{ loading, user, googleEnabled, adminEnabled, emailEnabled, historyRetentionDays, maintenanceMode, tokenEnforcement, defaultToolCost, refresh, adminLogin, changeAdminPassword, passwordLogin, resetPassword, logout }}
+      value={{ loading, user, googleEnabled, adminEnabled, emailEnabled, historyRetentionDays, maintenanceMode, tokenEnforcement, defaultToolCost, toolCosts, paymentInfo, packages, billing, refresh, adminLogin, changeAdminPassword, passwordLogin, resetPassword, logout }}
     >
       {children}
     </AuthCtx.Provider>

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import secrets
 import urllib.parse
+from typing import Any
 
 import httpx
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
@@ -14,6 +15,7 @@ from pydantic import BaseModel, Field
 from app.core.config import get_settings
 from app.services import admin as admin_svc
 from app.services import auth as svc
+from app.services import billing as billing_svc
 from app.services import email as email_svc
 
 settings = get_settings()
@@ -56,6 +58,13 @@ class AdminSettingsIn(BaseModel):
     token_enforcement: bool | None = None
     default_tool_cost: int | None = None
     tool_costs: dict[str, int] | None = None
+    payment_info: dict[str, Any] | None = None
+    packages: dict[str, Any] | None = None
+
+
+class AdminSubscriptionIn(BaseModel):
+    days: int | None = Field(default=None, ge=1, le=366)  # kosong = durasi paket
+    cancel: bool = False
 
 GOOGLE_AUTH = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN = "https://oauth2.googleapis.com/token"  # noqa: S105
@@ -127,6 +136,10 @@ def me(request: Request) -> dict:
         "registration_open": admin_svc.is_registration_open(),
         "token_enforcement": admin_svc.token_enforcement_enabled(),
         "default_tool_cost": admin_svc.tool_cost(""),
+        "tool_costs": admin_svc.public_tool_costs(),
+        "payment_info": admin_svc.payment_info(),
+        "packages": billing_svc.packages(),
+        "billing": billing_svc.user_billing(int(user["id"])) if user else None,
     }
 
 
@@ -226,6 +239,7 @@ def google_callback(
     code: str | None = None,
     state: str | None = None,
     oauth_state: str | None = Cookie(default=None),
+    icalora_ref: str | None = Cookie(default=None),
 ) -> RedirectResponse:
     if not code:
         raise HTTPException(status_code=400, detail="Kode otorisasi tidak ada.")
@@ -264,9 +278,15 @@ def google_callback(
         resp = RedirectResponse(f"{settings.frontend_base_url}/login?error=registration_closed")
         resp.delete_cookie("oauth_state", path="/")
         return resp
+    if icalora_ref:
+        try:
+            billing_svc.attach_referral(int(user["id"]), icalora_ref)
+        except Exception:  # noqa: BLE001 - referral tak boleh menggagalkan login
+            pass
     resp = RedirectResponse(f"{settings.frontend_base_url}/dashboard")
     _set_session(resp, user["id"])
     resp.delete_cookie("oauth_state", path="/")
+    resp.delete_cookie("icalora_ref", path="/")
     return resp
 
 
@@ -356,9 +376,10 @@ def admin_give_tokens(user_id: int, body: AdminTokenIn, request: Request) -> dic
                 status_code=403, detail="Admin biasa hanya bisa memberi token ke pengguna biasa."
             )
         if body.add and body.add > settings.staff_max_token_grant:
+            cap = f"Rp{settings.staff_max_token_grant:,}".replace(",", ".")
             raise HTTPException(
                 status_code=403,
-                detail=f"Maksimal {settings.staff_max_token_grant:,} token per pemberian.",
+                detail=f"Maksimal {cap} per pengisian saldo.",
             )
     if target["is_demo"]:
         raise HTTPException(status_code=400, detail="Akun demo sudah tak terbatas.")
@@ -366,6 +387,12 @@ def admin_give_tokens(user_id: int, body: AdminTokenIn, request: Request) -> dic
         new_balance = admin_svc.add_tokens(user_id, body.add)
         detail = {"add": body.add, "balance_before": target["token_balance"]}
         action = "tokens.add"
+        reward = billing_svc.on_topup(user_id, body.add)
+        if reward:
+            detail["referral_bonus"] = reward
+            new_balance = (admin_svc.get_admin_user(user_id) or {}).get(
+                "token_balance", new_balance
+            )
     else:
         updated = admin_svc.update_user(user_id, {"token_balance": body.set})
         new_balance = updated["token_balance"] if updated else None
@@ -373,6 +400,31 @@ def admin_give_tokens(user_id: int, body: AdminTokenIn, request: Request) -> dic
         action = "tokens.set"
     admin_svc.record_audit(actor, action, target, {**detail, "balance_after": new_balance})
     return {"ok": True, "user_id": user_id, "token_balance": new_balance}
+
+
+@router.post("/admin/users/{user_id}/subscription")
+def admin_subscription(user_id: int, body: AdminSubscriptionIn, request: Request) -> dict:
+    """Aktifkan/perpanjang langganan setelah pembayaran dikonfirmasi (admin & super)."""
+    actor = require_staff(request)
+    target = admin_svc.get_admin_user(user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Pengguna tidak ditemukan.")
+    if target["is_demo"]:
+        raise HTTPException(status_code=400, detail="Akun demo sudah tak terbatas.")
+    if body.cancel:
+        if not actor.get("is_admin"):
+            raise HTTPException(status_code=403, detail="Hanya Super Admin yang bisa membatalkan.")
+        billing_svc.cancel_subscription(user_id)
+        admin_svc.record_audit(actor, "subscription.cancel", target)
+        return {"ok": True, "user_id": user_id, "sub_until": None}
+    days = body.days or billing_svc.packages()["subscription_days"]
+    until = billing_svc.activate_subscription(user_id, days)
+    detail: dict[str, Any] = {"days": days, "sub_until": until}
+    reward = billing_svc.on_topup(user_id, billing_svc.packages()["subscription_price"])
+    if reward:
+        detail["referral_bonus"] = reward
+    admin_svc.record_audit(actor, "subscription.activate", target, detail)
+    return {"ok": True, "user_id": user_id, "sub_until": until}
 
 
 @router.delete("/admin/users/{user_id}")
