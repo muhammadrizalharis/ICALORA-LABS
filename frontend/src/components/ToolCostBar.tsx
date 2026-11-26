@@ -38,10 +38,15 @@ export default function ToolCostBar({ slug }: { slug: string }) {
     );
 
   const enough = user.token_balance >= cost;
-  const revision =
-    packages && packages.revision_tools.includes(slug) && packages.revision_discount_pct > 0
-      ? ` Cek ulang dokumen yang sama dalam ${packages.revision_window_hours} jam diskon ${packages.revision_discount_pct}%.`
-      : "";
+  const hasRevision =
+    !!packages && packages.revision_tools.includes(slug) && packages.revision_discount_pct > 0;
+  const revisionPrice = hasRevision
+    ? cost - Math.floor((cost * packages!.revision_discount_pct) / 100)
+    : cost;
+  const revision = hasRevision
+    ? ` Cek ulang revisi dokumen yang sama dalam ${packages!.revision_window_hours} jam cukup ${formatRp(revisionPrice)}.`
+    : "";
+  const revisionOnly = !enough && hasRevision && user.token_balance >= revisionPrice;
 
   return (
     <div
@@ -56,6 +61,13 @@ export default function ToolCostBar({ slug }: { slug: string }) {
         {price} · Saldo Anda <b>{formatRp(user.token_balance)}</b>
         {enough ? (
           <span className="text-neutral-400">{revision}</span>
+        ) : revisionOnly ? (
+          <>
+            {" "}
+            · saldo kurang untuk pemeriksaan baru, tapi cukup untuk cek ulang revisi (
+            {formatRp(revisionPrice)}) bila Anda sudah memeriksa dokumen ini dalam{" "}
+            {packages!.revision_window_hours} jam terakhir.
+          </>
         ) : (
           <> · saldo tidak cukup.</>
         )}

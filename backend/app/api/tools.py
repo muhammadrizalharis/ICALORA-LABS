@@ -231,6 +231,10 @@ def _enforce_rate_limit(request: Request, user: dict | None) -> None:
         hits.append(now)
 
 
+# Endpoint yang mencocokkan dokumen lewat _new_billed_job (syarat harga revisi sementara).
+_REVISION_ENDPOINTS = {"plagiarism-async", "plagiarism-file-async", "ai-detect-file-async"}
+
+
 def _enforce_token_cost(request: Request, user: dict | None, slug: str) -> None:
     if not admin_svc.token_enforcement_enabled():
         return
@@ -244,7 +248,20 @@ def _enforce_token_cost(request: Request, user: dict | None, slug: str) -> None:
         return
     if billing_svc.subscription_active(int(user["id"])):
         return  # langganan aktif: bebas pakai tanpa memotong saldo
-    if not admin_svc.charge_tokens(int(user["id"]), cost):
+    uid = int(user["id"])
+    if not admin_svc.charge_tokens(uid, cost):
+        # Saldo kurang dari harga penuh, tapi mungkin cukup untuk cek ulang revisi:
+        # potong harga diskon dulu; dokumen dicocokkan di _new_billed_job.
+        try:
+            endpoint = request.url.path.rsplit("/", 1)[-1]
+            if endpoint in _REVISION_ENDPOINTS and billing_svc.has_revision_candidate(uid, slug):
+                disc = billing_svc.revision_price(cost)
+                if 0 < disc < cost and admin_svc.charge_tokens(uid, disc):
+                    request.state.charged = disc
+                    request.state.revision_full = cost
+                    return
+        except Exception:  # noqa: BLE001
+            logger.exception("cek kandidat revisi gagal")
         balance = int(user.get("token_balance") or 0)
         raise HTTPException(
             status_code=402,
@@ -273,6 +290,9 @@ def _new_billed_job(
 ) -> str:
     """Seperti `_new_job`, plus diskon cek ulang revisi untuk dokumen yang sama."""
     charged = int(getattr(request.state, "charged", 0) or 0)
+    full = getattr(request.state, "revision_full", None)
+    if uid and full:
+        return _new_provisional_revision_job(request, int(uid), tool, title, doc, int(full))
     quote: dict | None = None
     if uid and charged > 0:
         try:
@@ -289,6 +309,35 @@ def _new_billed_job(
             billing_svc.log_charge(int(uid), tool, request.state.charged, quote, job_id)
         except Exception:  # noqa: BLE001
             logger.exception("log_charge gagal")
+    return job_id
+
+
+def _new_provisional_revision_job(
+    request: Request, uid: int, tool: str, title: str | None, doc: str, full: int
+) -> str:
+    """Saldo hanya cukup untuk harga revisi: pastikan dokumen memang revisi, atau tagih selisih."""
+    charged = int(request.state.charged)
+    quote = billing_svc.revision_quote(uid, tool, doc, full)
+    if not quote["discount"]:
+        extra = full - charged
+        if not admin_svc.charge_tokens(uid, extra):
+            raise HTTPException(
+                status_code=402,
+                detail=(
+                    f"Saldo Anda tidak cukup. Dokumen ini tidak terdeteksi sebagai revisi "
+                    f"dari pemeriksaan sebelumnya, jadi biayanya penuh {_rp(full)}. "
+                    "Silakan isi saldo lewat menu Isi Saldo."
+                ),
+            )
+        request.state.charged = charged = full
+    else:
+        # Harga diskon yang sudah dipotong = full - diskon (rumus sama).
+        quote["discount"] = full - charged
+    job_id = _new_job(request, uid, tool, title)
+    try:
+        billing_svc.log_charge(uid, tool, charged, quote, job_id)
+    except Exception:  # noqa: BLE001
+        logger.exception("log_charge gagal")
     return job_id
 
 
